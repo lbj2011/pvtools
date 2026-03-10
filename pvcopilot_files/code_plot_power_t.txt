@@ -1,0 +1,1 @@
+plt.plot(df[time_key], df[power_key])
