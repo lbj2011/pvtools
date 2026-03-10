@@ -1,0 +1,68 @@
+# =========================
+# Project specific
+# =========================
+figures/
+out.csv
+
+# old / test folders
+test*
+old*
+pages_old/
+
+# credentials / sensitive scripts
+aws/
+
+# =========================
+# IDE
+# =========================
+.idea/
+.vscode/
+
+# =========================
+# Environment
+# =========================
+.env
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Build / packaging
+# =========================
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# =========================
+# Testing / coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# =========================
+# Logs
+# =========================
+*.log

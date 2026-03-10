@@ -1,0 +1,85 @@
+def identify_outliers_iqr(df: pd.DataFrame, power_key: str, time_key: str, iqr_multiplier: float = 1.5):
+    """
+    Identifies outliers in a specified column of a DataFrame using the Interquartile Range (IQR) method.
+
+    Outliers are defined as data points that are less than Q1 - (IQR * iqr_multiplier) or
+    greater than Q3 + (IQR * iqr_multiplier).
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data.
+        power_key (str): The column name to use for outlier detection (e.g., 'p_mp_ref').
+        time_key (str): The column name for the timestamp (used for context, not calculation).
+        iqr_multiplier (float): The multiplier for the IQR range. Default is 1.5 (Tukey's Fences).
+
+    Returns:
+        tuple: A tuple containing two pandas Index objects:
+               - normal_indices: The indices of the normal data points.
+               - outlier_indices: The indices of the outlier data points.
+    """
+
+def auto_fix_timezone(df, time_key, power_key, target_tz="local"):
+    """
+    Automatically detect and correct timezone and Daylight Saving Time (DST)
+    issues in PV system timeseries data.
+
+    This function assumes that:
+        • `df.index` is already a pandas.DatetimeIndex.
+        • The index name equals `time_key`.
+        • `power_key` refers to a column representing PV power output.
+    
+    The function applies three layers of detection:
+        1. Detect whether timestamps are tz-naive and localize them as UTC.
+        2. Detect whether the daily solar peak appears shifted by ±1 hour.
+           If the average daily peak hour is outside the expected solar window,
+           it applies a +1 or -1 hour correction.
+        3. Detect DST jump irregularities:
+               - Missing hour (DST forward shift)
+               - Repeated hour (DST backward shift)
+           and adjust the timestamps accordingly.
+    
+    After corrections, the function optionally converts the index timezone
+    into the desired target timezone.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input PV timeseries data. Must have a DatetimeIndex.
+    
+    time_key : str
+        Name of the DatetimeIndex (for reference/logging purposes).
+
+    power_key : str
+        Column name containing PV power data. Used to detect solar noon shifts.
+    
+    target_tz : str, default "local"
+        If a valid timezone string is provided (e.g., "America/Los_Angeles"),
+        the timestamps are converted to that timezone.
+        If "local", no timezone conversion is applied.
+
+    Returns
+    -------
+    df_fixed : pandas.DataFrame
+        The corrected DataFrame with updated DatetimeIndex.
+
+    message : str
+        Human-readable summary describing which corrections were applied.
+
+    Notes
+    -----
+    • This method uses heuristics and solar-peak assumptions.
+    • Designed for PV datasets with at least several days of data.
+    • Does NOT drop any data, only shifts timestamps.
+
+    Examples
+    --------
+    >>> df_fixed, msg = auto_fix_timezone(
+    ...     df,
+    ...     time_key="time",
+    ...     power_key="p_mp_ref",
+    ...     target_tz="America/Los_Angeles"
+    ... )
+    >>> print(msg)
+    Index was tz-naive → localized as UTC.
+    Detected early solar peak → applied +1 hour correction.
+    Converted index timezone to America/Los_Angeles.
+    """

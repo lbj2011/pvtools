@@ -1,0 +1,50 @@
+def degradation_year_on_year(energy_normalized, recenter=True,
+                             exceedance_prob=95, confidence_level=68.2,
+                             uncertainty_method='simple', block_length=30):
+    '''
+    Estimate the trend of a timeseries using the year-on-year decomposition
+    approach and calculate a Monte Carlo-derived confidence interval of slope.
+
+    Parameters
+    ----------
+    energy_normalized: pandas.Series
+        Daily or lower frequency time series of normalized system ouput.
+    recenter : bool, default True
+        Specify whether data is internally recentered to normalized yield
+        of 1 based on first year median. If False, ``Rd_pct`` is calculated
+        assuming ``energy_normalized`` is passed already normalized to the
+        year 0 system capacity.
+    exceedance_prob : float, default 95
+        The probability level to use for exceedance value calculation,
+        in percent.
+    confidence_level : float, default 68.2
+        The size of the confidence interval to return, in percent.
+    uncertainty_method : string, default 'simple'
+        Either 'simple', 'circular_block', or None
+        Determines what bootstrapping method to use to construct confidence
+        intervals and exceedance levels. If None (or anything other than the three
+        alternatives), the algorithm does not construct confidence intervals,
+        is considerably faster, and only returns the `Rd_pct`.
+    block_length : int, default 30
+        If `uncertainty_method` is 'circular_block', `block_length`
+        determines the length of the blocks used in the circular block bootstrapping
+        in number of days. Must be shorter than a third of the time series.
+
+    Returns
+    -------
+    Rd_pct : float
+        Estimated degradation relative to the year 0 median system capacity [%/year]
+    confidence_interval : numpy.array
+        confidence interval (size specified by ``confidence_level``) of
+        degradation rate estimate
+    calc_info : dict
+
+        * `YoY_values` - pandas series of right-labeled year on year slopes
+        * `renormalizing_factor` - float of value used to recenter data
+        * `exceedance_level` - the degradation rate that was outperformed with
+          probability of `exceedance_prob`
+        * `usage_of_points` - number of times each point in energy_normalized
+          is used to calculate a degradation slope. 0: point is never used. 1:
+          point is either used as a start or endpoint. 2: point is used as both
+          start and endpoint for an Rd calculation.
+    '''

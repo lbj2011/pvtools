@@ -1,0 +1,57 @@
+/* ABOUT TEXT */
+.about-text {
+    font-size: 16px;
+}
+
+
+/* CARD IMAGE */
+.tool-card-img {
+    height: 180px;
+    object-fit: contain;
+    padding: 20px;
+    background-color: #f8f9fa;
+}
+
+
+/* CARD BODY */
+.tool-card-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+
+/* TITLE */
+.tool-card-title {
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+
+/* DESCRIPTION */
+.tool-card-desc {
+    min-height: 60px;
+}
+
+
+/* BUTTON */
+.tool-card-btn {
+    margin-top: auto;
+    width: auto;
+    align-self: flex-start;
+    padding: 6px 16px;
+}
+
+
+/* CARD STYLE */
+.tool-card {
+    border-radius: 10px;
+}
+
+
+/* CARD HOVER EFFECT */
+.tool-card:hover {
+    transform: translateY(-4px);
+    transition: 0.2s ease;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+}
