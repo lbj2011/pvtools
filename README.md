@@ -15,6 +15,7 @@ PVTools provides interactive tools and datasets to support **PV system design, d
 
 # Table of Contents
 
+- [Cite our work](#cite-our-work)
 - [Applications](#applications)
 - [Repository Structure](#repository-structure)
 - [Logging and Privacy](#logging-and-privacy)
@@ -22,6 +23,11 @@ PVTools provides interactive tools and datasets to support **PV system design, d
 - [Copyright](#copyright)
 
 ---
+
+# Cite our work
+If you use **PVTOOLS** in your research, please cite:
+
+B. Li, T. Karin, X. Chen, and A. Jain, pvtools: Toolkit for Photovoltaic Data Analysis and Modeling, Zenodo, Jun. 2022. DOI: https://doi.org/10.5281/zenodo.15654456
 
 # Applications
 
@@ -137,13 +143,7 @@ Baojie Li, Todd Karin, Xin Chen, Anubhav Jain
 
 # Copyright
 
-String Length Calculator Copyright (c) 2020, The Regents of the University of
-California, through Lawrence Berkeley National Laboratory (subject to receipt of 
-any required approvals from the U.S. Dept. of Energy).  All rights reserved.
-
-If you have questions about your rights to use or distribute this software,
-please contact Berkeley Lab's Intellectual Property Office at
-IPO@lbl.gov.
+© 2026 PVTOOLS | Lawrence Berkeley National Laboratory
 
 NOTICE.  This Software was developed under funding from the U.S. Department
 of Energy and the U.S. Government consequently retains certain rights.  As
