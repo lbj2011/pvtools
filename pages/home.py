@@ -54,20 +54,57 @@ def make_tool_card(title, image, description, link, badge=None):
 layout = dbc.Container([
 
     # ---------- ABOUT ----------
-    dbc.Row(
-        dbc.Col([
-            html.H3("About", className="mt-4"),
-            html.P(
-                """
-                PVTOOLS is a set of web applications and Python libraries for
-                photovoltaic-specific applications. This work is funded by the
-                DuraMAT consortium.
-                """,
-                className="about-text"
-            ),
-        ], width=12),
-        className="mb-4"
-    ),
+dbc.Row(
+    dbc.Col([
+        html.H3("About", className="mt-4"),
+
+        html.P(
+            [
+                "PVTOOLS is a collection of open-source web applications and Python libraries "
+                "for photovoltaic reliability system analysis. The tools are developed at the ",
+                html.A(
+                    "LBL HackingMaterials Group",
+                    href="https://hackingmaterials.lbl.gov/",
+                    target="_blank"
+                ),
+                " as part of the ",
+                html.A(
+                    "DuraMAT Consortium",
+                    href="https://www.duramat.org/",
+                    target="_blank"
+                ),
+                "."
+            ],
+            className="about-text"
+        ),
+
+        html.P(
+            [
+                "Source code and ongoing development are available on ",
+                html.A(
+                    [
+                        "GitHub ",
+                        html.Img(
+                            src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                            style={
+                                "height": "16px",
+                                "verticalAlign": "middle",
+                                "marginLeft": "4px"
+                            }
+                        )
+                    ],
+                    href="https://github.com/lbj2011/pvtools",
+                    target="_blank"
+                ),
+                "."
+            ],
+            className="about-text",
+            style={"marginBottom": "0px"}
+        ),
+
+    ], width=12),
+    className="mb-3"
+),
 
     html.H3("Tools", className="mt-4"),
 

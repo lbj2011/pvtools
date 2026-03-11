@@ -66,17 +66,41 @@ navbar = dbc.NavbarSimple(
                 dbc.DropdownMenuItem("IV Curve Correction Tool", href='/iv-curve-correction-tool'),
                 dbc.DropdownMenuItem("String Length Calculator", href='/string-length-calculator'),
                 dbc.DropdownMenuItem("Photovoltaic Climate Stressors", href='/pv-climate-stressors'),
-                
             ],
         ),
     ],
-    brand="PVTOOLS",
-    brand_href="/",
-    brand_style={"fontWeight": "bold"},  # ✅ Makes "PVTOOLS" bold
+
+    brand=html.Span(
+        [
+            html.A(
+                "PVTOOLS",
+                href="/",
+                style={
+                    "color": "white",
+                    "fontWeight": "bold",
+                    "textDecoration": "none",
+                    "marginRight": "10px"
+                }
+            ),
+
+            html.A(
+                html.Img(
+                    src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                    style={
+                        "height": "30px",
+                        "filter": "invert(1)"
+                    }
+                ),
+                href="https://github.com/lbj2011/pvtools",
+                target="_blank"
+            )
+        ],
+        style={"display": "flex", "alignItems": "center"}
+    ),
+
     sticky="top",
     color="#000000",
     dark=True,
-    # expand=True
 )
 
 
@@ -118,18 +142,31 @@ footer = html.Div(
                 style={'margin': '4px 0'}
             ),
 
-            html.P([
-                "Contact: ",
+            # html.P([
+            #     "Contact: ",
+            #     html.A(
+            #         "baojieli@lbl.gov",
+            #         href="mailto:baojieli@lbl.gov",
+            #         style={'color': '#dddddd', 'textDecoration': 'none'}
+            #     )
+            # ], style={'margin': '4px 0'}),
+
+            html.P(
+            [
+                "Open-source code and feedback on ",
                 html.A(
-                    "baojieli@lbl.gov",
-                    href="mailto:baojieli@lbl.gov",
-                    style={'color': '#dddddd', 'textDecoration': 'none'}
-                )
-            ], style={'margin': '4px 0'}),
+                    "GitHub",
+                    href="https://github.com/lbj2011/pvtools",
+                    target="_blank",
+                    style={'color': '#dddddd', 'textDecoration': 'none','fontWeight': 'bold'}
+                ),
+            ],
+            style={'margin': '4px 0'}
+            ),
 
             html.P(
                 "© 2026 PVTOOLS | Lawrence Berkeley National Laboratory",
-                style={'margin': '4px 0'}
+                style={'margin': '4px 0','fontWeight': 'bold'}
             )
         ]
     )
