@@ -124,10 +124,9 @@ footer = html.Div(
 
             # FUNDING FIRST
             html.P(
-                "Funding was primarily provided as part of the Durable Modules Consortium (DuraMAT), "
-                "an Energy Materials Network Consortium funded by the U.S. Department of Energy, "
-                "Office of Energy Efficiency and Renewable Energy, Solar Energy Technologies Office. "
-                "Lawrence Berkeley National Laboratory is funded by the DOE under award DE-AC02-05CH11231.",
+                "Funding provided by U.S. DOE Office of Critical Minerals and Energy Innovation (CMEI) Solar Energy Technologies Office (SETO) "
+                "and as part of the Durable Module Materials Consortium 2 (DuraMAT 2) funded by the U.S. DOE Office CMEI SETO, Agreement 38259. " \
+                "Lawrence Berkeley National Laboratory is funded by the DOE under award DE-AC02-05CH11231." ,               
                 style={
                     'fontSize': '12px',
                     'color': '#cccccc',
