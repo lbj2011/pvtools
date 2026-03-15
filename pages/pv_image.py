@@ -29,6 +29,9 @@ client = openai.OpenAI(
     base_url="https://api.cborg.lbl.gov"
 )
 
+def get_layout():
+    return layout
+
 # Map valid IDs to real image file names
 image_map = {
     'example1': 'example1.jpg',

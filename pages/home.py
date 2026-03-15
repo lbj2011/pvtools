@@ -15,6 +15,9 @@ green_button_style = {
     'fontWeight': 'bold'  # ✅ makes the text bold
 }
 
+def get_layout():
+    return layout
+
 def make_tool_card(title, image, description, link, badge=None):
 
     header = html.Span([
@@ -151,7 +154,6 @@ dbc.Row(
     ], className="g-4")
 
 ])
-
 
 if __name__ == "__main__":
     app.layout = html.Div(layout)

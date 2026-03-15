@@ -46,6 +46,6 @@ ivcorrection>=0.1.1
 openai>=1.62.0
 geopy>=2.4.1
 rdtools>=2.1.8
-xgboost>=1.7.6
+xgboost==1.7.6
 pyarrow>=15.0.2
 python-dotenv>=1.2.2

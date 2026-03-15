@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, Input, Output, dash_table
+from dash import dcc, html, Input, Output, dash_table, State
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,6 +13,14 @@ from collections import Counter
 import math
 from utils.data_loader import safe_get_df
 import ast
+import json
+import os
+import openai
+import re
+from page_supporting_files.field_chat import apply_filters, get_filter_from_llm
+from dash import callback_context
+from page_supporting_files.field_fitlers import build_filters
+from dash import ctx
 
 df_raw = safe_get_df()
 
@@ -27,6 +35,11 @@ filter_text_style = {
     'fontSize': '17px',  # Default size, can be overridden per element
     'color': 'black'
     }
+
+
+def get_layout():
+    return layout
+
 
 def normalize_faults(x):
     if isinstance(x, list):
@@ -99,190 +112,203 @@ layout = dbc.Container([
     html.P(''),
     dbc.Card([
         dbc.CardBody([
-            dbc.Row([
-            dbc.Col([
+            html.Div(   
+                [
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.H4(
+                                    [
+                                        "Ask Questions to Filter the Data ",
+                                        dbc.Badge("Beta", color="#00B0F0", className="ms-2"),
+                                    ],
+                                    className="section-title mb-0",
+                                    style={"margin": "0"},
+                                ),
+                                xs=12,
+                                md="auto",
+                            ),
 
-                html.Div([
-                    html.Label("• Filter by PV Technologies:", style={**filter_text_style, 'marginRight': '10px'}),
-                    dcc.Checklist(
-                        id='pv-tech-filter',
-                        options=[{'label': t, 'value': t} for t in types],
-                        value=types,
-                        inline=True,
-                        style={**filter_text_style},
-                        inputStyle={"margin-right": "6px"},   # space between checkbox and text
-                        labelStyle={"margin-right": "10px"}   # space between options
-                    )
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px', 'marginLeft': '10px'}),
-
-                html.Div([
-                    html.Label("• Filter by PV Climate Zone:", style={**filter_text_style, 'marginRight': '10px'}),
-                    dcc.Checklist(
-                        id='pv-climate-filter',
-                        options=[
-                            {'label': 'Moderate', 'value': 'Moderate'},
-                            {'label': 'Desert', 'value': 'Desert'},
-                            {'label': 'Hot & Humid', 'value': 'Hot & Humid'},
-                            {'label': 'Snow', 'value': 'Snow'}
+                            dbc.Col(
+                                html.Span(
+                                    "(⏱ May take 5–20 seconds)",
+                                    style={
+                                        "color": "#A6A6A6",
+                                        "fontSize": "14px",
+                                        "fontWeight": "400",
+                                    },
+                                ),
+                                xs=12,
+                                md="auto",
+                                className="align-self-center",
+                            ),
                         ],
-                        value=['Moderate', 'Desert', 'Hot & Humid', 'Snow'],  # all selected by default
-                        inline=True,
-                        style={**filter_text_style},
-                        inputStyle={"margin-right": "6px"},
-                        labelStyle={"margin-right": "10px"}
-                    )
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px', 'marginLeft': '10px'}),
+                        align="center",
+                        className="g-2",
+                    ),
+                    html.P(''),
+                    dcc.Store(id="chat-filtered-data"),
 
-                # Scope of study filter
-                html.Div([
-                    html.Label("• Filter by Scope of Study:",
-                            style={**filter_text_style, 'marginRight': '10px'}),
-                    dcc.Checklist(
-                        id='scope-filter',
-                        options=[
-                            {'label': 'Module level', 'value': 'module level'},
-                            {'label': 'System level', 'value': 'system level'}
-                        ],
-                        value=['module level', 'system level'],
-                        inline=True,
-                        style={**filter_text_style},
-                        inputStyle={"margin-right": "6px"},
-                        labelStyle={"margin-right": "10px"}
-                    )
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px', 'marginLeft': '10px'}),
-
-                
-
-                html.Details(
-                    [
-                        html.Summary(
-                            "Advanced filters",
-                            style={
-                                **filter_text_style,
-                                'cursor': 'pointer',
-                                'fontWeight': '600',
-                                'marginLeft': '10px'
-                            }
-                        ),
-
-                        html.Div([
-                            html.Label("• Filter by Rate Range (%/year):", style={**filter_text_style, 'marginRight': '10px'}),
-                            html.Label("Min:", style={**filter_text_style, 'marginRight': '5px'}),
-                            dcc.Input(id='rate-min', type='number', placeholder='Min Rate', value=-20, style={**filter_text_style, 'marginRight': '10px', 'width': '80px'}),
-                            html.Label("Max:", style={**filter_text_style, 'marginRight': '5px'}),
-                            dcc.Input(id='rate-max', type='number', placeholder='Max Rate', value=5, style={**filter_text_style, 'width': '80px'})
-                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px', 'marginLeft': '20px'}),
-                        
-                        html.Div([
-                            html.Label("• Filter by Duration Range (year):", style={**filter_text_style, 'marginRight': '10px'}),
-                            html.Label("Min:", style={**filter_text_style, 'marginRight': '5px'}),
-                            dcc.Input(id='duration-min', type='number', placeholder='Min Duration', value=0, style={**filter_text_style, 'marginRight': '10px', 'width': '80px'}),
-                            html.Label("Max:", style={**filter_text_style, 'marginRight': '5px'}),
-                            dcc.Input(id='duration-max', type='number', placeholder='Max Duration', value=50, style={**filter_text_style, 'width': '80px'})
-                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px', 'marginLeft': '20px'}),
-                        
-                        html.Div([
-                            html.Label(
-                                "• Filter by System capacity (kW):",
-                                style={**filter_text_style, 'marginRight': '8px'}
-                            ),
-
-                            # Reported / Not reported
-                            dcc.Checklist(
-                                id='capacity-report-filter',
-                                options=[
-                                    {'label': 'Not reported', 'value': 'not_reported'},
-                                    {'label': 'Reported', 'value': 'reported'},
-                                ],
-                                value=['reported', 'not_reported'],   # default: both
-                                inline=True,
-                                style={**filter_text_style},
-                                inputStyle={'marginRight': '3px'},
-                                labelStyle={'marginRight': '8px'}
-                            ),
-
-                            # Min / Max inputs (kW)
-                            html.Label("(", style={**filter_text_style, 'margin': '0 4px 0 10px'}),
-
-                            html.Label("Min", style={**filter_text_style, 'marginRight': '4px'}),
+                    # INPUT ROW
+                    html.Div(
+                        [
                             dcc.Input(
-                                id='capacity-min',
-                                type='number',
-                                value=0,
-                                min=0,
-                                style={**filter_text_style, 'width': '70px', 'marginRight': '6px'}
+                                id="chat-input",
+                                type="text",
+                                placeholder="Ask a question about the PV degradation dataset...",
+                                className="chat-input",
                             ),
 
-                            html.Label("Max", style={**filter_text_style, 'marginRight': '4px'}),
-                            dcc.Input(
-                                id='capacity-max',
-                                type='number',
-                                value=500,
-                                min=0,
-                                style={**filter_text_style, 'width': '70px'}
+                            html.Button(
+                                "Send",
+                                id="chat-submit",
+                                n_clicks=0,
+                                disabled=True,
+                                className="send-button",
                             ),
-                            html.Label(")", style={**filter_text_style}),
+
+                            html.Button(
+                                "Reset",
+                                id="chat-reset",
+                                n_clicks=0,
+                                className="reset-button"
+                            ),
                         ],
                         style={
-                            'display': 'flex',
-                            'alignItems': 'center',
-                            'flexWrap': 'wrap',
-                            'marginLeft': '20px',
-                            'marginBottom': '8px'
-                        }),
+                            "display": "flex",
+                            "alignItems": "center",
+                            "marginBottom": "16px",
+                        },
+                    ),
 
-                        html.Div(
-                            [
-                                html.Label(
-                                    "• Filter by Faults:",
-                                    style={**filter_text_style, 'marginRight': '6px'}
-                                ),
-                                dcc.Checklist(
-                                    id='faults-filter',
-                                    options=[
-                                        {'label': 'Reported', 'value': 'reported'},
-                                        {'label': 'Not reported', 'value': 'not_reported'}
-                                    ],
-                                    value=['reported', 'not_reported'],
-                                    inline=True,
-                                    style={**filter_text_style},
-                                    inputStyle={'marginRight': '3px'},
-                                    labelStyle={'marginRight': '8px'}
-                                )
-                            ],
-                            style={
-                                'display': 'flex',
-                                'alignItems': 'center',
-                                'marginLeft': '20px',
-                                'marginBottom': '8px'
-                            }
-                        )
-                    ]
-                ),
+                    # Example questions
+                    html.Div(
+                        [
+                            html.Span(
+                                "Examples question:",
+                                style={
+                                    "fontSize": "13px",
+                                    "color": "#666",
+                                    "alignSelf": "center",
+                                    "marginRight": "4px",
+                                },
+                            ),
 
-                html.Div([
-                    dcc.Graph(id='map')
-                ]#, style={'width': '70%', 'display': 'inline-block', 'marginLeft': '0px'}
-                ),
-            ], xs=12, sm=12, md=12, lg=8, xl=8),
-        
-            dbc.Col([
-                html.Div([
-                    html.H4("Details", style={'fontFamily': 'Arial'}),
-                    html.P('(Select a data point to show)'),
-                    dash_table.DataTable(
-                        id='table',
-                        columns=[
-                            {'name': 'Attribute', 'id': 'attribute'},
-                            {'name': 'Value', 'id': 'value', 'presentation': 'markdown'}
+                            html.Button(
+                                "Show studies with <-5% degradation",
+                                id="q1",
+                                n_clicks=0,
+                                className="example-btn",
+                            ),
+                            html.Button(
+                                "Show cases at offshore area",
+                                id="q2",
+                                n_clicks=0,
+                                className="example-btn",
+                            ),
+                            html.Button(
+                                "Tell me studies in Asia",
+                                id="q3",
+                                n_clicks=0,
+                                className="example-btn",
+                            ),
                         ],
-                        data=[],
-                        style_table={'overflowX': 'auto'},
-                        style_cell={'textAlign': 'left', 'fontFamily': 'Arial', 'verticalAlign': 'top' },
-                        style_as_list_view=True,
-                    )
-                ]
+                        style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
+                    ),
+                    html.P(''),
+
+                    # RESPONSE TEXT
+                    dcc.Loading(
+                        type="circle",
+                        children=html.Div(
+                            [
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Span("Response:", className="response-label"),
+                                                html.Div(id="response-text", className="response-text")
+                                            ],
+                                            className="response-container"
+                                        ),
+                                        html.Div(id="filtered-table"),
+                                    ],
+                                    id="response-panel",
+                                    style={"display": "none"}   # hidden at start
+                                )
+                            ]
+                        ),
+                    ),
+                    html.P(''),
+
+                    html.Details(
+                    [
+                        html.Summary(
+                            "Show LLM reasoning / filter result",
+                            style={
+                                "cursor": "pointer",
+                                "fontWeight": "300",
+                                "fontSize": "13px",
+                                "color": "#666",
+                            },
+                        ),
+                        html.Pre(
+                            id="llm-result",
+                            style={
+                                "whiteSpace": "pre-wrap",
+                                "background": "#f6f8fa",
+                                "padding": "12px",
+                                "borderRadius": "8px",
+                                "fontSize": "13px",
+                                "marginTop": "8px",
+                                "border": "1px solid #e5e7eb",
+                            },
+                        ),
+                    ],
+                    open=False,  # folded by default
+                    style={"marginBottom": "16px"},
                 ),
+
+                ],
+                className="llm-card",
+                style={
+                    # "margin": "0 auto",
+                    # "fontFamily": "Inter, system-ui, sans-serif",
+                }
+            ),
+            html.P(''),
+
+            html.Div(
+            [
+                build_filters(types)
+            ]),
+    
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        dcc.Graph(id='map')
+                    ]#, style={'width': '70%', 'display': 'inline-block', 'marginLeft': '0px'}
+                    ),
+                ], xs=12, sm=12, md=12, lg=8, xl=8),
+            
+                dbc.Col([
+                    html.Div([
+                        html.H4("Details", className="section-title-detail"),
+                        html.P("(Select a data point to show)", className="section-subtitle"),
+                        html.Div(
+            dash_table.DataTable(
+                id='table',
+                columns=[
+                    {'name': 'Attribute', 'id': 'attribute'},
+                    {'name': 'Value', 'id': 'value', 'presentation': 'markdown'}
+                ],
+                data=[],
+                style_as_list_view=True,
+            ),
+            className="details-table"
+        )
+                    ]
+                    ),
             ], xs=12, sm=12, md=12, lg=4, xl=4),
     ], className="g-2")  # Adds spacing between columns
     ]),
@@ -375,6 +401,130 @@ layout = dbc.Container([
 ])
 
 @app.callback(
+    Output("chat-input", "value", allow_duplicate=True),
+    Input("q1", "n_clicks"),
+    Input("q2", "n_clicks"),
+    Input("q3", "n_clicks"),
+    prevent_initial_call=True,
+)
+def fill_input(q1, q2, q3):
+    button_id = ctx.triggered_id
+
+    questions = {
+        "q1": "Show studies with <-5% degradation",
+        "q2": "Show cases at offshore area",
+        "q3": "Tell me studies in Asia",
+    }
+
+    return questions.get(button_id, "")
+
+@app.callback(
+    Output("chat-submit", "disabled"),
+    Input("chat-submit", "n_clicks"),
+    prevent_initial_call=True
+)
+def disable_button_on_click(n):
+    return True
+
+@app.callback(
+    Output("chat-submit", "disabled", allow_duplicate=True),
+    Input("chat-input", "value"),
+    prevent_initial_call=True
+)
+def toggle_send_button(value):
+    return not (value and value.strip())
+
+@app.callback(
+    Output("response-text", "children"),
+    Output("filtered-table", "children"),
+    Output("chat-input", "value"),
+    Output("chat-submit", "children"),
+    Output("chat-submit", "disabled", allow_duplicate=True),
+    Output("response-panel", "style"),
+    Output("chat-filtered-data", "data"),
+    Output("llm-result", "children"),   # ← ADD THIS
+    Input("chat-submit", "n_clicks"),
+    Input("chat-reset", "n_clicks"),
+    State("chat-input", "value"),
+    prevent_initial_call=True
+)
+def handle_chat(submit_clicks, reset_clicks, question):
+
+    ctx = callback_context
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    hidden = {"display": "none"}
+    visible = {
+        "display": "block",
+        "backgroundColor": "rgba(255,255,255,0.9)",
+        "padding": "14px 16px",
+        "borderRadius": "10px",
+        "marginBottom": "15px",
+        "fontSize": "15px",
+        "border": "1px solid #D1E7F6",
+    }
+
+    if trigger == "chat-reset":
+        return "", "", "", "Send", True, hidden, None, ""
+
+    if trigger == "chat-submit":
+
+        if not question:
+            return "", "", "", "Send", True, hidden, None, ""
+
+        result = get_filter_from_llm(question)
+        message = result.get("reason", "")
+
+        # pretty debug view
+        llm_debug = json.dumps(result, indent=2)
+
+        if not result.get("can_be_answered_with_dataframe", False):
+            return message, "", "", "Send", True, visible, None, llm_debug
+
+        df_filtered = apply_filters(df, result.get("filter_tree"))
+
+        table = dash_table.DataTable(
+            data=df_filtered.to_dict("records"),
+            columns=[{"name": c, "id": c} for c in df_filtered.columns],
+            page_size=10,
+            style_table={
+                "overflowX": "auto",
+                "width": "100%",
+            },
+            style_cell={
+                "fontSize": "12px",
+                "textAlign": "left",
+                "padding": "4px 8px",
+                "lineHeight": "1.1",
+                "whiteSpace": "nowrap",
+                "height": "auto",
+            },
+            style_header={
+                "backgroundColor": "#f0f2f6",
+                "fontWeight": "800",
+                "textAlign": "left",
+            },
+            style_data_conditional=[
+                {
+                    "if": {"row_index": "odd"},
+                    "backgroundColor": "#fafafa",
+                }
+            ],
+        )
+
+        return (
+            message,
+            table,
+            "",
+            "Send",
+            True,
+            visible,
+            df_filtered.index.tolist(),
+            llm_debug
+        )
+
+
+@app.callback(
     [
         Output('map', 'figure'),
         Output('histogram', 'figure'),
@@ -392,7 +542,8 @@ layout = dbc.Container([
         Input('rate-min', 'value'),
         Input('rate-max', 'value'),
         Input('duration-min', 'value'),
-        Input('duration-max', 'value')
+        Input('duration-max', 'value'),
+        Input("chat-filtered-data", "data")
     ]
 )
 def update_map_and_histogram(
@@ -406,7 +557,8 @@ def update_map_and_histogram(
     rate_min,
     rate_max,
     duration_min,
-    duration_max
+    duration_max,
+    chat_filtered_index
 ):
     # If any categorical filter is empty → show nothing
     if (
@@ -438,6 +590,12 @@ def update_map_and_histogram(
         df['PV zone'].isin(selected_zones) &
         df['scope of study'].isin(selected_scopes)
     ]
+
+    # apply LLM filter if present
+    if chat_filtered_index:
+        filtered_df = filtered_df.loc[
+            filtered_df.index.intersection(chat_filtered_index)
+        ]
 
     FAULTS_COL = 'faults_list'
 

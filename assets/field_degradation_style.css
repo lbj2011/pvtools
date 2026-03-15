@@ -1,0 +1,324 @@
+/* ================= GLOBAL ================= */
+
+body {
+    line-height: 1.25;
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* ================= check box and loading item color ================= */
+input[type="checkbox"] {
+    accent-color: #0070C0;   /* your preferred color */
+}
+
+/* ================= SECTION TITLES ================= */
+
+.section-title {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: #2f3437;
+    margin: 0 0 16px 0;
+    line-height: 1.2;
+}
+
+/* Section titles */
+.section-title-detail {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: #2f3437;
+    margin-top: 10px;      /* space above Details */
+    margin-bottom: 2px;    /* reduce space to subtitle */
+    line-height: 1.2;
+}
+
+/* Subtitle under titles */
+.section-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0 0 10px 0;
+}
+
+/* ================= TABLE ================= */
+
+/* container controlling table height */
+.details-table {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+
+/* DataTable cells */
+.details-table .dash-spreadsheet td {
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    padding: 4px 6px !important;
+    line-height: 1.2 !important;
+    vertical-align: top;
+}
+
+
+/* header */
+.details-table .dash-spreadsheet th {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 6px !important;
+}
+
+/* ================= LLM result TABLE ================= */
+/* main table */
+/* container */
+.result-table .dash-table-container {
+    border-radius: 8px;
+    overflow-x: auto;   /* change from hidden */
+    overflow-y: hidden;
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    color: #555;
+    width: 100%;
+}
+
+/* header cells */
+.result-table .dash-table-container th {
+    background-color: #f0f2f6;
+    font-weight: 800 !important;   /* force bold */
+    text-align: left !important;   /* force left align */
+    padding: 4px 8px !important;
+    line-height: 1.1;
+    color: #555;
+}
+
+/* body cells */
+.result-table .dash-table-container td {
+    padding: 4px 8px !important;
+    line-height: 1;
+    border-bottom: 1px solid #eee;
+    text-align: left !important;
+    color: #555;
+    white-space: normal !important;   /* allow wrapping */
+    word-break: break-word;           /* break long DOI/text */
+    max-width: 300px;                 /* prevent huge columns */
+}
+
+/* zebra striping */
+.result-table .dash-table-container tbody tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+/* hover */
+.result-table .dash-table-container tbody tr:hover {
+    background-color: #f3f6fb;
+}
+
+.responsive-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.processing-note {
+    color: #555;
+    font-size: 14px;
+    font-weight: 400;
+}
+
+/* Force the note to the next line on small screens */
+@media (max-width: 600px) {
+    .processing-note {
+        flex-basis: 100%;
+        margin-left: 0;
+    }
+}
+
+/* ================= LLM response ================= */
+.response-container {
+    margin-bottom: 12px;
+}
+
+.response-label {
+    font-weight: 700;
+    font-size: 16px;
+    margin-right: 6px;
+    /* color: #444; */
+}
+
+.response-text {
+    display: inline;
+    font-weight: 500;
+    font-size: 15px;
+    /* color: #063f75; */
+}
+
+/* ================= LLM PANEL ================= */
+
+.llm-card {
+    background: linear-gradient(45deg, #FFE7F9, #E2F4FF);
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #eee;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+
+/* ================= FILTER PANEL ================= */
+
+.filter-card {
+    background-color: #fafafa;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #eee;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+
+/* ================= FILTER LAYOUT ================= */
+
+/* Two-column layout: label + controls */
+.filter-grid-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.filter-label {
+    font-weight: 500;
+}
+
+/* Container for inputs / checkboxes */
+.filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Allow wrapping for longer controls */
+.filter-controls.wrap {
+    flex-wrap: wrap;
+}
+
+
+/* ================= INPUT FIELDS ================= */
+
+.filter-input {
+    width: 70px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    padding: 4px 6px;
+    outline: none;
+}
+
+.filter-input:focus {
+    border-color: #FFC9FF;
+}
+
+
+/* ================= CHECKLIST ================= */
+
+.filter-options label {
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+.filter-options input {
+    margin-right: 3px;
+}
+
+
+/* ================= ADVANCED FILTER ================= */
+
+.advanced-summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 10px;
+}
+
+.advanced-panel {
+    margin-top: 12px;
+}
+
+
+/* ================= CHAT UI ================= */
+
+.chat-input {
+    height: 42px;
+    border-radius: 12px;
+    border: 2px solid #FFC9FF;
+    background-color: #FFFFFF;
+    padding: 0 14px;
+    font-size: 15px;
+    font-weight: 600;
+    outline: none;
+    box-shadow: 0 1px 3px rgba(36, 186, 154, 0.08);
+}
+
+.send-button {
+    height: 42px;
+    padding: 0 18px;
+    border-radius: 10px;
+    border: 1px solid #ffffff;
+    background: linear-gradient(135deg, #F0BEED, #00B0F0);
+    color: white;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    margin-left: 10px;
+}
+
+.send-button:hover {
+    font-weight: 700;
+    border: 1px solid #75B6E5;
+    transform: translateY(-1px);
+}
+
+.send-button:disabled {
+    background: linear-gradient(135deg, #FFE7F9, #A4DEF4);
+    color: #ffffff;
+    cursor: not-allowed;
+}
+
+.example-btn {
+    border: 1px solid #e0e0e0;
+    background-color: #ffffff;
+    padding: 6px 10px;
+    border-radius: 14px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.example-btn:hover {
+    background-color: #D2EFFA;
+    border: 1px solid #75B6E5;
+}
+
+.reset-button {
+    margin-left: 8px;
+    height: 42px;
+    padding: 0 18px;
+    border-radius: 10px;
+    border: 1px solid #ddd;
+    background-color: #ffffff;
+    color: #444;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.reset-button:hover {
+    font-weight: 700;
+    border: 1px solid #75B6E5;
+    transform: translateY(-1px);
+}
+
+/* ================= RESULT BOX ================= */
+
+.result-box {
+    background-color: #f5f5f7;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+    font-size: 15px;
+}

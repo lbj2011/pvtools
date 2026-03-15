@@ -37,6 +37,9 @@ from app import app
 
 # session_id = str(uuid.uuid4())
 
+def get_layout():
+    return layout
+
 layout = dbc.Container([
     html.Hr(),
     html.Div([

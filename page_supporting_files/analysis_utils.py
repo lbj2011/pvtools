@@ -8,10 +8,8 @@ import openai
 import rdtools
 import ast
 import plotly.express as px
-import pvcopilot_files.pvcopilot_filter_functions as pvcopilot_filter_functions
-from typing import List, Optional
 import plotly.graph_objects as go
-from pvcopilot_files.pvcopilot_filter_functions import auto_fix_timezone
+from page_supporting_files.pvcopilot_filter_functions import auto_fix_timezone
 import traceback
 from dotenv import load_dotenv
 
@@ -220,10 +218,10 @@ def execute_generated_code(code, df, variable_dict):
 
 def generate_full_code(code, code_read):
 
-    with open("pvcopilot_files/code_plot_power_t.txt", "r", encoding="utf-8") as f:
+    with open("page_supporting_files/code_plot_power_t.txt", "r", encoding="utf-8") as f:
             code_plot = f.read().replace('\n', ' ').replace('"', "'")
 
-    with open("pvcopilot_files/code_plot_lib.txt", "r", encoding="utf-8") as f:
+    with open("page_supporting_files/code_plot_lib.txt", "r", encoding="utf-8") as f:
             code_plot_lib = f.read().replace('\n', ' ').replace('"', "'")
 
     code_full = code["library_code"] + "\n" + code_plot_lib + "\n\n" + code_read + "\n\n"+ code["run_code"] + "\n\n"+ code_plot
@@ -239,14 +237,14 @@ def generate_degradation_code_and_execute(df, variable_dict, llm_temp, filter_op
     # Read function descriptions
     # -------------------------
     try:
-        with open("pvcopilot_files/rdtools_function_description.txt", "r", encoding="utf-8") as f:
+        with open("page_supporting_files/rdtools_function_description.txt", "r", encoding="utf-8") as f:
             rdtools_function_summary = f.read().replace('\n', ' ').replace('"', "'")
     except FileNotFoundError:
         rdtools_function_summary = "The rdtools degradation_year_on_year function takes time-indexed power data and returns the degradation rate."
         log_text += "[WARNING] rdtools description file missing.\n"
 
     try:
-        with open("pvcopilot_files/filter_function_description.txt", "r", encoding="utf-8") as f:
+        with open("page_supporting_files/filter_function_description.txt", "r", encoding="utf-8") as f:
             filter_function_summary = f.read().replace('\n', ' ').replace('"', "'")
     except FileNotFoundError:
         filter_function_summary = "xx"

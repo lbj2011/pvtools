@@ -10,7 +10,7 @@ from scipy.stats import norm
 from scipy.stats import gaussian_kde
 import dash_bootstrap_components as dbc
 from app import app
-from pvcopilot_files.analysis_utils import parse_contents, generate_degradation_code_and_execute, plot_power_vs_time, generate_full_code, plot_outlier_vs_time, get_filtered_display_string, build_data_summary_block
+from page_supporting_files.analysis_utils import parse_contents, generate_degradation_code_and_execute, plot_power_vs_time, generate_full_code, plot_outlier_vs_time, get_filtered_display_string, build_data_summary_block
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
@@ -21,6 +21,8 @@ MAJOR_CARD_FONT_COLOR = "black"
 BODY_CARD_BACKGROUND = "white" 
 CODE_BLOCK_BACKGROUND = "#f8f9fa"
 
+def get_layout():
+    return layout
 
 # --- Redesigned Application Layout (Headers Only Deep Blue) ---
 layout = dbc.Container([
