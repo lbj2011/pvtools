@@ -1,0 +1,14 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# notebooks
+*.ipynb
+
+# local env
+.env
+venv
+node_modules

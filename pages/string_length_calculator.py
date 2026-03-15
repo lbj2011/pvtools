@@ -30,6 +30,8 @@ from utils import pvtoolslib
 from app import app
 
 # app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+def get_layout():
+    return layout
 
 layout = dbc.Container([
     html.Hr(),

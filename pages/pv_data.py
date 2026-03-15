@@ -22,6 +22,9 @@ filter_text_style = {
     'color': 'black'
     }
 
+def get_layout():
+    return layout
+
 # Layout
 layout = dbc.Container([
 

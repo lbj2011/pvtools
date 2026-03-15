@@ -1,0 +1,71 @@
+{
+    "publish year": {"type": "float", "description": "Year the paper was published"},
+    "doi": {"type": "string", "description": "Digital Object Identifier of the publication"},
+    "title": {"type": "string", "description": "Title of the research paper"},
+    "document type": {"type": "string", "description": "Type of publication (e.g., conference paper, journal article)"},
+    "keywords": {"type": "string", "description": "Keywords associated with the paper"},
+    "authors with affiliations": {"type": "string", "description": "Authors and their institutional affiliations"},
+    "paper id": {"type": "integer", "description": "Unique identifier for the paper in the dataset"},
+
+    "pv tech": {"type": "string", "description": "Normalized PV technology category"},
+    "pv technology detail": {"type": "string", "description": "Additional details of PV technology"},
+
+    "scope of study": {"type": "string", "description": "Level of study such as module, system, or cell level"},
+    "start year": {"type": "float", "description": "Year the study started"},
+    "end year": {"type": "float", "description": "Year the study ended"},
+
+    "number of pv modules in study": {"type": "float", "description": "Number of PV modules included in the study"},
+
+    "pv module nominal power in watts": {"type": "float", "description": "Module nominal power in watts"},
+
+    "country": {"type": "string", "description": "Country where the PV system is located"},
+    "latitude": {"type": "float", "description": "Latitude coordinate"},
+    "longitude": {"type": "float", "description": "Longitude coordinate"},
+
+    "pv module name": {"type": "string", "description": "Name or identifier of the PV module"},
+    "bifacial": {"type": "boolean/string", "description": "Whether the module is bifacial"},
+    "mounting": {"type": "string", "description": "Mounting configuration of the PV module"},
+
+    "rate": {"type": "float", "description": "Annual degradation rate (%)"},
+
+    "location of information": {"type": "string", "description": "Where the degradation information was extracted from (text, figure, table)"},
+    "confidence level": {"type": "float", "description": "Confidence score of extracted data"},
+
+    "annual degradation rate of other parameters": {
+        "type": "json_string",
+        "description": "JSON string containing degradation rates of parameters like Isc, Voc, Imp, Vmp, FF"
+    },
+
+    "degradation metric": {"type": "string", "description": "Metric used for degradation analysis"},
+    "analysis method": {"type": "string", "description": "Method used for degradation analysis (e.g., LR = linear regression)"},
+
+    "number of measurements for degradation analysis": {"type": "integer", "description": "Number of measurements used"},
+    "source of initial power value": {"type": "string", "description": "Source used for initial power value (e.g., nameplate)"},
+
+    "other examination techs": {"type": "string", "description": "Other examination techniques used"},
+    "faults (raw text)": {"type": "string", "description": "Original text describing observed faults"},
+    "faults_list": {"type": "string", "description": "Simplified list of faults"},
+
+    "grid-connected": {"type": "boolean/string", "description": "Whether the PV system is grid connected"},
+
+    "materials and construction": {"type": "string", "description": "Materials and construction components of the PV module"},
+    "note": {"type": "string", "description": "Additional notes about degradation analysis"},
+
+    "file upload time": {"type": "float", "description": "Timestamp of file upload"},
+    "response time": {"type": "float", "description": "Processing response time"},
+
+    "duration": {"type": "float", "description": "Normalized duration in years"},
+    "system capacity": {"type": "float", "description": "Normalized system capacity"},
+
+    "from_text": {"type": "boolean", "description": "Whether value was extracted from text"},
+    "from_figure": {"type": "boolean", "description": "Whether value was extracted from figure"},
+    "from_table": {"type": "boolean", "description": "Whether value was extracted from table"},
+
+    "koppen_zone": {"type": "string", "description": "Köppen climate classification"},
+    "Main climate": {"type": "string", "description": "Main climate category"},
+    "Precipitation": {"type": "string", "description": "Precipitation classification"},
+    "Temperature": {"type": "string", "description": "Temperature classification"},
+    "PV zone": {"type": "string", "description": "PV climate zone"},
+
+    "source of value": {"type": "string", "description": "Source where value was extracted from"}
+}

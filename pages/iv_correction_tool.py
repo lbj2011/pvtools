@@ -27,6 +27,9 @@ cec_module_dropdown_list = ivcorrectionlib.cec_module_dropdown_list
 ini_color = '#A6A6A6'
 select_color = '#0070C0'
 
+def get_layout():
+    return layout
+
 layout = dbc.Container([
     html.Hr(),
     html.Div([
