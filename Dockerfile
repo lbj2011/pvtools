@@ -61,7 +61,7 @@ EXPOSE 8000
 # 1 worker recommended for Heroku 1X dyno (512MB RAM)
 CMD gunicorn index:server \
     -k gthread \
-    --workers 1 \
+    --workers 3 \
     --threads 4 \
     --timeout 120 \
     --bind 0.0.0.0:${PORT:-8000}

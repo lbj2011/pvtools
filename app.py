@@ -1,9 +1,74 @@
 import os
-
-from dash import dash, html, dcc
+from dash import Dash, html, dcc
 import dash_bootstrap_components as dbc
+from flask import request, abort
 
-GA_ID = "G-WENJERWTTT" 
+# ----------------------------
+# Create Dash app
+# ----------------------------
+app = Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.BOOTSTRAP],
+    meta_tags=[{
+        "name": "google-site-verification",
+        "content": "S1RjgJU6ZoVdko93JeLNEnn5viVxN1cXL2me3LB9J5I",
+    }],
+)
+
+server = app.server
+server.secret_key = os.environ.get("secret_key", "secret")
+
+# Allow callbacks before layout
+app.config["suppress_callback_exceptions"] = True
+app.title = "PVTOOLS"
+
+# Dash scripts local
+app.scripts.config.serve_locally = True
+
+
+# ----------------------------
+# Crawler / bot protection
+# ----------------------------
+BLOCK_PATHS = [
+    "wp-login",
+    "wp-admin",
+    "wp-content",
+    "wp-includes",
+    "xmlrpc.php",
+    "wp_filemanager",
+    "phpmyadmin"
+]
+
+BAD_AGENTS = [
+    "sqlmap",
+    "nikto",
+    "scanner"
+]
+
+@server.before_request
+def block_bots():
+    path = request.path.lower()
+    ua = request.headers.get("User-Agent", "").lower()
+
+    if any(p in path for p in BLOCK_PATHS):
+        abort(404)
+
+    if any(b in ua for b in BAD_AGENTS):
+        abort(403)
+
+
+# ----------------------------
+# robots.txt
+# ----------------------------
+@server.route("/robots.txt")
+def robots():
+    return "User-agent: *\nDisallow: /", 200, {"Content-Type": "text/plain"}
+
+
+# ----------------------------
+# Google Analytics
+# ----------------------------
+GA_ID = "G-WENJERWTTT"
 
 ga_script = f"""
 <!-- Google tag (gtag.js) -->
@@ -33,25 +98,10 @@ ga_script = f"""
 </script>
 """
 
-# app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
-app = dash.Dash(__name__,
-                external_stylesheets=[dbc.themes.BOOTSTRAP],
-                meta_tags=[{
-                    'name': "google-site-verification",
-                    'content': "S1RjgJU6ZoVdko93JeLNEnn5viVxN1cXL2me3LB9J5I",
-                }],
-                )
 
-server = app.server
-server.secret_key = os.environ.get('secret_key', 'secret')
-
-# Allow to set callbacks before setting layout:
-app.config['suppress_callback_exceptions']=True
-app.title = 'PVTOOLS'
-
-# For google analytics to work:
-app.scripts.config.serve_locally = True
-
+# ----------------------------
+# Custom index HTML
+# ----------------------------
 app.index_string = f"""
 <!DOCTYPE html>
 <html>
@@ -73,24 +123,18 @@ app.index_string = f"""
 </html>
 """
 
-# Add meta tag for google search
+
+# ----------------------------
+# Example layout (replace with yours)
+# ----------------------------
+app.layout = html.Div([
+    html.H1("PVTOOLS"),
+    html.P("PV tools dashboard"),
+])
 
 
-
-# app.scripts.append_script({
-#     'external_url': 'https://cdn.jsdelivr.net/gh/lppier/lppier.github.io/async_src.js'
-# })
-# app.scripts.append_script({
-#     'external_url': 'https://cdn.jsdelivr.net/gh/lppier/lppier.github.io/gtag.js'
-# })
-
-#
-# app.config.suppress_callback_exceptions = True
-# # app.config.suppress_callback_exceptions = False
-# app.css.config.serve_locally = False
-# app.scripts.config.serve_locally = False
-#
-
-
-if __name__ == '__main__':
+# ----------------------------
+# Run local
+# ----------------------------
+if __name__ == "__main__":
     app.run_server(debug=True)

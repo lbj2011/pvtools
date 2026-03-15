@@ -215,11 +215,15 @@ footer = html.Div(
 )
 def display_page(pathname):
 
+    start = time.time()
+
     page = routes.get(pathname)
 
     if page:
         try:
             body = load_page(page)
+            print(f"DEBUG: Loading {pathname} took {time.time() - start:.2f} seconds")
+            
         except Exception as e:
             body = html.Div([
                 html.H3("Error loading page"),
