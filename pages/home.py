@@ -131,6 +131,14 @@ dbc.Row(
         ), xs=12, sm=6, lg=4),
 
         dbc.Col(make_tool_card(
+            "PV Copilot",
+            "pvcopilot_cover.png",
+            "Data in, degradation results out — LLM-assisted automatic PV data analysis.",
+            "pv-copilot",
+            badge="New!"
+        ), xs=12, sm=6, lg=4),
+
+        dbc.Col(make_tool_card(
             "IV Curve Correction Tool",
             "ivcorrection.png",
             "IV curve correction based on IEC 60891:2021.",
