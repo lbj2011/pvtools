@@ -58,9 +58,9 @@ def parse_contents(contents=None, filename=None, df=None):
                 df = pd.read_excel(io.BytesIO(decoded))
                 code_read = f"df = pd.read_excel('{filename}')"
 
-            elif 'pkl' in filename:
-                df = pd.read_pickle(io.BytesIO(decoded))
-                code_read = f"df = pd.read_pickle('{filename}')"
+            elif 'parquet' in filename:
+                df = pd.read_parquet(io.BytesIO(decoded))
+                code_read = f"df = pd.read_parquet('{filename}')"
 
             else:
                 return None, html.Div(
@@ -77,6 +77,23 @@ def parse_contents(contents=None, filename=None, df=None):
     else:
         # Example dataset case
         code_read = "df = pd.read_csv('data/pmp.csv')"
+
+    # ----------------------------------
+    # 1.5 Detect if time is in index
+    # ----------------------------------
+    time_in_index = False
+
+    if isinstance(df.index, pd.DatetimeIndex):
+        time_in_index = True
+    else:
+        # Try converting index to datetime (non-destructive check)
+        try:
+            converted_index = pd.to_datetime(df.index, errors='coerce')
+            if converted_index.notna().sum() > 0.9 * len(df):
+                df.index = converted_index
+                time_in_index = True
+        except Exception:
+            pass
 
     # ----------------------------------
     # 2A. Validate column names
@@ -99,7 +116,10 @@ def parse_contents(contents=None, filename=None, df=None):
     # ----------------------------------
     # 3. Prepare LLM identification
     # ----------------------------------
-    required_vars = ["Power", "Time", "DC Voltage", "DC Current"]
+    required_vars = ["DC Power", "AC Power", "Irradiance", "Module temperature"]
+
+    if not time_in_index:
+        required_vars.insert(1, "Time")
 
     prompt = f"""
     The following is a list of column names from a data file: {colnames}.
@@ -109,7 +129,10 @@ def parse_contents(contents=None, filename=None, df=None):
     Return the result as a JSON object:
     {{
       "variable_mapping": [
-        {{"Metric": "Power", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "DC Power", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "AC Power", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "Irradiance", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "Module temperature", "Variable Name": "column_name_or_N/A"}},
         {{"Metric": "Time", "Variable Name": "column_name_or_N/A"}},
         ...
       ]
@@ -131,9 +154,26 @@ def parse_contents(contents=None, filename=None, df=None):
         cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
 
         result = json.loads(cleaned)
+        print(result)
         mapping_data = result.get("variable_mapping", [])
 
         mapping_df = pd.DataFrame(mapping_data)
+
+        # ----------------------------------
+        # If time is in index, override mapping
+        # ----------------------------------
+        # inject index time
+        if time_in_index:
+            mapping_df = mapping_df[mapping_df["Metric"] != "Time"]
+
+            index_name = df.index.name
+            print(index_name)
+            display_name = index_name if index_name not in [None, ""] else "__index__"
+
+            mapping_df.loc[len(mapping_df)] = {
+                "Metric": "Time",
+                "Variable Name": display_name
+            }
 
         # ----------------------------------
         # Ensure all required variables appear (fill missing with N/A)
@@ -157,7 +197,7 @@ def parse_contents(contents=None, filename=None, df=None):
         # Build summary table for display
         # ----------------------------------
         summary_table = html.Div([
-            html.H6("Identified Variables"),
+            html.H5("Identified Variables"),
             html.Table(
                 [
                     html.Thead(html.Tr([html.Th(c) for c in mapping_df.columns])),
@@ -174,7 +214,7 @@ def parse_contents(contents=None, filename=None, df=None):
         # Check for missing Power/Time
         # ----------------------------------
         missing_msgs = []
-        if mapping_df.loc[mapping_df["Metric"] == "Power", "Variable Name"].iloc[0] == "N/A":
+        if mapping_df.loc[mapping_df["Metric"] == "DC Power", "Variable Name"].iloc[0] == "N/A":
             missing_msgs.append("⚠️ Power column not identified.")
         if mapping_df.loc[mapping_df["Metric"] == "Time", "Variable Name"].iloc[0] == "N/A":
             missing_msgs.append("⚠️ Time column not identified.")
@@ -194,6 +234,7 @@ def parse_contents(contents=None, filename=None, df=None):
             f"Error during LLM analysis or parsing: {e}",
             className="alert alert-warning"
         )
+        print(res_text)
         mapped_variables_dict = {}
 
     return df, summary_table, mapped_variables_dict, code_read
@@ -286,9 +327,17 @@ def generate_degradation_code_and_execute(df, variable_dict, llm_temp, filter_op
     
     **Follow these steps for the 'run_code' string strictly and add comments in the code:** 
     * Define a variable named **power_key** with value of {variable_dict['Power']}, and **time_key** with value of {variable_dict['Time']}. 
-    * Set the column specified by time_key as df's index. - Ensure the index is converted to datetime format using pd.to_datetime(). 
-    * {timezone_prompt} * Identify the nan/empty points, store the indices as 'nan_indices'. 
+    * Handle time as follows:
+        - If time_key == "__index__":
+            - df is already indexed by time
+            - Ensure df.index is converted using pd.to_datetime(df.index)
+        - Else:
+            - Set the column specified by time_key as df's index
+            - Ensure the index is converted to datetime using pd.to_datetime()
+    * {timezone_prompt} 
+    * Identify the nan/empty points, store the indices as 'nan_indices'. 
     * {outlier_filter_prompt} 
+    
     * Use the rdtools.degradation_year_on_year function to calculate the degradation rate. 
         - Function summary: {rdtools_function_summary} 
         - Use the filterd data by excluding nan_indices and other indices 
@@ -601,3 +650,128 @@ def get_filtered_display_string(filters, outlier_indices=None):
         f"• {FILTER_NAME_MAP.get(f, f)}\n"
         for f in filters
     ) if filters else "None"
+
+
+def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
+
+    figures = []
+    errors = []
+
+    # -------------------------
+    # Color palette
+    # -------------------------
+    COLORS = {
+        "power": "#0d6efd",        # blue
+        "irradiance": "#f59f00",   # amber/orange
+        "temp_raw": "#dc3545",     # red
+    }
+
+    # -------------------------
+    # Shared layout config
+    # -------------------------
+    def apply_layout(fig, title, y_label):
+        fig.update_layout(
+            title=dict(text=title, x=0.01),
+            template="plotly_white",
+            height=180,
+            margin=dict(l=40, r=20, t=40, b=40),
+            xaxis_title="Time",
+            yaxis_title=y_label,
+            hovermode="x unified",
+            legend=dict(
+                orientation="h",
+                y=-0.25,
+                x=0.5,
+                xanchor="center"
+            )
+        )
+        return fig
+
+    # -------------------------
+    # 1. Power (blue)
+    # -------------------------
+    try:
+        power_key = mapped_variables_dict.get("DC Power")
+
+        if not power_key:
+            raise ValueError("DC Power key not found")
+
+        if power_key not in df.columns:
+            raise ValueError(f"Column '{power_key}' not found")
+
+        fig_power = go.Figure()
+
+        fig_power.add_trace(go.Scattergl(
+            x=df.index,
+            y=df[power_key],
+            mode="markers",
+            name="Power Output",
+            opacity=0.3,
+            marker=dict(color=COLORS["power"], size=4)
+        ))
+
+        fig_power = apply_layout(fig_power, "Power vs Time", "Power (W)")
+        figures.append(dcc.Graph(figure=fig_power))
+
+    except Exception as e:
+        errors.append(f"[Power Plot] {str(e)}")
+
+    # -------------------------
+    # 2. Irradiance (orange)
+    # -------------------------
+    try:
+        irr_key = mapped_variables_dict.get("Irradiance")
+
+        if not irr_key:
+            raise ValueError("Irradiance key not found")
+
+        if irr_key not in df.columns:
+            raise ValueError(f"Column '{irr_key}' not found")
+
+        fig_irr = go.Figure()
+
+        fig_irr.add_trace(go.Scattergl(
+            x=df.index,
+            y=df[irr_key],
+            mode="markers",
+            name="Irradiance",
+            opacity=0.3,
+            marker=dict(color=COLORS["irradiance"], size=4)
+        ))
+
+        fig_irr = apply_layout(fig_irr, "Irradiance", "Irradiance (W/m²)")
+        figures.append(dcc.Graph(figure=fig_irr))
+
+    except Exception as e:
+        errors.append(f"[Irradiance Plot] {str(e)}")
+
+    # -------------------------
+    # 3. Temperature (red + purple)
+    # -------------------------
+    try:
+        temp_raw = mapped_variables_dict.get("Module temperature")
+
+        if not temp_raw:
+            raise ValueError("Module temperature key not found")
+
+        if temp_raw not in df.columns:
+            raise ValueError(f"Column '{temp_raw}' not found")
+
+        fig_temp = go.Figure()
+
+        fig_temp.add_trace(go.Scattergl(
+            x=df.index,
+            y=df[temp_raw],
+            mode="markers",
+            name="Module Temp",
+            opacity=0.3,
+            marker=dict(color=COLORS["temp_raw"], size=4)
+        ))
+
+        fig_temp = apply_layout(fig_temp, "Temperature", "Temperature (°C)")
+        figures.append(dcc.Graph(figure=fig_temp))
+
+    except Exception as e:
+        errors.append(f"[Temperature Plot] {str(e)}")
+
+    return figures, errors

@@ -14,6 +14,7 @@ from page_supporting_files.analysis_utils import parse_contents, generate_degrad
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
+from page_supporting_files.analysis_utils import make_overview_figures
 
 # --- Define Color Variables ---
 MAJOR_CARD_BACKGROUND = "#F8F8F8"
@@ -99,10 +100,10 @@ layout = dbc.Container([
                     
                     # Left side: Upload and Analyze Button
                     dbc.Col(lg=4, md=12, sm=12, xs=12, children=[
-                        html.Label("Upload your data (.csv, .xls, .pkl)"),
+                        html.Label("Upload your data (.csv, .xls, .parquet)"),
                         dcc.Upload(
                             id="upload-data",
-                            accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .pkl",
+                            accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .parquet",
                             children=html.Div(["Drag and Drop or ", html.A("Select Files", style={"color": "blue"})]),
                             style={"width": "100%", "height": "60px", "lineHeight": "60px",
                                    "borderWidth": "1px", "borderStyle": "dashed",
@@ -134,14 +135,24 @@ layout = dbc.Container([
                         lg=8, md=12, sm=12, xs=12,
                         children=[
                             dcc.Loading(
-                                id="loading-summary",
-                                type="circle",           # spinner type: "default", "circle", "dot", "cube"
-                                color="#0d6efd",         # optional (Bootstrap primary)
-                                children=html.Div(
-                                    id="data-summary-output",
-                                    className="p-2 border",
-                                    style={"minHeight": "170px", "marginTop": "5px"}
-                                )
+                                id="loading-summary-and-figs",
+                                type="circle",
+                                color="#0d6efd",
+
+                                children=html.Div([
+
+                                    # -------------------------
+                                    # Summary Table + figs
+                                    # -------------------------
+                                    html.Div(
+                                        id="data-summary-output",
+                                        className="p-2 border",
+                                        style={
+                                            "minHeight": "170px",
+                                            "marginTop": "5px"
+                                        }
+                                    )
+                                ])
                             )
                         ]
                     )
@@ -422,7 +433,15 @@ layout = dbc.Container([
 def update_upload_status(filename):
     """Displays a status message when a file is uploaded."""
     if filename:
-        return html.Div(f"File uploaded successfully: {filename}", className="text-success small")
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-check-circle-fill me-2"),  # Bootstrap icon
+                html.Span(f"File selected: '{filename}'")
+            ],
+            color="success",
+            className="d-flex align-items-center shadow-sm rounded px-3 py-2",
+            style={"fontSize": "0.9rem"}
+        )
     # Return empty div on initial load or if upload fails/resets
     return html.Div("Awaiting file...", className="text-muted small")
 
@@ -584,8 +603,41 @@ def analyze_uploaded_data_callback(
                 "Analyze Data"
             )
 
+        # ----------------------------------
+        # Generate figures of raw data
+        # ----------------------------------
+        figures_output = html.Div()
+
+        try:
+            if df is not None and mapped_variables_dict:
+                figures_output, err = make_overview_figures(df, mapped_variables_dict)
+                figures_output = html.Div(figures_output)   # figs is a list of components ✅
+                print(err)
+        except Exception:
+            figures_output = html.Div("Figure generation failed.", className="text-danger")
+
+        # -------------------------
+        # Merge output: table + figs
+        # -------------------------
+        combined_output = html.Div([
+
+            # Summary
+            html.Div(
+                summary_table,
+                style={'fontSize': '10pt'},
+                # className="p-2 border"
+            ),
+
+            # Figures title
+            html.H5("Figures of raw data", className="mt-2"),
+
+            # Figures
+            figures_output
+
+        ])
+
         return (
-            html.Div(summary_table, style={'fontSize': '10pt'}),
+            combined_output,
             mapped_variables_dict,
             df_json,
             code_read,
@@ -596,7 +648,7 @@ def analyze_uploaded_data_callback(
     # ------------------------------------------------
     # Fallback
     # ------------------------------------------------
-    return "", {}, None, "", False, "Analyze Data"
+    return "", {}, None, "", html.Div(), False, "Analyze Data"
 
 
 app.clientside_callback(
