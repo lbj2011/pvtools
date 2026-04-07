@@ -10,6 +10,8 @@ import dash_bootstrap_components as dbc
 import time
 from flask import request
 import importlib
+import traceback
+import sys
 
 from app import app
 
@@ -27,7 +29,7 @@ import pages.pvcopilot
 import pages.string_length_calculator
 import pages.iv_correction_tool
 import pages.pv_climate_stressors
-
+import pages.pv_pathway
 
 # ------------------------------------------------
 # Lazy page loader
@@ -35,7 +37,6 @@ import pages.pv_climate_stressors
 def load_page(page_name):
     module = importlib.import_module(f"pages.{page_name}")
     return module.get_layout()
-
 
 # ------------------------------------------------
 # Routes
@@ -49,6 +50,7 @@ routes = {
     "/iv-curve-correction-tool": "iv_correction_tool",
     "/string-length-calculator": "string_length_calculator",
     "/pv-climate-stressors": "pv_climate_stressors",
+    "/pv-pathway": "pv_pathway",
 }
 
 
@@ -104,6 +106,9 @@ navbar = dbc.NavbarSimple(
             children=[
                 dbc.DropdownMenuItem(
                     "LLM-Powered PV Image Analysis", href='/pv-image'
+                ),
+                dbc.DropdownMenuItem(
+                    "PV degradation pathway", href='/pv-pathway'
                 ),
                 dbc.DropdownMenuItem(
                     "PVcopilot", href='/pv-copilot'
@@ -227,7 +232,7 @@ def display_page(pathname):
         except Exception as e:
             body = html.Div([
                 html.H3("Error loading page"),
-                html.Pre(str(e))
+                html.Pre(traceback.format_exc())  # 👈 full stack trace
             ])
     else:
         body = html.H3("404")

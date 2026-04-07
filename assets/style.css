@@ -1,3 +1,5 @@
+
+
 /* ABOUT TEXT */
 .about-text a {
     color: inherit; 
@@ -63,3 +65,31 @@
     box-shadow: 0 12px 28px rgba(0,0,0,0.15);
 }
 
+
+/* =========================
+   PV Pathway Detail Panel
+   ========================= */
+
+/* Desktop */
+@media (min-width: 768px) {
+  .pv-pathway-detail-panel {
+    height: 450px;
+    min-height: 450px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 767px) {
+  .pv-pathway-detail-panel {
+    height: auto;
+    min-height: unset;
+    overflow-y: visible;
+  }
+}
+
+/* Graph loading blur effect */
+.dash-loading .dash-graph {
+    filter: blur(4px);
+    opacity: 0.6;
+    transition: all 0.3s ease;
+}

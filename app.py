@@ -62,7 +62,7 @@ def block_bots():
 # ----------------------------
 @server.route("/robots.txt")
 def robots():
-    return "User-agent: *\nDisallow: /", 200, {"Content-Type": "text/plain"}
+    return "User-agent: *\nDisallow:", 200, {"Content-Type": "text/plain"}
 
 
 # ----------------------------
