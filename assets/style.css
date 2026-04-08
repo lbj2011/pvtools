@@ -93,3 +93,37 @@
     opacity: 0.6;
     transition: all 0.3s ease;
 }
+
+/* layout slide in  */
+.slide-in-up {
+    animation: slideInUp 0.5s ease-out;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* alert slide in  */
+.slide-in-top {
+    animation: slideInTop 0.4s ease-out;
+    animation-delay: 0.05s;
+    animation-fill-mode: both;
+}
+
+@keyframes slideInTop {
+    from {
+        opacity: 0;
+        transform: translateY(-15px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

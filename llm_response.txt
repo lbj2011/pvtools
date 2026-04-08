@@ -1,67 +1,55 @@
+# Import necessary packages
 import pandas as pd
 import numpy as np
 
-# Load data as df when filename is None
-df = load_data(filename=None)
+# Load data as df; change file path if necessary
+df = pd.read_parquet('sys_1278_downsampled.parquet')
 
-# Define the mapping dictionary
-mapped_variables_dict = {
-    'DC Power': 'dc_power',
-    'AC Power': 'ac_power',
-    'Irradiance': 'poa_irradiance',
-    'Module temperature': 'module_temperature_C',
-    'Time': '__index__'
-}
+# Define a mapping dictionary for variable normalization; fill as needed
+mapped_variables_dict = {}
 
-# Normalize dataframe based on the mapped variables
+# Normalize the dataframe using provided function
 df_filtered = normalize(df, mapped_variables_dict)
 
-# Example selected_filters list (should be defined elsewhere or provided)
+# List of selected filters; adjust as necessary
 selected_filters = ['timezone', 'low-irra-power', 'outlier']
 
-# Initialize index lists
-normal_idx_lists = []
+# Initialize lists to hold normal and outlier indices
+normal_idx_list = []
 
-# Apply low irradiance power filter if selected
+# Apply low irradiation power filter if selected
 if "low-irra-power" in selected_filters:
-    normal_idx_low_irra, outlier_idx_low_irra = low_irra_power_filter(df_filtered, mapped_variables_dict)
-    normal_idx_lists.append(normal_idx_low_irra)
+    normal_idx_lip, outlier_idx_lip = low_irra_power_filter(df_filtered, mapped_variables_dict)
+    normal_idx_list.append(set(normal_idx_lip))
 
-# Apply outlier detection filter if selected
+# Apply IQR outlier detection filter if selected
 if "outlier" in selected_filters:
-    normal_idx_outlier, outlier_idx_outlier = identify_outliers_iqr(df_filtered, "norm")
-    normal_idx_lists.append(normal_idx_outlier)
+    normal_idx_iqr, outlier_idx_iqr = identify_outliers_iqr(df_filtered, "norm")
+    normal_idx_list.append(set(normal_idx_iqr))
 
-# Merge/Intersect all normal indexes
-if normal_idx_lists:
-    # Intersect all normal_idx lists to get final set of indices
-    final_normal_idx = set(normal_idx_lists[0]).intersection(*normal_idx_lists[1:])
+# Merge all normal indices (intersection)
+if normal_idx_list:
+    normal_idx = set.intersection(*normal_idx_list)
 else:
-    # If no filters applied, all indices are normal
-    final_normal_idx = df_filtered.index
+    normal_idx = set(df_filtered.index)
 
-# Total points
+# Calculate and print counts
 total_points = len(df_filtered)
-# Normal points after filtering
-normal_points = len(final_normal_idx)
-# Outliers are the difference
-outlier_points = total_points - normal_points
+num_normal = len(normal_idx)
+num_outliers = total_points - num_normal
+print(f"Total points: {total_points}, Normal: {num_normal}, Outliers: {num_outliers}")
 
-print(f"Total points: {total_points}")
-print(f"Normal points: {normal_points}")
-print(f"Outliers: {outlier_points}")
+# Filter the dataframe to only keep normal data points
+df_filtered_final = df_filtered.loc[list(normal_idx)]
 
-# Filter dataframe to only include normal indices
-df_filtered_final = df_filtered.loc[final_normal_idx]
+# Define the irradiation key for daily aggregation; adjust key name as necessary
+irra_key = 'irra' # <- Change to actual irradiation column name
 
-# Use the irradiance key as needed
-irra_key = mapped_variables_dict['Irradiance']
-
-# Aggregate daily data
+# Aggregate data daily
 daily_data = aggregate_daily(df_filtered_final, irra_key)
 
-# Compute year-over-year results
+# Compute year-over-year distribution and relative difference
 rd, yoy_dist = compute_yoy(daily_data)
 
-# Print result
+# Print relative difference
 print(rd)

@@ -10,14 +10,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies required to compile scientific packages
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         build-essential \
         git \
         libgomp1 \
-        libblas3 \
-        liblapack3 \
-    && rm -rf /var/lib/apt/lists/*
+        libopenblas-dev \
+        liblapack-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /install
 
@@ -38,14 +38,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime libraries required by NumPy/SciPy
-# (Important: otherwise BLAS fallback may slow down computation)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20250301T000000Z bookworm main" > /etc/apt/sources.list && \
+    apt-get update -o Acquire::Retries=5 && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
         libgomp1 \
-        libblas3 \
-        liblapack3 \
-    && rm -rf /var/lib/apt/lists/*
+        libopenblas-dev \
+        liblapack-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local

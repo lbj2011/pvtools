@@ -10,7 +10,7 @@ from scipy.stats import norm
 from scipy.stats import gaussian_kde
 import dash_bootstrap_components as dbc
 from app import app
-from page_supporting_files.analysis_utils import parse_contents, generate_degradation_code_and_execute, plot_power_vs_time, generate_full_code, plot_outlier_vs_time, get_filtered_display_string, build_data_summary_block
+from page_supporting_files.analysis_utils import parse_contents
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
@@ -36,6 +36,7 @@ layout = dbc.Container([
     dcc.Store(id='dataframe-filtered', data={}),
     dcc.Store(id='code-read-store', data={}),
     dcc.Store(id="data-source-store", data=None),
+    dcc.Store(id="stored-data-file-name", data=None),
 
     html.Hr(),
     html.Div([
@@ -75,11 +76,48 @@ layout = dbc.Container([
         html.Div(
             id="floating-panel",
             children=[
+                
                 html.Div(id="panel-content", 
                          children=[
-                            dbc.Button("Generate full code to run", id="generate-code-btn", color="primary", size="sm", 
-                                    style={"fontSize": "16px", "fontWeight": "500"}),
-                            html.Br(),  # 👈 add break
+                             html.Div(
+                                style={
+                                    "display": "flex",
+                                    "justifyContent": "space-between",
+                                    "alignItems": "center",
+                                    "marginBottom": "5px"
+                                },
+                                children=[
+
+                                    dbc.Button(
+                                        "Generate full code to run",
+                                        id="generate-code-btn",
+                                        color="primary",
+                                        size="sm",
+                                        style={"fontSize": "16px", "fontWeight": "500"}
+                                    ),
+
+                                    dbc.Button(
+                                        "X",
+                                        id="close-panel-btn",
+                                        size="sm",
+                                        style={
+                                            "width": "20px",
+                                            "height": "20px",
+                                            "borderRadius": "50%",   # 👈 makes it a circle
+                                            "padding": "0",
+                                            "display": "flex",
+                                            "alignItems": "center",
+                                            "justifyContent": "center",
+                                            "backgroundColor": "#e0e0e0",  # light gray
+                                            "color": "#fffcfc",
+                                            "border": "none",
+                                            "fontSize": "10px",
+                                            "fontWeight": "600",
+                                            "cursor": "pointer"
+                                        }
+                                    ),
+                                ]
+                            ),
                             html.Small(
                                         "(It typically takes 2-6 seconds)",
                                         className="text-muted small"
@@ -91,14 +129,14 @@ layout = dbc.Container([
                                     id="code-preview",
                                     style={"marginTop": "10px"}
                                 )
-                ),
-                html.A(
-                    "Download Code",
-                    id="download-link",
-                    href="",
-                    download="generated_code.py",
-                    style={"display": "none", "marginTop": "10px"}  # ✅ FIX duplicate display
-                )
+                            ),
+                            html.A(
+                                "Download Code",
+                                id="download-link",
+                                href="",
+                                download="generated_code.py",
+                                style={"display": "none", "marginTop": "10px"}  # ✅ FIX duplicate display
+                            )
             ])
               
             ],
@@ -189,18 +227,34 @@ layout = dbc.Container([
                         [
                             dbc.Button(
                                 "Example Data 1",
-                                id="load-example-btn",
+                                id="load-example-btn-1",
                                 color="secondary",
                                 outline=True,
                                 size="sm",
-                                className="mt-2"
+                                className="mt-2 me-2"
+                            ),
+                            dbc.Button(
+                                "Example Data 2",
+                                id="load-example-btn-2",
+                                color="secondary",
+                                outline=True,
+                                size="sm",
+                                className="mt-2 me-2"
+                            ),
+                            dbc.Button(
+                                "Example Data 3",
+                                id="load-example-btn-3",
+                                color="secondary",
+                                outline=True,
+                                size="sm",
+                                className="mt-2 me-2"
                             )
                         ],
                         style={"marginTop": "10px"}
                         ),
                         dbc.Button("Analyze Data", id="analyze-btn", color="primary", className="w-100 mt-3"),
                         html.Small(
-                            "(Analysis typically takes 2-4 seconds)",
+                            "(Analysis typically takes 2-10 seconds)",
                             className="text-muted small"
                         )
                     ]),
@@ -367,11 +421,8 @@ layout = dbc.Container([
                         dbc.Button(
                             "RUN ANALYSIS",
                             id="run-btn", color="primary", className="w-100 mt-3"
-                        ),
-                        html.Small(
-                            "(Analysis typically takes 2-4 seconds)",
-                            className="text-muted small"
-                        )],
+                        )
+                        ],
                         lg=4, md=12, sm=12, xs=12
                     ),
 
@@ -410,7 +461,6 @@ layout = dbc.Container([
 ])
 
 
-
 # ==================================================
 # upload data
 # ==================================================
@@ -419,24 +469,27 @@ layout = dbc.Container([
     Output("upload-status-output", "children"),
     Output("data-source-store", "data"),
     Output("data-summary-output", "children"),
+    Output("stored-data-file-name", "data"),
     Input("upload-data", "filename"),
     prevent_initial_call=False
 )
 def update_upload_status(filename):
     """Displays a status message when a file is uploaded."""
     if filename:
-        return [dbc.Alert(
+
+        msg = dbc.Alert(
             [
                 html.I(className="bi bi-check-circle-fill me-2"),  # Bootstrap icon
                 html.Span(f"File selected: '{filename}'")
             ],
             color="success",
-            className="d-flex align-items-center shadow-sm rounded px-3 py-2",
+            className="d-flex align-items-center shadow-sm rounded px-3 py-2 slide-in-top",
             style={"fontSize": "0.9rem"}
-        ), 'upload', '']
+        )
+        return [msg, 'upload', '', filename]
     
     # Return empty div on initial load or if upload fails/resets
-    return [html.Div("Awaiting file...", className="text-muted small"), None, '']
+    return [html.Div("Awaiting file...", className="text-muted small"), None, '', None]
 
 
 # ==================================================
@@ -446,23 +499,28 @@ def update_upload_status(filename):
 @app.callback(
     Output("data-filter-output", "children"),
     Output("dataframe-filtered", "data"),
+
     Input("filter-btn", "n_clicks"),
     Input("upload-data", "filename"),
-    Input("load-example-btn", "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+
     State("filter-options", "value"),
     State("mapped-vars-store", "data"),
     State("dataframe-store", "data"), 
+
     prevent_initial_call=True
 )
 def run_filter(filter_clicks, upload_clicks,
-        example_clicks, selected_filters, mapped_variables_dict, df_json):
+        example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json):
 
     trigger = ctx.triggered_id
 
     if df_json is None:
         return ['', None]
     
-    if trigger == 'load-example-btn' or trigger == 'upload-data':
+    if trigger == "upload-data" or (trigger and trigger.startswith("load-example-btn")):
         return ['', None]
 
     # =========================
@@ -622,9 +680,20 @@ def run_filter(filter_clicks, upload_clicks,
         html.H5("Filtering Summary", style={"marginBottom": "10px"}),
 
         html.Ul([
-            html.Li(f"Total data points: {n_total}"),
-            html.Li(f"High-quality data: {n_good} ({n_good/n_total:.1%})"),
-            html.Li(f"Filtered data: {n_bad} ({n_bad/n_total:.1%})"),
+            html.Li([
+                html.Span("Total data points: "),
+                html.B(f"{n_total}")
+            ]),
+
+            html.Li([
+                html.Span("High-quality data: "),
+                html.B(f"{n_good} ({n_good/n_total:.1%})")
+            ]),
+
+            html.Li([
+                html.Span("Filtered data: "),
+                html.B(f"{n_bad} ({n_bad/n_total:.1%})")
+            ]),
         ], style={
             "paddingLeft": "20px",
             "marginBottom": "10px"
@@ -641,7 +710,7 @@ def run_filter(filter_clicks, upload_clicks,
             ),
             html.Ul(
                 [html.Li(s) for s in filter_stats],
-                style={"marginTop": "8px"}
+                style={"marginTop": "8px", "color": "gray",}
             )
         ])
 
@@ -662,7 +731,7 @@ def run_filter(filter_clicks, upload_clicks,
         dbc.Row([
             dbc.Col(dcc.Graph(figure=scatter_fig), md=12)
         ])
-    ])
+    ], className="slide-in-up")
 
     df_filtered_store = df_filtered.loc[normal_indices]
 
@@ -677,18 +746,22 @@ def run_filter(filter_clicks, upload_clicks,
     Output("degradation-output", "children"),
     Output("run-btn", "disabled", allow_duplicate=True),
     Output("run-btn", "children", allow_duplicate=True),
+
     Input("run-btn", "n_clicks"),
     Input("upload-data", "filename"),
-    Input("load-example-btn", "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+
     State("dataframe-filtered", "data"),
     State("mapped-vars-store", "data"),
     State("metric-selected", "value"),
-    
+
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
         degradation_clicks, upload_clicks,
-        example_clicks,
+        example1_clicks, example2_clicks, example3_clicks,
         df_filtered_json,
         mapped_variables_dict,
         selected_metric,
@@ -697,7 +770,12 @@ def analyze_uploaded_data_callback(
     
     trigger = ctx.triggered_id
     
-    if trigger == 'load-example-btn' or trigger == 'upload-data':
+    if trigger in [
+        "load-example-btn-1",
+        "load-example-btn-2",
+        "load-example-btn-3",
+        "upload-data"
+    ]:
         return ['', False, "Analyze Data"]
     
     df_filtered = pd.read_json(df_filtered_json, orient='split')
@@ -737,7 +815,7 @@ def analyze_uploaded_data_callback(
             ]),
 
             html.Li([
-                html.Span("Annual degradation rate: "),
+                html.Span("Annual power degradation rate: "),
                 html.B(f"{rd/100:.2%}/year") 
             ]),
 
@@ -800,14 +878,13 @@ def analyze_uploaded_data_callback(
     degradation_layout = html.Div([
 
         dbc.Row([
-            dbc.Col(summary_block, md=6),
-            # dbc.Col(dcc.Graph(figure=pie_fig), md=6)
+            dbc.Col(summary_block, md=6)
         ]),
 
         dbc.Row([
             dbc.Col(dcc.Graph(figure=trend_fig), md=12)
         ])
-    ])
+    ], className="slide-in-up")
 
     return [degradation_layout,
         False,
@@ -843,21 +920,28 @@ app.clientside_callback(
     Output("analyze-btn", "children", allow_duplicate=True),
     Output("data-source-store", "data", allow_duplicate=True),
     Output("upload-status-output", "children", allow_duplicate=True),
+    Output("stored-data-file-name", "data", allow_duplicate=True),
     Input("analyze-btn", "n_clicks"),
-    Input("load-example-btn", "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
     State("upload-data", "contents"),
     State("upload-data", "filename"),
     State("dataframe-store", "data"),
     State("data-source-store", "data"),
+    State("stored-data-file-name", "data"),
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
         analyze_clicks,
-        example_clicks,
+        example_clicks_1,
+        example_clicks_2,
+        example_clicks_3,
         contents,
         filename,
         stored_df_json,
-        data_source
+        data_source,
+        stored_file_name
 ):
 
     trigger = ctx.triggered_id
@@ -865,30 +949,39 @@ def analyze_uploaded_data_callback(
     # ------------------------------------------------
     # 1. Load example dataset (no analysis yet)
     # ------------------------------------------------
-    if trigger == "load-example-btn":
+    if trigger in ["load-example-btn-1", "load-example-btn-2", "load-example-btn-3"]:
+
+        file_map = {
+            "load-example-btn-1": "sys_1278_downsampled.parquet",
+            "load-example-btn-2": "sys_1403_part1_downsampled.parquet",
+            "load-example-btn-3": "sys_1422_downsampled.parquet",
+        }
+
+        example_filename = file_map.get(trigger)
 
         try:
-            df = pd.read_parquet("data/sys_1278_downsampled.parquet")
+            df = pd.read_parquet(f"data/{example_filename}")
             df_json = df.to_json(date_format='iso', orient='split')
+
             output_msg = dbc.Alert(
                 [
                     html.I(className="bi bi-check-circle-fill me-2"),
-                    html.Span("Example dataset 1 selected")
+                    html.Span(f"{example_filename} loaded successfully")
                 ],
                 color="success",
-                className="d-flex align-items-center shadow-sm rounded px-3 py-2",
+                className="d-flex align-items-center shadow-sm rounded px-3 py-2 slide-in-top",
                 style={"fontSize": "0.9rem"}
             )
 
         except Exception as e:
             return (
                 html.Div(f"Error loading example data: {e}", className="alert alert-danger"),
-                {}, None, "", False, "Analyze Data", None, ''
+                {}, None, "", False, "Analyze Data", None, '', example_filename
             )
 
         return (
-            html.Div("",className="text-muted"),
-            {}, df_json, "", False, "Analyze Data", 'example', output_msg
+            html.Div("", className="text-muted"),
+            {}, df_json, "", False, "Analyze Data", 'example', output_msg, example_filename
         )
 
     # ------------------------------------------------
@@ -901,7 +994,7 @@ def analyze_uploaded_data_callback(
             df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
 
             if df is None:
-                return summary_table, {}, None, "", False, "Analyze Data", None, ''
+                return summary_table, {}, None, "", False, "Analyze Data", None, '', stored_file_name
 
         elif data_source == "example" and stored_df_json is not None:
             try:
@@ -915,13 +1008,13 @@ def analyze_uploaded_data_callback(
             except Exception as e:
                 return (
                     html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, ''
+                    {}, None, "", False, "Analyze Data", None, '', stored_file_name
                 )
 
         else:
             return (
                 html.Div("Upload a file or load the example dataset, then click 'Analyze Data'."),
-                {}, None, "", False, "Analyze Data", None, ''
+                {}, None, "", False, "Analyze Data", None, '', filename
             )
 
         # Convert dataframe to JSON
@@ -933,7 +1026,7 @@ def analyze_uploaded_data_callback(
                 html.Div(
                     f"Error converting DataFrame to JSON: {e}",
                     className="alert alert-danger"
-                ),{ }, None, "", False, "Analyze Data", None, ''
+                ),{ }, None, "", False, "Analyze Data", None, '', stored_file_name
             )
 
         # ----------------------------------
@@ -966,7 +1059,7 @@ def analyze_uploaded_data_callback(
             # Figures
             figures_output
 
-        ])
+        ], className="slide-in-up")
 
         return (
             combined_output,
@@ -974,13 +1067,13 @@ def analyze_uploaded_data_callback(
             df_json,
             code_read,
             False,
-            "Analyze Data", None, ''
+            "Analyze Data", None, '', stored_file_name
         )
 
     # ------------------------------------------------
     # Fallback
     # ------------------------------------------------
-    return "", {}, None, "", html.Div(), False, "Analyze Data", None , ''
+    return "", {}, None, "", html.Div(), False, "Analyze Data", None , '', stored_file_name
 
 
 app.clientside_callback(
@@ -1000,27 +1093,37 @@ app.clientside_callback(
     prevent_initial_call=True
 )
 
-
+# ==================================================
+# get the code panel
+# ==================================================
 @app.callback(
     Output("floating-panel", "style"),
     Input("floating-btn", "n_clicks"),
+    Input("close-panel-btn", "n_clicks"),
     prevent_initial_call=True
 )
-def toggle_panel(n):
-    if n % 2 == 1:
-        return {
-            "position": "fixed",
-            "bottom": "100px",
-            "right": "30px",
-            "width": "300px",
-            "padding": "15px",
-            "backgroundColor": "white",
-            "borderRadius": "10px",
-            "boxShadow": "0px 4px 15px rgba(0,0,0,0.2)",
-            "display": "block",
-            "zIndex": 1000
-        }
-    return {"display": "none"}
+def toggle_panel(open_clicks, close_clicks):
+    trigger = ctx.triggered_id
+
+    base_style = {
+        "position": "fixed",
+        "bottom": "100px",
+        "right": "30px",
+        "width": "300px",
+        "padding": "15px",
+        "backgroundColor": "white",
+        "borderRadius": "10px",
+        "boxShadow": "0px 4px 15px rgba(0,0,0,0.2)",
+        "zIndex": 1000
+    }
+
+    if trigger == "floating-btn":
+        return {**base_style, "display": "block"}
+
+    if trigger == "close-panel-btn":
+        return {**base_style, "display": "none"}
+
+    return {**base_style, "display": "none"}
 
 
 @app.callback(
@@ -1028,13 +1131,14 @@ def toggle_panel(n):
     Output("download-link", "href"),
     Output("download-link", "style"),
     Input("generate-code-btn", "n_clicks"),
-    State("upload-data", "filename"),
+    State("stored-data-file-name", "data"),
     State("mapped-vars-store", "data"),
     State("filter-options", "value"),
     State("metric-selected", "value"),
     prevent_initial_call=True
 )
 def generate_code(n,filename, mapped_variables_dict, selected_filters, selected_metric):
+    print(filename)
 
     # Generate code (this triggers loading spinner automatically)
     clean_code = get_full_code(filename, mapped_variables_dict, selected_filters, selected_metric)
