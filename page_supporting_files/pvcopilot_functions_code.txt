@@ -137,6 +137,18 @@ def compute_yoy(series, eps=1e-6):
                 yoy.append(ratio)
 
     yoy = np.array(yoy)
-    rd = np.median(yoy) * 100
+
+    # --- Remove outliers using IQR ---
+    if len(yoy) > 0:
+        q1 = np.percentile(yoy, 25)
+        q3 = np.percentile(yoy, 75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        yoy = yoy[(yoy >= lower) & (yoy <= upper)]
+
+    rd = np.median(yoy) * 100 if len(yoy) > 0 else np.nan
 
     return rd, yoy

@@ -15,6 +15,7 @@ from dash import callback_context as ctx
 from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
+from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr
 import base64
 
@@ -61,9 +62,9 @@ layout = dbc.Container([
                 "right": "30px",
                 "padding": "10px 16px",
                 "borderRadius": "30px",
-                "backgroundColor": "#000000",
+                "backgroundColor": "#AE28C5",
                 "color": "white",
-                "fontSize": "16px",
+                "fontSize": "18px",
                 "fontWeight": "800",
                 "border": "none",
                 "boxShadow": "0px 4px 10px rgba(0,0,0,0.3)",
@@ -171,12 +172,18 @@ layout = dbc.Container([
 
              """.replace('    ', '')
             ),
-        ], xs=12, sm=12, md=12, lg=9, xl=9),
+        ], xs=12, sm=12, md=12, lg=8, xl=8),
 
-        dbc.Col([
-            html.Img(src=app.get_asset_url('pvcopilot_logo.png'),
-            style={'width': '90%'}),
-        ], xs=9, sm=8, md=6, lg=3, xl=3, className="text-end"),
+        dbc.Col(
+            [
+                html.Img(
+                    src=app.get_asset_url('pvcopilot_animated_slogan.gif'),
+                    style={"width": "50%"}
+                ),
+            ],
+            xs=12, sm=12, md=10, lg=4, xl=4,
+            className="text-center text-lg-end"
+        )
     ]),
 
     dbc.Alert(
@@ -213,14 +220,98 @@ layout = dbc.Container([
                     
                     # Left side: Upload and Analyze Button
                     dbc.Col(lg=4, md=12, sm=12, xs=12, children=[
-                        html.Label("Upload your data (.csv, .xls, .parquet)"),
+                        html.Div(
+                            "Upload your data (.csv, .xls, .parquet)",
+                            style={
+                                "fontSize": "16px",
+                                "fontWeight": "600",
+                                "color": "#2c3e50",
+
+                                "paddingBottom": "10px",   # 👈 bottom padding
+                                "marginTop": "5px",
+                            }
+                        ),
+
+                        html.Details([
+
+                            # --- Summary (no box, just padded text) ---
+                            html.Summary(
+                                "Data requirements (click to expand)",
+                                style={
+                                    "cursor": "pointer",
+                                    "color": "#B5B5B8",
+                                    "fontSize": "14px",
+                                    "fontWeight": "500",
+                                }
+                            ),
+
+                            # --- Expanded content (THIS gets the box) ---
+                            html.Div(
+                                [
+                                    html.Ul([
+                                        html.Li([
+                                            "Include columns for ",
+                                            html.B("time, power, irradiance, and temperature")
+                                        ]),
+                                        html.Li([
+                                            "Use ",
+                                            html.B(">=2 years of data"),
+                                            " for reliable degradation analysis"
+                                        ]),
+                                        html.Li([
+                                            "Recommended time resolution: ",
+                                            html.B("1–6 hours")
+                                        ]),
+                                    ], 
+                                    style={
+                                        "marginBottom": "0",
+                                        "paddingLeft": "16px"
+                                        })
+                                ],
+                                style={
+                                    "marginTop": "8px",
+
+                                    # 👇 CARD STYLE ONLY FOR EXPANDED AREA
+                                    "padding": "12px 14px",
+                                    "border": "1px solid #e0e0e0",
+                                    "borderRadius": "10px",
+                                    "backgroundColor": "#e8f3ff",
+                                    "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
+
+                                    "color": "#1A64BE",
+                                    "fontSize": "13px",
+                                    "lineHeight": "1.6",
+                                }
+                            )
+                        ]),
+
                         dcc.Upload(
                             id="upload-data",
                             accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .parquet",
-                            children=html.Div(["Drag and Drop or ", html.A("Select Files", style={"color": "blue"})]),
-                            style={"width": "100%", "height": "60px", "lineHeight": "60px",
-                                   "borderWidth": "1px", "borderStyle": "dashed",
-                                   "textAlign": "center"}
+                            children=html.Div(
+                                [
+                                    "Drag and Drop or ",
+                                    html.A("Select Files", style={"color": "#0d6efd", "fontWeight": "500"})
+                                ]
+                            ),
+                            style={
+                                "width": "100%",
+                                "height": "60px",
+                                "textAlign": "center",
+
+                                # 👇 THIS is what you want
+                                "marginTop": "12px",   # ✅ space ABOVE
+
+                                # styling
+                                "paddingTop": "18px",
+                                "borderWidth": "1.5px",
+                                "borderStyle": "dashed",
+                                "borderColor": "#ced4da",
+                                "borderRadius": "8px",
+                                "backgroundColor": "#ffffff",
+                                "boxShadow": "0 2px 8px rgba(0,0,0,0.06)",
+                                "cursor": "pointer"
+                            }
                         ),
                         html.Div(id="upload-status-output", style={"marginTop": "5px"}),
                         html.Div(
@@ -255,7 +346,11 @@ layout = dbc.Container([
                         dbc.Button("Analyze Data", id="analyze-btn", color="primary", className="w-100 mt-3"),
                         html.Small(
                             "(Analysis typically takes 2-10 seconds)",
-                            className="text-muted small"
+                            style={
+                                "color": "#adb5bd",   # 👈 lighter gray
+                                "marginTop": "6px",   # 👈 space above
+                                "display": "block"    # 👈 ensures margin works properly
+                            }
                         )
                     ]),
                     
@@ -387,16 +482,19 @@ layout = dbc.Container([
                 children=[
 
                     dbc.Col([
+                        html.H6("Choose the metric:"),
                         # degradation metric 
                         dbc.RadioItems(
                             id="metric-selected",
                             options=[
-                                {"label": "YoY (Year-over-Year)", "value": "yoy"},
-                                {"label": "Linear regression", "value": "linear", "disabled": True},
-                                {"label": "PV-Pro", "value": "pvpro", "disabled": True},
-                                {"label": "PVUSA", "value": "pvusa", "disabled": True},
+                                {"label": "YoY (Year-over-Year)", "value": "YOY"},
+                                {"label": "LR (Linear regression)", "value": "LR"},
+                                {"label": "HW (Holt-Winters)", "value": "HW"},
+                                {"label": "ARIMA (Auto Regressive Integrated Moving Average)", "value": "ARIMA"},
+                                {"label": "CSD (Classical Seasonal Decomposition)", "value": "CSD"},
+                                
                             ],
-                            value="yoy",
+                            value="YOY",
                             inline=False
                         ),
 
@@ -789,7 +887,23 @@ def analyze_uploaded_data_callback(
 
     daily_data = aggregate_daily(df_filtered, irra_key)
 
-    rd, yoy_dist = compute_yoy(daily_data)
+    if selected_metric == "YOY":
+        rd, fig = compute_yoy(daily_data)
+
+    elif selected_metric == "LR":
+        rd, fig = compute_lr(daily_data)
+
+    elif selected_metric == "HW":
+        rd, fig = compute_hw(daily_data)
+
+    elif selected_metric == "ARIMA":
+        rd, fig = compute_arima(daily_data)
+
+    elif selected_metric == "CSD":
+        rd, fig = compute_csd(daily_data)
+
+    else:
+        raise ValueError(f"Unknown metric: {selected_metric}")
 
     # =========================
     # Duration calculation
@@ -833,48 +947,6 @@ def analyze_uploaded_data_callback(
         "paddingLeft": "15px"
     })
 
-    trend = daily_data.rolling(30, center=True).mean()
-
-    trend_fig = go.Figure()
-
-    # Daily points
-    trend_fig.add_trace(
-        go.Scatter(
-            x=daily_data.index,
-            y=daily_data,
-            mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
-            name="Daily aggregated power"
-        )
-    )
-
-    # Trend line
-    trend_fig.add_trace(
-        go.Scatter(
-            x=trend.index,
-            y=trend,
-            mode="lines",
-            line=dict(color="#0070C0", width=2),
-            name="Trend (30-day)"
-        )
-    )
-
-    trend_fig.update_layout(
-        title="Trend",
-        xaxis_title="Time",
-        yaxis_title="Power (W)",
-        template="plotly_white",
-        height=350,
-        margin=dict(l=40, r=20, t=50, b=40),
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.2,
-            xanchor="center",
-            x=0.5
-        )
-    )
-
     degradation_layout = html.Div([
 
         dbc.Row([
@@ -882,7 +954,7 @@ def analyze_uploaded_data_callback(
         ]),
 
         dbc.Row([
-            dbc.Col(dcc.Graph(figure=trend_fig), md=12)
+            dbc.Col(dcc.Graph(figure=fig), md=12)
         ])
     ], className="slide-in-up")
 

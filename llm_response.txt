@@ -1,55 +1,210 @@
-# Import necessary packages
+# =================
+# Required Packages
+# =================
 import pandas as pd
 import numpy as np
 
-# Load data as df; change file path if necessary
-df = pd.read_parquet('sys_1278_downsampled.parquet')
+# ================================
+# NORMALIZATION
+# ================================
+def normalize(df, mapped_variables_dict, gamma=-0.004):
+    irr_key = mapped_variables_dict['Irradiance']
+    power_key = mapped_variables_dict['DC Power']
+    temp_C_key = mapped_variables_dict['Module temperature']
 
-# Define a mapping dictionary for variable normalization; fill as needed
-mapped_variables_dict = {}
+    df['norm'] = df[power_key] / (
+        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    return df
 
-# Normalize the dataframe using provided function
+# ================================
+# Filter outliers using IQR
+# ================================
+def identify_outliers_iqr(df: pd.DataFrame, power_key: str, iqr_multiplier: float = 1.5):
+    '''
+    Identifies outliers in a specified column of a DataFrame using the Interquartile Range (IQR) method.
+    Outliers are defined as data points that are less than Q1 - (IQR * iqr_multiplier) or
+    greater than Q3 + (IQR * iqr_multiplier).
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data.
+        power_key (str): The column name to use for outlier detection (e.g., 'p_mp_ref').
+        iqr_multiplier (float): The multiplier for the IQR range. Default is 1.5 (Tukey's Fences).
+    Returns:
+        tuple: A tuple containing two pandas Index objects:
+               - normal_indices: The indices of the normal data points.
+               - outlier_indices: The indices of the outlier data points.
+    '''
+    if power_key not in df.columns:
+        print(f'Error: The specified power column \'{power_key}\' does not exist in the DataFrame.')
+        return pd.Index([]), pd.Index([])
+
+    # Ensure the data is numeric and drop NaNs for quantile calculation
+    data = df[power_key].dropna()
+
+    # 1. Calculate Q1 (25th percentile) and Q3 (75th percentile)
+    Q1 = data.quantile(0.25)
+    Q3 = data.quantile(0.75)
+
+    # 2. Calculate IQR (Interquartile Range)
+    IQR = Q3 - Q1
+
+    # 3. Define the lower and upper bounds (Fences)
+    lower_bound = Q1 - (IQR * iqr_multiplier)
+    upper_bound = Q3 + (IQR * iqr_multiplier)
+
+    print(f'\n--- Outlier Detection Metrics for \'{power_key}\' ---')
+    print(f'Q1 (25th percentile): {Q1:.2f}')
+    print(f'Q3 (75th percentile): {Q3:.2f}')
+    print(f'IQR: {IQR:.2f}')
+    print(f'Lower Bound: {lower_bound:.2f}')
+    print(f'Upper Bound: {upper_bound:.2f}')
+    print('---------------------------------------------------\n')
+
+    # 4. Identify Outliers
+    is_outlier = (df[power_key] < lower_bound) | (df[power_key] > upper_bound)
+    outlier_indices = df.index[is_outlier]
+
+    # 5. Identify Normal Data
+    is_normal = ~is_outlier
+    normal_indices = df.index[is_normal]
+
+    return normal_indices, outlier_indices
+
+# ================================
+# Low irradiance & power filter
+# ================================
+def low_irra_power_filter(df, mapped_variables_dict):
+    mask = pd.Series(True, index=df.index)
+
+    irr_key = mapped_variables_dict['Irradiance']
+    power_key = mapped_variables_dict['DC Power']
+
+    # irradiance filter
+    mask &= df[irr_key] > 300
+
+    # power filter
+    mask &= df[power_key] > 0.02 * df[irr_key]
+
+    # norm range filter
+    upper = df['norm'].quantile(0.99)
+    mask &= df['norm'].between(0.01, upper)
+
+    # Indices
+    normal_indices = df.index[mask]
+    outlier_indices = df.index[~mask]
+
+    return normal_indices, outlier_indices
+
+# ================================
+# DAILY AGGREGATION
+# ================================
+def aggregate_daily(df_f, irradiance_col):
+    daily = (
+        df_f[['norm', irradiance_col]]
+        .dropna()
+        .groupby(df_f.index.date)
+        .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
+    )
+
+    daily.index = pd.to_datetime(daily.index)
+
+    return daily
+
+# ================================
+# YoY
+# ================================
+def compute_yoy(series, eps=1e-6):
+    series = series.dropna()
+    yoy = []
+
+    for t in series.index:
+        t_prev = t - pd.DateOffset(years=1)
+
+        if t_prev in series.index:
+            prev = series.loc[t_prev]
+            curr = series.loc[t]
+
+            if prev < eps:
+                continue
+
+            ratio = curr / prev - 1
+
+            if np.isfinite(ratio):
+                yoy.append(ratio)
+
+    yoy = np.array(yoy)
+
+    # --- Remove outliers using IQR ---
+    if len(yoy) > 0:
+        q1 = np.percentile(yoy, 25)
+        q3 = np.percentile(yoy, 75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        yoy = yoy[(yoy >= lower) & (yoy <= upper)]
+
+    rd = np.median(yoy) * 100 if len(yoy) > 0 else np.nan
+
+    return rd, yoy
+
+# ===============================
+# Main Script
+# ===============================
+
+# ---- Load data (provide correct file path as needed) ----
+df = pd.read_parquet("sys_1278_downsampled.parquet")  # <-- Provide correct path if necessary
+
+# ---- Map variable names ----
+mapped_variables_dict = {
+    'DC Power': 'dc_power',
+    'AC Power': 'ac_power',
+    'Irradiance': 'poa_irradiance',
+    'Module temperature': 'module_temperature_C',
+    'Time': '__index__'
+}
+irra_key = mapped_variables_dict['Irradiance']
+
+# ---- Normalize data ----
 df_filtered = normalize(df, mapped_variables_dict)
 
-# List of selected filters; adjust as necessary
-selected_filters = ['timezone', 'low-irra-power', 'outlier']
+# ---- Select filters (edit as required, can be subset of the options) ----
+selected_filters = ['timezone', 'low-irra-power', 'outlier']  # Example, adjust as needed
 
-# Initialize lists to hold normal and outlier indices
-normal_idx_list = []
+# ---- Apply "low-irra-power" filter ----
+indices_list = []
+if 'low-irra-power' in selected_filters:
+    normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+    indices_list.append(normal_idx)
 
-# Apply low irradiation power filter if selected
-if "low-irra-power" in selected_filters:
-    normal_idx_lip, outlier_idx_lip = low_irra_power_filter(df_filtered, mapped_variables_dict)
-    normal_idx_list.append(set(normal_idx_lip))
+# ---- Apply "outlier" IQR filter ----
+if 'outlier' in selected_filters:
+    normal_idx2, outlier_idx2 = identify_outliers_iqr(df_filtered, "norm")
+    indices_list.append(normal_idx2)
 
-# Apply IQR outlier detection filter if selected
-if "outlier" in selected_filters:
-    normal_idx_iqr, outlier_idx_iqr = identify_outliers_iqr(df_filtered, "norm")
-    normal_idx_list.append(set(normal_idx_iqr))
-
-# Merge all normal indices (intersection)
-if normal_idx_list:
-    normal_idx = set.intersection(*normal_idx_list)
+# ---- Merge all normal_idx (intersection of all applied filters) ----
+if len(indices_list) > 0:
+    # intersect all index lists to keep only points passing all filters
+    normal_idx_final = indices_list[0]
+    for idx in indices_list[1:]:
+        normal_idx_final = normal_idx_final.intersection(idx)
 else:
-    normal_idx = set(df_filtered.index)
+    normal_idx_final = df_filtered.index  # No filters, keep all
 
-# Calculate and print counts
-total_points = len(df_filtered)
-num_normal = len(normal_idx)
-num_outliers = total_points - num_normal
-print(f"Total points: {total_points}, Normal: {num_normal}, Outliers: {num_outliers}")
+outlier_idx_final = df_filtered.index.difference(normal_idx_final)
 
-# Filter the dataframe to only keep normal data points
-df_filtered_final = df_filtered.loc[list(normal_idx)]
+print(f"Total data points: {len(df_filtered)}")
+print(f"Normal (filtered) points: {len(normal_idx_final)}")
+print(f"Outlier or filtered out points: {len(outlier_idx_final)}")
 
-# Define the irradiation key for daily aggregation; adjust key name as necessary
-irra_key = 'irra' # <- Change to actual irradiation column name
+# ---- Final DataFrame with filtered (clean) data points ----
+df_filtered_final = df_filtered.loc[normal_idx_final]
 
-# Aggregate data daily
+# ---- Aggregate to daily data ----
 daily_data = aggregate_daily(df_filtered_final, irra_key)
 
-# Compute year-over-year distribution and relative difference
+# ---- Compute YoY ----
 rd, yoy_dist = compute_yoy(daily_data)
 
-# Print relative difference
-print(rd)
+print("Relative YoY (%) after all filters and aggregation:", rd)

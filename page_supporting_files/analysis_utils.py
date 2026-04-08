@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 from dash import html, dcc
 import base64, os, json
 import openai
-import rdtools
+# import rdtools
 import ast
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,6 +14,11 @@ import traceback
 from dotenv import load_dotenv
 import numpy as np
 import re
+from sklearn.linear_model import LinearRegression
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import seasonal_decompose
+
 
 load_dotenv(override=True)
 
@@ -29,6 +34,9 @@ client = openai.OpenAI(
 client_gpt = openai.OpenAI(
     api_key= OPENAI_API_KEY
 )
+
+def _time_to_years(index):
+    return (index - index[0]).days / 365.25
 
 # ================================
 # Read data
@@ -332,6 +340,22 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         ))
 
         fig_irr = apply_layout(fig_irr, "Irradiance", "Irradiance (W/m²)")
+
+        # --- Apply irradiance limit ---
+        ymax = df[irr_key].max()
+        ymin = df[irr_key].min()
+
+        y_lower = ymin
+        y_upper = ymax
+
+        if ymax > 1500:
+            y_upper = 1500
+
+        if ymin < 0:
+            y_lower = 0
+
+        fig_irr.update_yaxes(range=[y_lower, y_upper])
+
         figures.append(dcc.Graph(figure=fig_irr))
 
     except Exception as e:
@@ -360,17 +384,24 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
             marker=dict(color=COLORS["temp_raw"], size=4)
         ))
 
+        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
+
         fig_temp = apply_layout(fig_temp, "Temperature", "Temperature (°C)")
 
         # --- Apply temperature limit ---
         ymax = df[temp_raw].max()
         ymin = df[temp_raw].min()
 
-        if ymax > 150:
-            fig_temp.update_yaxes(range=[ymin-20, 80])
+        y_lower = ymin
+        y_upper = ymax
 
-        if ymin<-50:
-            fig_temp.update_yaxes(range=[-40, ymax+20])
+        if ymax > 150:
+            y_upper = 80
+
+        if ymin < -50:
+            y_lower = -40
+
+        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
 
         figures.append(dcc.Graph(figure=fig_temp))
 
@@ -474,8 +505,310 @@ def compute_yoy(series, eps=1e-6):
 
     rd = np.median(yoy) * 100 if len(yoy) > 0 else np.nan
 
-    return rd, yoy
+    # ===============
+    # plot - YOY
+    # ===============
 
+    trend = series.rolling(30, center=True).mean()
+
+    fig = go.Figure()
+
+    # Daily points
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily-aggragated Power"
+        )
+    )
+
+    # Trend line
+    fig.add_trace(
+        go.Scatter(
+            x=trend.index,
+            y=trend,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name="Trend (30-day rolling)"
+        )
+    )
+
+    fig.update_layout(
+        title="Power Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+
+    return rd, fig
+
+
+# ================================
+# LR
+# ================================
+def compute_lr(series):
+    series = series.dropna()
+
+    if len(series) < 2:
+        return np.nan, None
+
+    t = _time_to_years(series.index).values.reshape(-1, 1)
+    y = series.values
+
+    model = LinearRegression().fit(t, y)
+    trend = model.predict(t)
+
+    slope = model.coef_[0]
+    rd = slope / np.mean(y)*100
+
+    fig = go.Figure()
+
+    # Raw data (scatter)
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily-aggragated Power"
+        )
+    )
+
+    # Trend line
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=trend,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name=f"LR Trend ({rd:.2f}%/yr)"
+        )
+    )
+
+    fig.update_layout(
+        title="Power and Linear Regression Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+
+    return rd, fig
+
+
+# ================================
+# HW
+# ================================
+def compute_hw(series, period=12):
+    series = series.dropna()
+
+    if len(series) < 2 * period:
+        return np.nan, None
+
+    model = ExponentialSmoothing(
+        series,
+        trend='add',
+        seasonal='add',
+        seasonal_periods=period
+    ).fit()
+
+    fitted = model.fittedvalues
+
+    t = _time_to_years(fitted.index).values.reshape(-1, 1)
+    y = fitted.values
+
+    lr = LinearRegression().fit(t, y)
+    slope = lr.coef_[0]
+    rd = slope / np.mean(y)*100
+
+    fig = go.Figure()
+
+    # Raw data
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily-aggragated Power"
+        )
+    )
+
+    # HW fitted line
+    fig.add_trace(
+        go.Scatter(
+            x=fitted.index,
+            y=fitted.values,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name=f"HW Fit ({rd:.2f}%/yr)"
+        )
+    )
+
+    fig.update_layout(
+        title="Power and Holt-Winters Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+
+    return rd, fig
+
+
+# ================================
+# ARIMA
+# ================================
+
+def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12)):
+    series = series.dropna()
+
+    if len(series) < 24:
+        return np.nan, None
+
+    model = SARIMAX(series, order=order, seasonal_order=seasonal_order)
+    res = model.fit(disp=False)
+
+    fitted = res.fittedvalues
+
+    t = _time_to_years(fitted.index).values.reshape(-1, 1)
+    y = fitted.values
+
+    lr = LinearRegression().fit(t, y)
+    slope = lr.coef_[0]
+    rd = slope / np.mean(y) * 100
+
+    fig = go.Figure()
+
+    # Raw data (scatter)
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily-aggragated Power"
+        )
+    )
+
+    # ARIMA fitted line
+    fig.add_trace(
+        go.Scatter(
+            x=fitted.index,
+            y=fitted.values,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name=f"ARIMA Fit ({rd:.2f}%/yr)"
+        )
+    )
+
+    fig.update_layout(
+        title="Power and ARIMA Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+    return rd, fig
+
+
+# ================================
+# CSD
+# ================================
+def compute_csd(series, period=12):
+    series = series.dropna()
+
+    if len(series) < 2 * period:
+        return np.nan, None
+
+    decomposition = seasonal_decompose(series, model='additive', period=period)
+    trend = decomposition.trend.dropna()
+
+    t = _time_to_years(trend.index).values.reshape(-1, 1)
+    y = trend.values
+
+    model = LinearRegression().fit(t, y)
+    slope = model.coef_[0]
+    rd = slope / np.mean(y)*100
+
+    trend = decomposition.trend
+
+    fig = go.Figure()
+
+    # Raw data
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily-aggragated Power"
+        )
+    )
+
+    # Trend (drop NaNs from edges)
+    fig.add_trace(
+        go.Scatter(
+            x=trend.dropna().index,
+            y=trend.dropna().values,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name=f"CSD Trend ({rd:.2f}%/yr)"
+        )
+    )
+
+    fig.update_layout(
+        title="Power and CSD Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+
+    return rd, fig
 # ================================
 # get full code
 # ================================
@@ -489,6 +822,8 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
 
     prompt = f"""
         Your task is to generate a code:
+        * include all necessary packages on the beginning of code based on {pvcopilot_packages_code}
+        * copy the whole content (definiaiton of functions) of {pvcopilot_functions_code} here
         * load data as df where filename is {filename}, add comment user need to provide file path if necessary
         * define a dict 'mapped_variables_dict' from {mapped_variables_dict}
         * use functinon df_filtered = normalize(df, mapped_variables_dict)
@@ -505,7 +840,6 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
         Note that: 
         * all these functions are already defined, just use them.
         * add comments to each part for user to understand.
-        * add necessary packages on the beginning of code based on {pvcopilot_packages_code}
 
         No verbose.
 
