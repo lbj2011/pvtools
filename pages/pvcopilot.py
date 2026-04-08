@@ -14,7 +14,9 @@ from page_supporting_files.analysis_utils import parse_contents, generate_degrad
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
-from page_supporting_files.analysis_utils import make_overview_figures
+from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr
+import base64
 
 # --- Define Color Variables ---
 MAJOR_CARD_BACKGROUND = "#F8F8F8"
@@ -31,7 +33,9 @@ layout = dbc.Container([
     html.Div([
     dcc.Store(id='mapped-vars-store', data={}),
     dcc.Store(id='dataframe-store', data={}),
+    dcc.Store(id='dataframe-filtered', data={}),
     dcc.Store(id='code-read-store', data={}),
+    dcc.Store(id="data-source-store", data=None),
 
     html.Hr(),
     html.Div([
@@ -42,6 +46,77 @@ layout = dbc.Container([
         'padding-right': '10px',
         'textAlign': 'center'}),
     html.Hr(),
+
+    html.Div([
+
+        # Floating button
+        html.Button(
+            "Get the code ⬇",
+            id="floating-btn",
+            n_clicks=0,
+            style={
+                "position": "fixed",
+                "bottom": "30px",
+                "right": "30px",
+                "padding": "10px 16px",
+                "borderRadius": "30px",
+                "backgroundColor": "#000000",
+                "color": "white",
+                "fontSize": "16px",
+                "fontWeight": "800",
+                "border": "none",
+                "boxShadow": "0px 4px 10px rgba(0,0,0,0.3)",
+                "cursor": "pointer",
+                "zIndex": 1000
+            }
+        ),
+
+        # Floating content panel
+        html.Div(
+            id="floating-panel",
+            children=[
+                html.Div(id="panel-content", 
+                         children=[
+                            dbc.Button("Generate full code to run", id="generate-code-btn", color="primary", size="sm", 
+                                    style={"fontSize": "16px", "fontWeight": "500"}),
+                            html.Br(),  # 👈 add break
+                            html.Small(
+                                        "(It typically takes 2-6 seconds)",
+                                        className="text-muted small"
+                                    ),
+                            dcc.Loading(
+                                id="code-loading",
+                                type="circle",
+                                children=html.Div(
+                                    id="code-preview",
+                                    style={"marginTop": "10px"}
+                                )
+                ),
+                html.A(
+                    "Download Code",
+                    id="download-link",
+                    href="",
+                    download="generated_code.py",
+                    style={"display": "none", "marginTop": "10px"}  # ✅ FIX duplicate display
+                )
+            ])
+              
+            ],
+            style={
+                "position": "fixed",
+                "bottom": "100px",
+                "right": "30px",
+                "width": "250px",
+                "padding": "15px",
+                "backgroundColor": "white",
+                "borderRadius": "10px",
+                "boxShadow": "0px 4px 15px rgba(0,0,0,0.2)",
+                "display": "none",   # hidden initially
+                "zIndex": 1000
+            }
+        )
+
+    ]),
 
     dbc.Row([
         dbc.Col([
@@ -113,7 +188,7 @@ layout = dbc.Container([
                         html.Div(
                         [
                             dbc.Button(
-                                "Try Example Data",
+                                "Example Data 1",
                                 id="load-example-btn",
                                 color="secondary",
                                 outline=True,
@@ -168,63 +243,74 @@ layout = dbc.Container([
             children=[
             dbc.CardHeader(
                 # Apply deep blue background and white text to the HEADER only
-                html.H4("Analysis Options", style={"color": MAJOR_CARD_FONT_COLOR}),
+                html.H4("Data filter", style={"color": MAJOR_CARD_FONT_COLOR}),
                 style={"backgroundColor": MAJOR_CARD_BACKGROUND}
             ),
             dbc.CardBody(style={"backgroundColor": BODY_CARD_BACKGROUND}, children=[
                 dbc.Row([
-                    # 1. Filter block (Inner Card)
-                    dbc.Col(dbc.Card(children=[
-                        dbc.CardHeader(html.H5("Preprocessing (optional)")),
-                        dbc.CardBody([
+                    
+                    dbc.Col(
+                        
+                        [
+                            html.H6("Choose the filters:"),
                             dbc.Checklist(
                                 id="filter-options",
                                 options=[
-                                    {"label": "Outlier removal", "value": "outlier"},
                                     {"label": "Time zone & DST correction", "value": "timezone"},
+                                    {"label": "Low irradiance/power filter", "value": "low-irra-power"},
+                                    {"label": "Outlier removal", "value": "outlier"},
                                     {"label": "Clear-sky filter", "value": "clearsky"},
                                 ],
-                                value=[],
+                                value=['timezone', "low-irra-power", "outlier"],
                                 inline=False
+                            ),
+                            dbc.Button("Filter data", id="filter-btn", color="primary", className="w-100 mt-3")
+                        ],
+                    xs=12, lg=4),
+
+                    # Right side: Data Summary Table
+                    dbc.Col(
+                        lg=8, md=12, sm=12, xs=12,
+                        children=[
+                            dcc.Loading(
+                                id="data-filter-result",
+                                type="circle",
+                                color="#0d6efd",
+
+                                children=html.Div([
+
+                                    html.Div(
+                                        id="data-filter-output",
+                                        className="p-2 border",
+                                        style={
+                                            "minHeight": "170px",
+                                            "marginTop": "5px"
+                                        }
+                                    )
+                                ])
                             )
-                        ])
-                    ]), xs=12, lg=4),
+                        ]
+                    )
                     
-                    # 2. Degradation metric block (Inner Card)
-                    dbc.Col(dbc.Card(children=[
-                        dbc.CardHeader(html.H5("Degradation Metric/Function")),
-                        dbc.CardBody([
-                            dbc.RadioItems(
-                                id="metric-select",
-                                options=[
-                                    {"label": "YoY (Year-over-Year)", "value": "yoy"},
-                                    {"label": "Linear regression", "value": "linear"},
-                                    {"label": "PV-Pro", "value": "pvpro"},
-                                    {"label": "PVUSA", "value": "pvusa"},
-                                ],
-                                value="yoy",
-                                inline=False
-                            )
-                        ])
-                    ]), xs=12, lg=4),
                     
                     # 3. Figures block (Inner Card)
-                    dbc.Col(dbc.Card(children=[
-                        dbc.CardHeader(html.H5("Figures to Show")),
-                        dbc.CardBody([
-                            dbc.Checklist(
-                                id="figure-options",
-                                options=[
-                                    {"label": "Power vs time", "value": "power_time"},
-                                    {"label": "Outliers vs time", "value": "outliers_time"},
-                                    {"label": "Distribution of rate", "value": "rate_dist"},
-                                    {"label": "SDM parameter vs time", "value": "sdm_param"},
-                                ],
-                                value=["power_time"],
-                                inline=False
-                            )
-                        ])
-                    ]), xs=12, lg=4)
+                    # dbc.Col(dbc.Card(children=[
+                    #     dbc.CardHeader(html.H5("Figures to Show")),
+                    #     dbc.CardBody([
+                    #         dbc.Checklist(
+                    #             id="figure-options",
+                    #             options=[
+                    #                 {"label": "Power vs time", "value": "power_time"},
+                    #                 {"label": "Outliers vs time", "value": "outliers_time"},
+                    #                 {"label": "Distribution of rate", "value": "rate_dist"},
+                    #                 {"label": "SDM parameter vs time", "value": "sdm_param"},
+                    #             ],
+                    #             value=["power_time"],
+                    #             inline=False
+                    #         )
+                    #     ])
+                    # ]), xs=12, lg=4)
+                    
                 ])
             ])
         ]), xs=12, md=12),
@@ -236,7 +322,7 @@ layout = dbc.Container([
         children=[
         dbc.CardHeader(
             # Apply deep blue background and white text to the HEADER only
-            html.H4("Analysis Output", style={"color": MAJOR_CARD_FONT_COLOR}),
+            html.H4("Degradation Analysis", style={"color": MAJOR_CARD_FONT_COLOR}),
             style={"backgroundColor": MAJOR_CARD_BACKGROUND}
         ),
         dbc.CardBody(style={"backgroundColor": BODY_CARD_BACKGROUND}, children=[
@@ -245,175 +331,76 @@ layout = dbc.Container([
                 justify="start",
                 className="mt-4", # Add some top margin for visibility
                 children=[
-                    # 1. Button Column (Left Side)
+
                     dbc.Col([
+                        # degradation metric 
+                        dbc.RadioItems(
+                            id="metric-selected",
+                            options=[
+                                {"label": "YoY (Year-over-Year)", "value": "yoy"},
+                                {"label": "Linear regression", "value": "linear", "disabled": True},
+                                {"label": "PV-Pro", "value": "pvpro", "disabled": True},
+                                {"label": "PVUSA", "value": "pvusa", "disabled": True},
+                            ],
+                            value="yoy",
+                            inline=False
+                        ),
+
+                        # LLM Temperature
+                        # html.Label("LLM Temperature: 1.0", id="temp-label", className="fw-bold"),
+                        # dcc.Slider(
+                        #     id='temp-slider',
+                        #     min=0,
+                        #     max=1,
+                        #     step=0.1,
+                        #     # SETTING THE START VALUE TO 1.0
+                        #     value=1.0, 
+                        #     # ONLY show marks for 0, 0.5, and 1
+                        #     marks={
+                        #         0: {'label': '0'},
+                        #         0.5: {'label': '0.5'},
+                        #         1: {'label': '1'},
+                        #     },
+                        #     className="mb-4"
+                        # ),
+
                         dbc.Button(
-                            "Click to RUN ANALYSIS",
-                            id="run-btn",
-                            color="success",
-                            className="w-100"
+                            "RUN ANALYSIS",
+                            id="run-btn", color="primary", className="w-100 mt-3"
                         ),
                         html.Small(
                             "(Analysis typically takes 2-4 seconds)",
                             className="text-muted small"
                         )],
-                        lg=4, md=6, sm=6, xs=6
+                        lg=4, md=12, sm=12, xs=12
                     ),
 
                     # 2. Slider Column (Right Side)
                     dbc.Col(
                         [
-                            # Label that will be updated by the callback
-                            # Initial value is set to 1.0
-                            html.Label("LLM Temperature: 1.0", id="temp-label", className="fw-bold"),
-                            dcc.Slider(
-                                id='temp-slider',
-                                min=0,
-                                max=1,
-                                step=0.1,
-                                # SETTING THE START VALUE TO 1.0
-                                value=1.0, 
-                                # ONLY show marks for 0, 0.5, and 1
-                                marks={
-                                    0: {'label': '0'},
-                                    0.5: {'label': '0.5'},
-                                    1: {'label': '1'},
-                                },
-                                className="mb-4"
-                            ),
+                            dcc.Loading(
+                                type="circle",
+                                color="#0d6efd",
+
+                                children=html.Div([
+
+                                    html.Div(
+                                        id="degradation-output",
+                                        className="p-2 border",
+                                        style={
+                                            "minHeight": "170px",
+                                            "marginTop": "5px"
+                                        }
+                                    )
+                                ])
+                            )
+                            
                         ],
-                        lg=4, md=6, sm=6, xs=6
+                        lg=8, md=12, sm=12, xs=12,
                     )
                 ]
             )
-            ,
-
-            html.Hr(),
-
-            # Results, Figures, and Code Snippet in the same row
-            dbc.Row(
-                children=[
-
-                    # 1️⃣ Results Column
-                    dbc.Col(
-                        lg=3, md=12, sm=12, xs=12,
-                        children=[
-                            html.H4("Results Summary", className="mt-2"),
-                            dcc.Loading(
-                                id="loading-results",
-                                type="circle",
-                                color="#0d6efd",
-                                children=html.Div(
-                                    id="results-block",
-                                    className="mb-4 p-3 border",
-                                    style={"minHeight": "250px"}
-                                )
-                            ),
-                        ]
-                    ),
-
-                    # 2️⃣ Code Column
-                    dbc.Col(
-                        lg=4, md=12, sm=12, xs=12,
-                        children=[
-
-                            html.Div(
-                                [
-                                    html.H4(
-                                        "Code Snippet (for reproduction)",
-                                        className="mt-2",
-                                        style={"flex": "1"}
-                                    ),
-
-                                    dcc.Clipboard(
-                                        target_id="code-block",
-                                        title="Copy code",
-                                        style={
-                                            "cursor": "pointer",
-                                            "fontSize": 20,
-                                            "color": "#6c757d",
-                                            "marginTop": "10px"
-                                        }
-                                    )
-                                ],
-                                style={
-                                    "display": "flex",
-                                    "alignItems": "center",
-                                    "justifyContent": "space-between"
-                                }
-                            ),
-
-                            dcc.Loading(
-                                id="loading-code",
-                                type="circle",
-                                color="#0d6efd",
-                                children=html.Pre(
-                                    id="code-block",
-                                    style={
-                                        "backgroundColor": CODE_BLOCK_BACKGROUND,
-                                        "padding": "15px",
-                                        "overflowX": "auto",
-                                        "border": "1px solid #dee2e6",
-                                        "minHeight": "250px",
-                                        "maxHeight": "400px",
-                                        "overflowY": "auto"
-                                    }
-                                )
-                            ),
-                        ],
-                    ),
-
-                    # 3️⃣ Figures Column
-                    dbc.Col(
-                        lg=5, md=12, sm=12, xs=12,
-                        children=[
-                            html.H4("Generated Figures", className="mt-2"),
-                            dcc.Loading(
-                                id="loading-figures",
-                                type="circle",
-                                color="#0d6efd",
-                                children=html.Div(
-                                    id="figures-block",
-                                    className="mb-4 p-3 border",
-                                    style={"minHeight": "250px"}
-                                )
-                            ),
-                        ]
-                    ),
-                ]
-            ),
-
-            html.Details(
-                open=False,   # folded by default
-                children=[
-
-                    html.Summary(
-                        "Execution Status & Logs (click to expand)",
-                        style={
-                            "fontWeight": "bold",
-                            "cursor": "pointer",
-                            "padding": "6px"
-                        }
-                    ),
-
-                    dcc.Loading(
-                        type="circle",
-                        children=html.Pre(
-                            id="status-log",
-                            style={
-                                "backgroundColor": "#f8f9fa",
-                                "padding": "15px",
-                                "border": "1px solid #dee2e6",
-                                "marginTop": "10px",
-                                "maxHeight": "300px",
-                                "overflowY": "auto",
-                                "fontSize": "13px",
-                                "whiteSpace": "pre-wrap"
-                            }
-                        )
-                    )
-                ]
-            ),
+           
         ])
     ])
 ], style={
@@ -422,18 +409,23 @@ layout = dbc.Container([
 })
 ])
 
-# --- Callbacks ---
 
-# NEW: Callback to update the upload status text
+
+# ==================================================
+# upload data
+# ==================================================
+
 @app.callback(
     Output("upload-status-output", "children"),
+    Output("data-source-store", "data"),
+    Output("data-summary-output", "children"),
     Input("upload-data", "filename"),
     prevent_initial_call=False
 )
 def update_upload_status(filename):
     """Displays a status message when a file is uploaded."""
     if filename:
-        return dbc.Alert(
+        return [dbc.Alert(
             [
                 html.I(className="bi bi-check-circle-fill me-2"),  # Bootstrap icon
                 html.Span(f"File selected: '{filename}'")
@@ -441,36 +433,387 @@ def update_upload_status(filename):
             color="success",
             className="d-flex align-items-center shadow-sm rounded px-3 py-2",
             style={"fontSize": "0.9rem"}
-        )
+        ), 'upload', '']
+    
     # Return empty div on initial load or if upload fails/resets
-    return html.Div("Awaiting file...", className="text-muted small")
+    return [html.Div("Awaiting file...", className="text-muted small"), None, '']
 
-# --- Callback to Update Label ---
-@app.callback(
-    Output('temp-label', 'children'),
-    [Input('temp-slider', 'value')]
-)
-def update_output(value):
-    """Updates the LLM Temperature label with the slider's current value."""
-    # Format the value to one decimal place for cleaner display
-    return f"LLM Temperature: {value:.1f}"
 
-# --- load_example_data ---
+# ==================================================
+# run data filter
+# ==================================================
 
 @app.callback(
-    Output("dataframe-store", "data", allow_duplicate=True),
-    Output("upload-status-output", "children", allow_duplicate=True),
+    Output("data-filter-output", "children"),
+    Output("dataframe-filtered", "data"),
+    Input("filter-btn", "n_clicks"),
+    Input("upload-data", "filename"),
     Input("load-example-btn", "n_clicks"),
+    State("filter-options", "value"),
+    State("mapped-vars-store", "data"),
+    State("dataframe-store", "data"), 
     prevent_initial_call=True
 )
-def load_example_data(n):
+def run_filter(filter_clicks, upload_clicks,
+        example_clicks, selected_filters, mapped_variables_dict, df_json):
 
-    df = pd.read_csv("data/pmp.csv")
-    return (
-        df.to_json(date_format="iso", orient="split"),
-        html.Div("Loaded example dataset: 'pmp.csv'", className="text-success small")
+    trigger = ctx.triggered_id
+
+    if df_json is None:
+        return ['', None]
+    
+    if trigger == 'load-example-btn' or trigger == 'upload-data':
+        return ['', None]
+
+    # =========================
+    # Load dataframe
+    # =========================
+    df = pd.read_json(df_json, orient='split')
+
+    # =========================
+    # Get irradiance column
+    # =========================
+    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
+
+    if irra_key is None or irra_key not in df.columns:
+        return "❌ Irradiance column not found. Please map it first."
+
+    # =========================
+    # Core processing
+    # =========================
+    df_filtered = normalize(df, mapped_variables_dict)
+
+    # start with all data as valid
+    current_mask = pd.Series(True, index=df_filtered.index)
+
+    filter_stats = []
+
+    # =========================
+    # Optional filters
+    # =========================
+    if "timezone" in selected_filters:
+        try:
+            df_filtered.index = pd.to_datetime(df_filtered.index)
+            df_filtered.index = df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
+            filter_stats.append("Timezone corrected (UTC → US/Pacific)")
+        except Exception:
+            filter_stats.append("⚠️ Timezone correction failed")
+
+    if "low-irra-power" in selected_filters:
+        normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+
+        mask = df_filtered.index.isin(normal_idx)
+        removed = (~mask & current_mask).sum()
+
+        current_mask &= mask
+        filter_stats.append(f"Low irra-power filter removed {removed} points")
+
+    if "outlier" in selected_filters:
+        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm")
+
+        mask = df_filtered.index.isin(normal_idx)
+        removed = (~mask & current_mask).sum()
+
+        current_mask &= mask
+        filter_stats.append(f"IQR outlier filter removed {removed} points")
+
+    if "clearsky" in selected_filters:
+        normal_idx, outlier_idx = clear_sky(df_filtered, "norm")
+
+        mask = df_filtered.index.isin(normal_idx)
+        removed = (~mask & current_mask).sum()
+
+        current_mask &= mask
+        filter_stats.append(f"Clear-sky filter removed {removed} points")
+
+    # =========================
+    # Final indices
+    # =========================
+    normal_indices = df_filtered.index[current_mask]
+    outlier_indices = df_filtered.index[~current_mask]
+
+    # =========================
+    # Counts
+    # =========================
+    n_total = len(df_filtered)
+    n_good = len(normal_indices)
+    n_bad = len(outlier_indices)
+
+    # =========================
+    # Pie chart (clean + compact)
+    # =========================
+    pie_fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=["High-quality data", "Filtered data"],
+                values=[n_good, n_bad],
+                hole=0.5,
+                marker=dict(colors=["#0070C0", "#A6CAEC"]),
+                textinfo="percent",
+                hoverinfo="label+percent"
+            )
+        ]
     )
-# --- analyze button ---
+
+    pie_fig.update_layout(
+        height=120,
+        margin=dict(t=10, b=10, l=10, r=10),
+
+        showlegend=True,
+
+        legend=dict(
+            orientation="v",   # vertical legend
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.02,            # push legend slightly outside chart
+            font=dict(size=11)
+        )
+    )
+
+    # =========================
+    # Scatter plot (unchanged)
+    # =========================
+    scatter_fig = go.Figure()
+
+    scatter_fig.add_trace(
+        go.Scattergl(
+            x=df_filtered.loc[outlier_indices].index,
+            y=df_filtered.loc[outlier_indices]["norm"],
+            mode="markers",
+            marker=dict(size=5, opacity=0.3, color="#A6CAEC"),
+            name="Filtered data"
+        )
+    )
+
+    scatter_fig.add_trace(
+        go.Scattergl(
+            x=df_filtered.loc[normal_indices].index,
+            y=df_filtered.loc[normal_indices]["norm"],
+            mode="markers",
+            marker=dict(size=5, opacity=0.4, color="#0070C0"),
+            name="High-quality data"
+        )
+    )
+
+    scatter_fig.update_layout(
+        title="Normalized Power Over Time",
+        xaxis_title="Time",
+        yaxis_title="Normalized Power (W)",
+        template="plotly_white",
+        margin=dict(l=40, r=20, t=60, b=60),  # 🔼 increase bottom margin
+        height=350,
+
+        legend=dict(
+            orientation="h",        # horizontal legend
+            yanchor="top",
+            y=-0.25,                # push below chart
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11)
+        )
+    )
+
+    # =========================
+    # summary block
+    # =========================
+    summary_block = html.Div([
+
+        html.H5("Filtering Summary", style={"marginBottom": "10px"}),
+
+        html.Ul([
+            html.Li(f"Total data points: {n_total}"),
+            html.Li(f"High-quality data: {n_good} ({n_good/n_total:.1%})"),
+            html.Li(f"Filtered data: {n_bad} ({n_bad/n_total:.1%})"),
+        ], style={
+            "paddingLeft": "20px",
+            "marginBottom": "10px"
+        }),
+
+        html.Details([
+            html.Summary(
+                "Show filtering details",
+                style={
+                    "color": "gray",
+                    "cursor": "pointer",
+                    "fontSize": "0.9rem"
+                }
+            ),
+            html.Ul(
+                [html.Li(s) for s in filter_stats],
+                style={"marginTop": "8px"}
+            )
+        ])
+
+    ], style={
+        "paddingLeft": "15px"
+    })
+
+    # =========================
+    # Layout
+    # =========================
+    filter_layout = html.Div([
+
+        dbc.Row([
+            dbc.Col(summary_block, md=6),
+            dbc.Col(dcc.Graph(figure=pie_fig), md=6)
+        ]),
+
+        dbc.Row([
+            dbc.Col(dcc.Graph(figure=scatter_fig), md=12)
+        ])
+    ])
+
+    df_filtered_store = df_filtered.loc[normal_indices]
+
+    return [filter_layout,
+            df_filtered_store.to_json(date_format="iso", orient="split")
+            ]
+
+# ==================================================
+# run degradation calculation
+# ==================================================
+@app.callback(
+    Output("degradation-output", "children"),
+    Output("run-btn", "disabled", allow_duplicate=True),
+    Output("run-btn", "children", allow_duplicate=True),
+    Input("run-btn", "n_clicks"),
+    Input("upload-data", "filename"),
+    Input("load-example-btn", "n_clicks"),
+    State("dataframe-filtered", "data"),
+    State("mapped-vars-store", "data"),
+    State("metric-selected", "value"),
+    
+    prevent_initial_call=True
+)
+def analyze_uploaded_data_callback(
+        degradation_clicks, upload_clicks,
+        example_clicks,
+        df_filtered_json,
+        mapped_variables_dict,
+        selected_metric,
+
+):
+    
+    trigger = ctx.triggered_id
+    
+    if trigger == 'load-example-btn' or trigger == 'upload-data':
+        return ['', False, "Analyze Data"]
+    
+    df_filtered = pd.read_json(df_filtered_json, orient='split')
+
+    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
+
+    if irra_key is None or irra_key not in df_filtered.columns:
+        return ["❌ Irradiance column not found. Please map it first.",
+                False,
+            "Analyze Data"]
+
+    daily_data = aggregate_daily(df_filtered, irra_key)
+
+    rd, yoy_dist = compute_yoy(daily_data)
+
+    # =========================
+    # Duration calculation
+    # =========================
+    start_date = df_filtered.index.min()
+    end_date = df_filtered.index.max()
+
+    duration_days = (end_date - start_date).days
+    duration_years = duration_days / 365.25
+
+    # =========================
+    # Summary block
+    # =========================
+    summary_block = html.Div([
+
+        html.H5("Degradation Summary", style={"marginBottom": "10px"}),
+
+        html.Ul([
+
+            html.Li([
+                html.Span("Metric: "),
+                html.B(selected_metric)
+            ]),
+
+            html.Li([
+                html.Span("Annual degradation rate: "),
+                html.B(f"{rd/100:.2%}/year") 
+            ]),
+
+            html.Li([
+                html.Span("Measurement duration: "),
+                html.B(f"{duration_years:.1f} years ")
+            ]),
+
+        ], style={
+            "paddingLeft": "20px",
+            "marginBottom": "10px"
+        })
+
+    ], style={
+        "paddingLeft": "15px"
+    })
+
+    trend = daily_data.rolling(30, center=True).mean()
+
+    trend_fig = go.Figure()
+
+    # Daily points
+    trend_fig.add_trace(
+        go.Scatter(
+            x=daily_data.index,
+            y=daily_data,
+            mode="markers",
+            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            name="Daily aggregated power"
+        )
+    )
+
+    # Trend line
+    trend_fig.add_trace(
+        go.Scatter(
+            x=trend.index,
+            y=trend,
+            mode="lines",
+            line=dict(color="#0070C0", width=2),
+            name="Trend (30-day)"
+        )
+    )
+
+    trend_fig.update_layout(
+        title="Trend",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        )
+    )
+
+    degradation_layout = html.Div([
+
+        dbc.Row([
+            dbc.Col(summary_block, md=6),
+            # dbc.Col(dcc.Graph(figure=pie_fig), md=6)
+        ]),
+
+        dbc.Row([
+            dbc.Col(dcc.Graph(figure=trend_fig), md=12)
+        ])
+    ])
+
+    return [degradation_layout,
+        False,
+            "Analyze Data"]
+
+
 app.clientside_callback(
     """
     function(n_clicks) {
@@ -488,19 +831,24 @@ app.clientside_callback(
     prevent_initial_call=True
 )
 
-
+# ==================================================
+# data upload and plot raw data
+# ==================================================
 @app.callback(
-    Output("data-summary-output", "children"),
+    Output("data-summary-output", "children", allow_duplicate=True),
     Output("mapped-vars-store", "data"),
     Output("dataframe-store", "data"),
     Output("code-read-store", "data"),
     Output("analyze-btn", "disabled", allow_duplicate=True),
     Output("analyze-btn", "children", allow_duplicate=True),
+    Output("data-source-store", "data", allow_duplicate=True),
+    Output("upload-status-output", "children", allow_duplicate=True),
     Input("analyze-btn", "n_clicks"),
     Input("load-example-btn", "n_clicks"),
     State("upload-data", "contents"),
     State("upload-data", "filename"),
     State("dataframe-store", "data"),
+    State("data-source-store", "data"),
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
@@ -508,7 +856,8 @@ def analyze_uploaded_data_callback(
         example_clicks,
         contents,
         filename,
-        stored_df_json
+        stored_df_json,
+        data_source
 ):
 
     trigger = ctx.triggered_id
@@ -519,88 +868,72 @@ def analyze_uploaded_data_callback(
     if trigger == "load-example-btn":
 
         try:
-            df = pd.read_csv("data/pmp.csv")
+            df = pd.read_parquet("data/sys_1278_downsampled.parquet")
             df_json = df.to_json(date_format='iso', orient='split')
+            output_msg = dbc.Alert(
+                [
+                    html.I(className="bi bi-check-circle-fill me-2"),
+                    html.Span("Example dataset 1 selected")
+                ],
+                color="success",
+                className="d-flex align-items-center shadow-sm rounded px-3 py-2",
+                style={"fontSize": "0.9rem"}
+            )
 
         except Exception as e:
             return (
                 html.Div(f"Error loading example data: {e}", className="alert alert-danger"),
-                {},
-                None,
-                "",
-                False,
-                "Analyze Data"
+                {}, None, "", False, "Analyze Data", None, ''
             )
 
         return (
-            html.Div(
-                "",
-                className="text-muted"
-            ),
-            {},
-            df_json,
-            "",
-            False,
-            "Analyze Data"
+            html.Div("",className="text-muted"),
+            {}, df_json, "", False, "Analyze Data", 'example', output_msg
         )
 
     # ------------------------------------------------
     # 2. Analyze Data button clicked
     # ------------------------------------------------
     if trigger == "analyze-btn":
+        print(data_source)
 
-        # Case A: Uploaded file
-        if contents is not None:
-
+        if data_source == "upload" and contents is not None:
             df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
 
             if df is None:
-                return summary_table, {}, None, "", False, "Analyze Data"
+                return summary_table, {}, None, "", False, "Analyze Data", None, ''
 
-        # Case B: Example dataset already loaded
-        elif stored_df_json is not None:
-
+        elif data_source == "example" and stored_df_json is not None:
             try:
-                df = pd.read_json(stored_df_json, orient='split')
+                if isinstance(stored_df_json, dict):
+                    df = pd.DataFrame(**stored_df_json)
+                else:
+                    df = pd.read_json(stored_df_json, orient='split')
+
                 df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
 
             except Exception as e:
                 return (
                     html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
-                    {},
-                    None,
-                    "",
-                    False,
-                    "Analyze Data"
+                    {}, None, "", False, "Analyze Data", None, ''
                 )
 
-        # Case C: No data at all
         else:
             return (
-                html.Div(
-                    "Upload a file or load the example dataset, then click 'Analyze Data'."
-                ),
-                {},
-                None,
-                "",
-                False,
-                "Analyze Data"
+                html.Div("Upload a file or load the example dataset, then click 'Analyze Data'."),
+                {}, None, "", False, "Analyze Data", None, ''
             )
 
         # Convert dataframe to JSON
         try:
             df_json = df.to_json(date_format='iso', orient='split')
+
         except Exception as e:
             return (
                 html.Div(
                     f"Error converting DataFrame to JSON: {e}",
                     className="alert alert-danger"
-                ),
-                {},
-                None,
-                "",
-                False,
-                "Analyze Data"
+                ),{ }, None, "", False, "Analyze Data", None, ''
             )
 
         # ----------------------------------
@@ -611,8 +944,7 @@ def analyze_uploaded_data_callback(
         try:
             if df is not None and mapped_variables_dict:
                 figures_output, err = make_overview_figures(df, mapped_variables_dict)
-                figures_output = html.Div(figures_output)   # figs is a list of components ✅
-                print(err)
+                figures_output = html.Div(figures_output) 
         except Exception:
             figures_output = html.Div("Figure generation failed.", className="text-danger")
 
@@ -642,13 +974,13 @@ def analyze_uploaded_data_callback(
             df_json,
             code_read,
             False,
-            "Analyze Data"
+            "Analyze Data", None, ''
         )
 
     # ------------------------------------------------
     # Fallback
     # ------------------------------------------------
-    return "", {}, None, "", html.Div(), False, "Analyze Data"
+    return "", {}, None, "", html.Div(), False, "Analyze Data", None , ''
 
 
 app.clientside_callback(
@@ -668,317 +1000,74 @@ app.clientside_callback(
     prevent_initial_call=True
 )
 
+
 @app.callback(
-    Output("results-block", "children"),
-    Output("figures-block", "children"),
-    Output("code-block", "children"),
-    Output("status-log", "children"),
-    Output("run-btn", "disabled", allow_duplicate=True),
-    Output("run-btn", "children", allow_duplicate=True),
-    Input("run-btn", "n_clicks"),
-    State('filter-options', 'value'),
-    State('figure-options', 'value'),
-    State("dataframe-store", "data"),
-    State("mapped-vars-store", "data"),
-    State("code-read-store", "data"),
-    State("upload-data", "contents"),
-    State("filter-options", "value"),
-    State("metric-select", "value"),
-    State("figure-options", "value"),
-    State('temp-slider', 'value'),
+    Output("floating-panel", "style"),
+    Input("floating-btn", "n_clicks"),
     prevent_initial_call=True
 )
-def run_full_analysis(
-    n_clicks,
-    filter_options,
-    figure_options,
-    df_json,
-    mapped_variables_dict,
-    code_read,
-    contents,
-    filters,
-    metric,
-    figures,
-    llm_temp
-):
-
-    log_text = "[INFO] Starting analysis\n"
-
-    # -------------------------
-    # Initialize safe defaults
-    # -------------------------
-    df = None
-    df_processed = None
-    rd = None
-    code = None
-    outlier_indices = []
-    nan_indices = []
-
-    results = html.Div()
-    figures_output = html.Div()
-    code_snippet = "Code not generated."
-
-    # ------------------------------------------------
-    # 0. Check dataset availability
-    # ------------------------------------------------
-    if df_json is None:
-
-        log_text += "[ERROR] No dataset available\n"
-
-        return (
-            html.Div([
-                html.P("Upload a file or load example data, then click 'Analyze Data'.")
-            ]),
-            html.Div(),
-            "",
-            log_text,
-            False,
-            "RUN ANALYSIS"
-        )
-
-    # ------------------------------------------------
-    # 1. Reconstruct dataframe
-    # ------------------------------------------------
-    try:
-
-        log_text += "[STEP 1] Reconstructing dataframe from JSON\n"
-
-        df = pd.read_json(df_json, orient='split')
-
-        log_text += f"[INFO] Dataframe loaded successfully. Rows: {len(df)}\n"
-
-    except Exception:
-
-        log_text += "[ERROR] Failed to reconstruct dataframe\n"
-        log_text += traceback.format_exc()
-
-    # ------------------------------------------------
-    # 2. Run degradation analysis
-    # ------------------------------------------------
-    if df is not None:
-
-        try:
-
-            log_text += "[STEP 2] Running degradation analysis\n"
-
-            rd, outlier_indices, nan_indices, df_processed, code, log_sub, execution_success = \
-                generate_degradation_code_and_execute(
-                    df,
-                    mapped_variables_dict,
-                    llm_temp,
-                    filter_options
-                )
-            
-            if not execution_success and code:
-                log_text += "[WARNING] Code generated but execution failed\n"
-
-            log_text += log_sub
-
-            warning = None
-
-            if not execution_success and code:
-                warning = dbc.Alert(
-                    "⚠ Code was generated but execution failed. See logs below.",
-                    color="warning",
-                    className="mt-2"
-                )
-
-        except Exception:
-
-            log_text += "[ERROR] Degradation analysis failed\n"
-            log_text += traceback.format_exc()
-
-    # ------------------------------------------------
-    # 3. Degradation rate component
-    # ------------------------------------------------
-    rd_component = html.Div()
-
-    if isinstance(rd, (int, float)):
-
-        rd_component = dbc.Alert(
-            html.Span([
-                "Degradation Rate: ",
-                html.B(f"{rd:.2f}%"),
-                " per year"
-            ]),
-            color="success",
-            className="mt-3"
-        )
-
-        log_text += f"[INFO] Degradation rate computed: {rd:.2f}% per year\n"
-
-    elif rd is not None:
-
-        rd_component = dbc.Alert(
-            "Error: Degradation rate invalid.",
-            color="danger",
-            className="mt-3"
-        )
-
-        log_text += "[WARNING] Degradation rate invalid\n"
-
-    # ------------------------------------------------
-    # 4. Filter summary
-    # ------------------------------------------------
-    filters_display = ""
-
-    try:
-
-        log_text += "[STEP 3] Generating filter summary\n"
-
-        filters_display = get_filtered_display_string(
-            filters=filters,
-            outlier_indices=outlier_indices
-        )
-
-    except Exception:
-
-        log_text += "[WARNING] Failed to generate filter summary\n"
-        log_text += traceback.format_exc()
-
-        filters_display = "Filter summary unavailable."
-
-    # ------------------------------------------------
-    # 5. Data summary block
-    # ------------------------------------------------
-    summary_component = html.Div()
-
-    if df_processed is not None:
-
-        try:
-
-            log_text += "[STEP 4] Building data summary\n"
-
-            summary_component = build_data_summary_block(
-                df_processed,
-                outlier_indices,
-                filters
-            )
-
-        except Exception:
-
-            log_text += "[ERROR] Data summary failed\n"
-            log_text += traceback.format_exc()
-
-            summary_component = html.Div(
-                "Error generating summary.",
-                className="text-danger"
-            )
-
-    else:
-
-        summary_component = html.Div(
-            "Processed dataframe unavailable."
-        )
-
-    # ------------------------------------------------
-    # 6. Results block
-    # ------------------------------------------------
-    results = html.Div([
-        warning,   # <-- add here
-
-        html.P([
-            html.Strong("Degradation Metric: "),
-            metric.upper() if metric else "N/A"
-        ]),
-
-        html.P([html.Strong("Filters Applied:"), html.Br()]),
-        dcc.Markdown(filters_display, dangerously_allow_html=True),
-
-        html.P([html.Strong("Data Summary:")]),
-        summary_component,
-
-        rd_component
-    ])
-
-    # ------------------------------------------------
-    # 7. Generate figures
-    # ------------------------------------------------
-    figures_output_list = []
-
-    if df_processed is not None:
-
-        try:
-
-            log_text += "[STEP 5] Generating figures\n"
-
-            if figure_options and 'power_time' in figure_options:
-
-                log_text += "[INFO] Generating Power vs Time plot\n"
-
-                figures_output_list.append(
-                    dcc.Graph(
-                        id='power-vs-time-plot',
-                        figure=plot_power_vs_time(
-                            df_processed,
-                            mapped_variables_dict,
-                            rd
-                        )
-                    )
-                )
-
-            if figure_options and 'outliers_time' in figure_options:
-
-                log_text += "[INFO] Generating Outliers vs Time plot\n"
-
-                figures_output_list.append(
-                    dcc.Graph(
-                        id='outlier-vs-time-plot',
-                        figure=plot_outlier_vs_time(
-                            df_processed,
-                            mapped_variables_dict,
-                            nan_indices,
-                            outlier_indices
-                        )
-                    )
-                )
-
-        except Exception:
-
-            log_text += "[ERROR] Figure generation failed\n"
-            log_text += traceback.format_exc()
-
-    figures_output = html.Div(figures_output_list)
-
-    # ------------------------------------------------
-    # 8. Generate code snippet
-    # ------------------------------------------------
-    try:
-
-        log_text += "[STEP 6] Generating reproducible code snippet\n"
-
-        if code:
-
-            code_snippet = generate_full_code(code, code_read)
-
-            log_text += "[INFO] Code snippet generated successfully\n"
-
-        else:
-
-            code_snippet = "No generated code available."
-
-            log_text += "[WARNING] No code returned from analysis\n"
-
-    except Exception:
-
-        log_text += "[WARNING] Failed to generate code snippet\n"
-        log_text += traceback.format_exc()
-
-        code_snippet = "Code snippet unavailable."
-
-    # ------------------------------------------------
-    # Finished
-    # ------------------------------------------------
-    log_text += "[SUCCESS] Callback finished\n"
-
-    return (
-        results,
-        figures_output,
-        code_snippet,
-        log_text,
-        False,
-        "RUN ANALYSIS"
+def toggle_panel(n):
+    if n % 2 == 1:
+        return {
+            "position": "fixed",
+            "bottom": "100px",
+            "right": "30px",
+            "width": "300px",
+            "padding": "15px",
+            "backgroundColor": "white",
+            "borderRadius": "10px",
+            "boxShadow": "0px 4px 15px rgba(0,0,0,0.2)",
+            "display": "block",
+            "zIndex": 1000
+        }
+    return {"display": "none"}
+
+
+@app.callback(
+    Output("code-preview", "children"),
+    Output("download-link", "href"),
+    Output("download-link", "style"),
+    Input("generate-code-btn", "n_clicks"),
+    State("upload-data", "filename"),
+    State("mapped-vars-store", "data"),
+    State("filter-options", "value"),
+    State("metric-selected", "value"),
+    prevent_initial_call=True
+)
+def generate_code(n,filename, mapped_variables_dict, selected_filters, selected_metric):
+
+    # Generate code (this triggers loading spinner automatically)
+    clean_code = get_full_code(filename, mapped_variables_dict, selected_filters, selected_metric)
+
+    # Preview (first ~20 lines)
+    preview_lines = "\n".join(clean_code.splitlines()[:20]) + "\n..."
+
+    preview = html.Pre(
+        preview_lines,
+        style={
+            "whiteSpace": "pre-wrap",
+            "fontSize": "12px",
+            "backgroundColor": "#f8f9fa",
+            "padding": "8px",
+            "borderRadius": "6px",
+            "maxHeight": "200px",
+            "overflowY": "auto"
+        }
     )
+
+    # Create downloadable file
+    b64 = base64.b64encode(clean_code.encode()).decode()
+    href = f"data:text/plain;base64,{b64}"
+
+    # Show download button ONLY after code is ready
+    download_style = {
+        "display": "inline-block",
+        "marginTop": "10px",
+        "color": "#0070C0",
+        "cursor": "pointer"
+    }
+
+    return preview, href, download_style
 
 if __name__ == '__main__':
     app.run_server(debug=True, host='0.0.0.0', port=8050)

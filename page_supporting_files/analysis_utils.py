@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 from page_supporting_files.pvcopilot_filter_functions import auto_fix_timezone
 import traceback
 from dotenv import load_dotenv
+import numpy as np
+import re
 
 load_dotenv(override=True)
 
@@ -154,7 +156,6 @@ def parse_contents(contents=None, filename=None, df=None):
         cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
 
         result = json.loads(cleaned)
-        print(result)
         mapping_data = result.get("variable_mapping", [])
 
         mapping_df = pd.DataFrame(mapping_data)
@@ -167,7 +168,6 @@ def parse_contents(contents=None, filename=None, df=None):
             mapping_df = mapping_df[mapping_df["Metric"] != "Time"]
 
             index_name = df.index.name
-            print(index_name)
             display_name = index_name if index_name not in [None, ""] else "__index__"
 
             mapping_df.loc[len(mapping_df)] = {
@@ -234,7 +234,6 @@ def parse_contents(contents=None, filename=None, df=None):
             f"Error during LLM analysis or parsing: {e}",
             className="alert alert-warning"
         )
-        print(res_text)
         mapped_variables_dict = {}
 
     return df, summary_table, mapped_variables_dict, code_read
@@ -651,7 +650,9 @@ def get_filtered_display_string(filters, outlier_indices=None):
         for f in filters
     ) if filters else "None"
 
-
+# ================================
+# FIGURES OF RAW DATA
+# ================================
 def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 
     figures = []
@@ -763,15 +764,172 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
             x=df.index,
             y=df[temp_raw],
             mode="markers",
-            name="Module Temp",
+            name="Module Temp raw",
             opacity=0.3,
             marker=dict(color=COLORS["temp_raw"], size=4)
         ))
 
         fig_temp = apply_layout(fig_temp, "Temperature", "Temperature (°C)")
+
+        # --- Apply temperature limit ---
+        ymax = df[temp_raw].max()
+        ymin = df[temp_raw].min()
+
+        if ymax > 150:
+            fig_temp.update_yaxes(range=[ymin-20, 80])
+
+        if ymin<-50:
+            fig_temp.update_yaxes(range=[-40, ymax+20])
+
         figures.append(dcc.Graph(figure=fig_temp))
 
     except Exception as e:
         errors.append(f"[Temperature Plot] {str(e)}")
 
     return figures, errors
+
+
+# ================================
+# NORMALIZATION
+# ================================
+def normalize(df, mapped_variables_dict, gamma=-0.004):
+
+    irr_key = mapped_variables_dict["Irradiance"]
+    power_key = mapped_variables_dict["DC Power"]
+    temp_C_key = mapped_variables_dict["Module temperature"]
+
+    df['norm'] = df[power_key] / (
+        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+
+    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+
+    return df
+
+
+# ================================
+# Low irradiance & power filter
+# ================================
+def low_irra_power_filter(df, mapped_variables_dict):
+    mask = pd.Series(True, index=df.index)
+
+    irr_key = mapped_variables_dict["Irradiance"]
+    power_key = mapped_variables_dict["DC Power"]
+
+    # irradiance filter
+    mask &= df[irr_key] > 300
+
+    # power filter
+    mask &= df[power_key] > 0.02 * df[irr_key]
+
+    # norm range filter
+    upper = df['norm'].quantile(0.99)
+    mask &= df['norm'].between(0.01, upper)
+
+    # ✅ indices
+    normal_indices = df.index[mask]
+    outlier_indices = df.index[~mask]
+
+    return normal_indices, outlier_indices
+
+# ================================
+# DAILY AGGREGATION
+# ================================
+def aggregate_daily(df_f, irradiance_col):
+    daily = (
+        df_f[['norm', irradiance_col]]
+        .dropna()
+        .groupby(df_f.index.date)
+        .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
+    )
+
+    daily.index = pd.to_datetime(daily.index)
+
+    return daily
+
+# ================================
+# YoY
+# ================================
+def compute_yoy(series, eps=1e-6):
+    series = series.dropna()
+    yoy = []
+
+    for t in series.index:
+        t_prev = t - pd.DateOffset(years=1)
+
+        if t_prev in series.index:
+            prev = series.loc[t_prev]
+            curr = series.loc[t]
+
+            if prev < eps:
+                continue
+
+            ratio = curr / prev - 1
+
+            if np.isfinite(ratio):
+                yoy.append(ratio)
+
+    yoy = np.array(yoy)
+
+    # --- Remove outliers using IQR ---
+    if len(yoy) > 0:
+        q1 = np.percentile(yoy, 25)
+        q3 = np.percentile(yoy, 75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        yoy = yoy[(yoy >= lower) & (yoy <= upper)]
+
+    rd = np.median(yoy) * 100 if len(yoy) > 0 else np.nan
+
+    return rd, yoy
+
+# ================================
+# get full code
+# ================================
+def get_full_code(filename, mapped_variables_dict,selected_filters, selected_metric):
+
+    with open("page_supporting_files/pvcopilot_functions_code.txt", "r", encoding="utf-8") as f:
+            pvcopilot_functions_code = f.read().replace('\n', ' ').replace('"', "'")
+
+    with open("page_supporting_files/pvcopilot_packages_code.txt", "r", encoding="utf-8") as f:
+            pvcopilot_packages_code = f.read().replace('\n', ' ').replace('"', "'")
+
+    prompt = f"""
+        Your task is to generate a code:
+        * load data as df where filename is {filename}
+        * define a dict 'mapped_variables_dict' from {mapped_variables_dict}
+        * use functinon df_filtered = normalize(df, mapped_variables_dict)
+        * if "low-irra-power" in selected_filters {selected_filters}:
+            use function normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+        * if "outlier" in selected_filters {selected_filters}:
+            use function normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm")
+        * merge all normal_idx, print the total number of points, normal ones, and outliers
+        * define df_filtered_final with only normal_idx from df_filtered
+        * use function daily_data = aggregate_daily(df_filtered_final, irra_key)
+        * use function rd, yoy_dist = compute_yoy(daily_data)
+        * print rd
+
+        Note that: 
+        * all these functions are already defined, just use them.
+        * add comments to each part for user to understand.
+        * add necessary packages on the beginning of code based on {pvcopilot_packages_code}
+
+        No verbose.
+
+        """
+
+    # Call LLM
+    response = client.chat.completions.create(
+        model="openai/gpt-4.1",
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    res_text = response.choices[0].message.content.strip()
+    clean_text = re.sub(r"```python\n(.*?)```", r"\1", res_text, flags=re.DOTALL).strip()
+
+    with open("llm_response.txt", "w", encoding="utf-8") as f:
+        f.write(clean_text)
+
+    return clean_text

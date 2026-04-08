@@ -1,0 +1,67 @@
+import pandas as pd
+import numpy as np
+
+# Load data as df when filename is None
+df = load_data(filename=None)
+
+# Define the mapping dictionary
+mapped_variables_dict = {
+    'DC Power': 'dc_power',
+    'AC Power': 'ac_power',
+    'Irradiance': 'poa_irradiance',
+    'Module temperature': 'module_temperature_C',
+    'Time': '__index__'
+}
+
+# Normalize dataframe based on the mapped variables
+df_filtered = normalize(df, mapped_variables_dict)
+
+# Example selected_filters list (should be defined elsewhere or provided)
+selected_filters = ['timezone', 'low-irra-power', 'outlier']
+
+# Initialize index lists
+normal_idx_lists = []
+
+# Apply low irradiance power filter if selected
+if "low-irra-power" in selected_filters:
+    normal_idx_low_irra, outlier_idx_low_irra = low_irra_power_filter(df_filtered, mapped_variables_dict)
+    normal_idx_lists.append(normal_idx_low_irra)
+
+# Apply outlier detection filter if selected
+if "outlier" in selected_filters:
+    normal_idx_outlier, outlier_idx_outlier = identify_outliers_iqr(df_filtered, "norm")
+    normal_idx_lists.append(normal_idx_outlier)
+
+# Merge/Intersect all normal indexes
+if normal_idx_lists:
+    # Intersect all normal_idx lists to get final set of indices
+    final_normal_idx = set(normal_idx_lists[0]).intersection(*normal_idx_lists[1:])
+else:
+    # If no filters applied, all indices are normal
+    final_normal_idx = df_filtered.index
+
+# Total points
+total_points = len(df_filtered)
+# Normal points after filtering
+normal_points = len(final_normal_idx)
+# Outliers are the difference
+outlier_points = total_points - normal_points
+
+print(f"Total points: {total_points}")
+print(f"Normal points: {normal_points}")
+print(f"Outliers: {outlier_points}")
+
+# Filter dataframe to only include normal indices
+df_filtered_final = df_filtered.loc[final_normal_idx]
+
+# Use the irradiance key as needed
+irra_key = mapped_variables_dict['Irradiance']
+
+# Aggregate daily data
+daily_data = aggregate_daily(df_filtered_final, irra_key)
+
+# Compute year-over-year results
+rd, yoy_dist = compute_yoy(daily_data)
+
+# Print result
+print(rd)

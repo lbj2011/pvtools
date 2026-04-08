@@ -148,7 +148,7 @@ def detect_dst_jump(df):
     duplicated_hours = [x for x in range(24) if (h == x).sum() > 120]
     return missing_hours, duplicated_hours
 
-def identify_outliers_iqr(df: pd.DataFrame, power_key: str, time_key: str, iqr_multiplier: float = 1.5):
+def identify_outliers_iqr(df: pd.DataFrame, power_key: str, iqr_multiplier: float = 1.5):
     """
     Identifies outliers in a specified column of a DataFrame using the Interquartile Range (IQR) method.
 
@@ -158,7 +158,6 @@ def identify_outliers_iqr(df: pd.DataFrame, power_key: str, time_key: str, iqr_m
     Args:
         df (pd.DataFrame): The DataFrame containing the data.
         power_key (str): The column name to use for outlier detection (e.g., 'p_mp_ref').
-        time_key (str): The column name for the timestamp (used for context, not calculation).
         iqr_multiplier (float): The multiplier for the IQR range. Default is 1.5 (Tukey's Fences).
 
     Returns:

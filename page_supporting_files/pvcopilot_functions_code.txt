@@ -1,0 +1,142 @@
+# ================================
+# NORMALIZATION
+# ================================
+def normalize(df, mapped_variables_dict, gamma=-0.004):
+
+    irr_key = mapped_variables_dict["Irradiance"]
+    power_key = mapped_variables_dict["DC Power"]
+    temp_C_key = mapped_variables_dict["Module temperature"]
+
+    df['norm'] = df[power_key] / (
+        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+
+    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+
+    return df
+
+# ================================
+# Filter outliers using IQR
+# ================================
+def identify_outliers_iqr(df: pd.DataFrame, power_key: str, iqr_multiplier: float = 1.5):
+    """
+    Identifies outliers in a specified column of a DataFrame using the Interquartile Range (IQR) method.
+
+    Outliers are defined as data points that are less than Q1 - (IQR * iqr_multiplier) or
+    greater than Q3 + (IQR * iqr_multiplier).
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data.
+        power_key (str): The column name to use for outlier detection (e.g., 'p_mp_ref').
+        iqr_multiplier (float): The multiplier for the IQR range. Default is 1.5 (Tukey's Fences).
+
+    Returns:
+        tuple: A tuple containing two pandas Index objects:
+               - normal_indices: The indices of the normal data points.
+               - outlier_indices: The indices of the outlier data points.
+    """
+    if power_key not in df.columns:
+        print(f"Error: The specified power column '{power_key}' does not exist in the DataFrame.")
+        return pd.Index([]), pd.Index([])
+
+    # Ensure the data is numeric and drop NaNs for quantile calculation
+    data = df[power_key].dropna()
+
+    # 1. Calculate Q1 (25th percentile) and Q3 (75th percentile)
+    Q1 = data.quantile(0.25)
+    Q3 = data.quantile(0.75)
+
+    # 2. Calculate IQR (Interquartile Range)
+    IQR = Q3 - Q1
+
+    # 3. Define the lower and upper bounds (Fences)
+    lower_bound = Q1 - (IQR * iqr_multiplier)
+    upper_bound = Q3 + (IQR * iqr_multiplier)
+
+    print(f"\n--- Outlier Detection Metrics for '{power_key}' ---")
+    print(f"Q1 (25th percentile): {Q1:.2f}")
+    print(f"Q3 (75th percentile): {Q3:.2f}")
+    print(f"IQR: {IQR:.2f}")
+    print(f"Lower Bound: {lower_bound:.2f}")
+    print(f"Upper Bound: {upper_bound:.2f}")
+    print("---------------------------------------------------\n")
+
+    # 4. Identify Outliers
+    # Outliers: Data points below the lower bound or above the upper bound
+    is_outlier = (df[power_key] < lower_bound) | (df[power_key] > upper_bound)
+    outlier_indices = df.index[is_outlier]
+
+    # 5. Identify Normal Data
+    # Normal points: Data points within the bounds
+    is_normal = ~is_outlier
+    normal_indices = df.index[is_normal]
+
+    return normal_indices, outlier_indices
+
+
+# ================================
+# Low irradiance & power filter
+# ================================
+def low_irra_power_filter(df, mapped_variables_dict):
+    mask = pd.Series(True, index=df.index)
+
+    irr_key = mapped_variables_dict["Irradiance"]
+    power_key = mapped_variables_dict["DC Power"]
+
+    # irradiance filter
+    mask &= df[irr_key] > 300
+
+    # power filter
+    mask &= df[power_key] > 0.02 * df[irr_key]
+
+    # norm range filter
+    upper = df['norm'].quantile(0.99)
+    mask &= df['norm'].between(0.01, upper)
+
+    # ✅ indices
+    normal_indices = df.index[mask]
+    outlier_indices = df.index[~mask]
+
+    return normal_indices, outlier_indices
+
+
+# ================================
+# DAILY AGGREGATION
+# ================================
+def aggregate_daily(df_f, irradiance_col):
+    daily = (
+        df_f[['norm', irradiance_col]]
+        .dropna()
+        .groupby(df_f.index.date)
+        .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
+    )
+
+    daily.index = pd.to_datetime(daily.index)
+
+    return daily
+
+# ================================
+# YoY
+# ================================
+def compute_yoy(series, eps=1e-6):
+    series = series.dropna()
+    yoy = []
+
+    for t in series.index:
+        t_prev = t - pd.DateOffset(years=1)
+
+        if t_prev in series.index:
+            prev = series.loc[t_prev]
+            curr = series.loc[t]
+
+            if prev < eps:
+                continue
+
+            ratio = curr / prev - 1
+
+            if np.isfinite(ratio):
+                yoy.append(ratio)
+
+    yoy = np.array(yoy)
+    rd = np.median(yoy) * 100
+
+    return rd, yoy
