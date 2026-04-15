@@ -6,6 +6,7 @@ import plotly.express as px
 import ast
 import re
 import numpy as np
+import plotly.graph_objects as go
 
 allc = ['#8A257F','#D476EC','#3BB1FF', '#1E51BB']
 
@@ -154,7 +155,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                         style={
                             "marginBottom": "10px",
                             "fontSize": "13px",
-                            "color": "#D9D9D9"
+                            "color": "#222324"
                         }
                     ),
 
@@ -193,20 +194,20 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                     "width": "300px",
 
     # 🔥 GLASS EFFECT
-    "background": "rgba(20, 96,130, 0.55)",
+    "background": "rgba(255,255,255, 0.55)",
     "backdropFilter": "blur(12px)",
 
     # ✨ soft border glow
     "border": "1px solid rgba(255,255,255,0.1)",
 
     # depth
-    "boxShadow": "0 8px 32px rgba(0,0,0,0.6)",
+    "boxShadow": "0 8px 32px rgba(240,240,240,0.3)",
 
     "padding": "16px",
     "borderRadius": "14px",
 
     # text color for dark theme
-    "color": "#ffffff",
+    "color": "#131314",
 
     "overflowY": "auto",
     "flex": "1",
@@ -285,7 +286,32 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         # Ensure columns exist
         if "components" not in df.columns or "major_mechanisms_faults" not in df.columns:
             raise ValueError("Expected columns missing in DF")
-    
+        
+
+        def get_component_group(comps):
+            parsed = parse_list(comps)  # 👈 returns list like ["cell", "glass"]
+
+            # find first known component
+            for c in parsed:
+                c_lower = c.lower()
+                if c_lower in KNOWN_COMPONENTS:
+                    return c_lower
+
+            return "other"
+        
+        df["parsed_components"] = df["components"].apply(parse_list)
+
+        df_exploded = df.explode("parsed_components")
+
+        df_exploded = df_exploded[df_exploded["parsed_components"].notna()]
+
+        df_exploded["parsed_components"] = df_exploded["parsed_components"].astype(str).str.lower()
+
+        df_exploded["component_group"] = df_exploded["parsed_components"].apply(
+            lambda x: x if x in KNOWN_COMPONENTS else "other"
+        )
+        df_exploded = df_exploded.reset_index(drop=False)
+
         # -------------------------
         # FILTER: components
         # -------------------------
@@ -306,7 +332,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
 
                 return normal_match or other_match
 
-            df = df[df["components"].apply(match_components)]
+            df_exploded = df_exploded[df_exploded["component_group"].apply(match_components)]
 
         # -------------------------
         # FILTER: mechanisms
@@ -332,7 +358,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         # -------------------------
         if component_values == [] or mechanism_values == []:
             return px.scatter_mapbox(lat=[], lon=[]).update_layout(
-                mapbox_style="carto-darkmatter",
+                mapbox_style="carto-positron",
                 mapbox=dict(
                     zoom=2,
                     center={"lat": 20, "lon": 0}
@@ -347,8 +373,17 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         # optional: remove duplicates
         df = df.drop_duplicates(subset=["latitude", "longitude"])
 
+        color_map = {
+            "cell": "#0b62a1",
+            "front sheet": "#37adf1",
+            "encapsulant": "#93dff4",
+            "glass": "#ec8bbc",
+            "backsheet": "#9b48b5",
+            "other": "#bec0c0"
+        }
+
         fig = px.scatter_mapbox(
-            df,
+            df_exploded,
             lat="latitude",
             lon="longitude",
             hover_name="eid",
@@ -360,17 +395,49 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 "longitude": False
             },
             custom_data=["index"],
+            color="component_group",              # 👈 key change
+            color_discrete_map=color_map,         # 👈 custom colors
             zoom=2
         )
 
+        # fig = px.scatter_mapbox(
+        #     df,
+        #     lat="latitude",
+        #     lon="longitude",
+        #     hover_name="eid",
+        #     hover_data={
+        #         "year": True,
+        #         "major_affiliation_city": True,
+        #         "major_affiliation_country": True,
+        #         "latitude": False,
+        #         "longitude": False
+        #     },
+        #     custom_data=["index"],
+        #     zoom=2
+        # )
+
         # =========================
-        # 🔵 Marker style
+        # Marker style
         # =========================
         fig.update_traces(
             marker=dict(
                 size=16,      # 👈 larger points
-                opacity=0.5,   # 👈 transparent
-                color="#00B0F0"   # 👈 change here
+                opacity=0.3,   # 👈 transparent
+                # color="#00B0F0"   # 👈 change here
+            )
+        )
+
+        fig.update_layout(
+            legend_title_text="Component Type",
+            legend=dict(
+                orientation="v",
+                x=0.99,              # right side
+                y=0.01,              # bottom
+                xanchor="right",     # anchor legend's right edge
+                yanchor="bottom",    # anchor legend's bottom edge
+                bgcolor="rgba(255,255,255,0.7)",  # 👈 readable over map
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1
             )
         )
 
@@ -387,7 +454,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 marker=dict(
                     size=22,
                     opacity=1,
-                    color="#F234B3"
+                    color="#F4BC05",
                 ),
                 name="selected"
             )
@@ -396,15 +463,15 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         # 🌍 Map behavior (NO REPEAT)
         # =========================
         fig.update_layout(
-            # mapbox_style="carto-positron",  # clean + light
-            mapbox_style="carto-darkmatter",
+            mapbox_style="carto-positron",  # clean + light
+            # mapbox_style="carto-darkmatter",
             margin={"l":0, "r":0, "t":0, "b":0},
 
             mapbox=dict(
                 zoom=2,
                 center={"lat": 20, "lon": 0},
             ),
-            showlegend=False, 
+            # showlegend=False, 
             uirevision="constant"
         )
 
@@ -593,7 +660,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                     "Click a data point to view details.",
                     style={
                         "fontSize": "13px",
-                        "color": "#BFBFBF",
+                        "color": "#78797A",
                         "marginTop": "6px",
                         "marginBottom": "0px"   # 👈 add this
                     }
@@ -601,20 +668,20 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
             ]),
             {
                 # 🔥 GLASS EFFECT
-    "background": "rgba(0,112,192, 0.55)",
+    "background": "rgba(220,234,247, 0.55)",
     "backdropFilter": "blur(12px)",
 
     # ✨ soft border glow
     "border": "1px solid rgba(255,255,255,0.1)",
 
     # depth
-    "boxShadow": "0 8px 32px rgba(0,0,0,0.6)",
+    "boxShadow": "0 8px 30px rgba(200,200,200,0.2)",
 
     "padding": "16px",
     "borderRadius": "14px",
 
     # text color for dark theme
-    "color": "#ffffff",
+    "color": "#42454c",
 
                 "width": "300px",
                 "padding": "10px",

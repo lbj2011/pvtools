@@ -2,6 +2,7 @@ from dash import html
 import dash_cytoscape as cyto
 from dash import dcc
 import dash_bootstrap_components as dbc
+from dash_model_viewer import DashModelViewer
 
 # allc = ['#8A257F','#C781CD','#7AB8D7', '#368BB6']
 allc = ['#8A257F','#D476EC','#3BB1FF', '#1E51BB']
@@ -138,11 +139,11 @@ def create_map_section():
                     [
                         html.Div(
                             id="map-summary",
-                            style={"pointerEvents": "auto"}   # 👈 allow interaction ONLY here
+                            # style={"pointerEvents": "auto"}   # 👈 allow interaction ONLY here
                         ),
                         html.Div(
                             id="map-detail",
-                            style={"pointerEvents": "auto"}   # 👈 allow interaction ONLY here
+                            # style={"pointerEvents": "auto"}   # 👈 allow interaction ONLY here
                         ),
                     ],
                     style={
@@ -163,7 +164,8 @@ def create_map_section():
                     "left": 0,
                     "right": 0,
                     "height": "100%",
-                    "pointerEvents": "none"
+                    "pointerEvents": "none",
+                    "zIndex": 10,   # ✅ KEY FIX
                 }
             )
         ],
@@ -379,7 +381,6 @@ def create_layout(file_list):
                     'textAlign': 'center'
                 }),
 
-                html.Hr(),
 
                 create_filter_section(),
 
@@ -398,6 +399,23 @@ def create_layout(file_list):
                 create_graph_container()
 
             ])
+        ]),
+
+        dbc.Container([
+            DashModelViewer(
+                    id="pv-model",
+                    # Use a URL or a path to your file in the 'assets' folder
+                    src="/assets/Untitled4.glb",
+                    alt="A 3D model of an exploded PV module",
+                    cameraControls=True,   # Allows orbiting and zooming
+                    cameraOrbit="70deg 70deg 65%",
+                    fieldOfView="25deg",
+                    ar=False,              # Enable if you want mobile users to view in AR
+                    style={"width": "100%", "height": "400px",
+                           "borderRadius": "10px",           # 圆角
+                            "border": "1px solid #ddd",      # 边框线}
+                    }
+                ),
         ])
 
     ])

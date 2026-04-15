@@ -1,3 +1,42 @@
+/* Page title */
+.page-title {
+    font-weight: 800;
+    font-size: 40px;
+}
+
+.page-title-container {
+    width: 100%;
+    padding-left: 10px;
+    padding-right: 10px;
+
+    display: flex;
+    justify-content: center;   /* horizontal center */
+    align-items: center;       /* vertical center (optional) */
+    text-align: center;        /* ensures text stays centered */
+}
+
+.level-1-title {
+    font-weight: 600;
+    font-size: 30px;   /* adjust size as needed */
+    margin-bottom: 12px;
+}
+
+.level-2-title {
+    font-weight: 600;
+    font-size: 24px;   /* adjust as needed */
+    margin-bottom: 10px;
+}
+
+.custom-alert {
+    background-color: #e4f0fa !important;
+    border: 1px solid #82b9ea !important;  /* add border + color */
+    color: #0a539c !important;
+    border-radius: 8px !important;
+}
+
+
+
+
 
 
 /* ABOUT TEXT */

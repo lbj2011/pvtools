@@ -41,19 +41,15 @@ layout = dbc.Container([
 
     html.Hr(),
     html.Div([
-        html.H1("PV-Copilot"), 
-    ], style={
-        'width': '100%',
-        'padding-left': '10px',
-        'padding-right': '10px',
-        'textAlign': 'center'}),
+        html.H1("PV-Copilot", className="page-title"), 
+    ], className="page-title-container"),
     html.Hr(),
 
     html.Div([
 
         # Floating button
         html.Button(
-            "Get the code ⬇",
+            "Get the code",
             id="floating-btn",
             n_clicks=0,
             style={
@@ -120,7 +116,7 @@ layout = dbc.Container([
                                 ]
                             ),
                             html.Small(
-                                        "(It typically takes 2-6 seconds)",
+                                        "(It typically takes 2-10 seconds)",
                                         className="text-muted small"
                                     ),
                             dcc.Loading(
@@ -176,9 +172,17 @@ layout = dbc.Container([
 
         dbc.Col(
             [
-                html.Img(
-                    src=app.get_asset_url('pvcopilot_animated_slogan.gif'),
-                    style={"width": "50%"}
+                html.Iframe(
+                    src="https://www.youtube.com/embed/QuTOc8Fb4g4",
+                    style={
+                        "width": "70%",
+                        "height": "150px",
+                        "border": "none",
+                        "marginBottom": "20px",  # 👈 add this
+                        "borderRadius": "12px",  # 👈 rounded corners
+                        "overflow": "hidden"     # 👈 ensures corners clip properly
+                    },
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture",
                 ),
             ],
             xs=12, sm=12, md=10, lg=4, xl=4,
@@ -519,7 +523,66 @@ layout = dbc.Container([
                         dbc.Button(
                             "RUN ANALYSIS",
                             id="run-btn", color="primary", className="w-100 mt-3"
-                        )
+                        ),
+
+                            html.Details([
+                                html.Summary(
+                                    "Degradation metric detail:",
+                                    style={
+                                        "cursor": "pointer",
+                                        "color": "#B5B5B8",
+                                        "fontSize": "14px",
+                                        "fontWeight": "500",
+                                    }
+                                ),
+
+                                html.Div([
+
+                                    html.Ul([
+                                        html.Li([
+                                            html.B("YoY (Year-over-Year)"),
+                                            " – Compares a metric to the same period in the previous year to measure growth and reduce seasonality effects."
+                                        ]),
+
+                                        html.Li([
+                                            html.B("LR (Linear Regression)"),
+                                            " – Fits a straight line to model relationships between variables; useful for trend estimation and simple forecasting."
+                                        ]),
+
+                                        html.Li([
+                                            html.B("HW (Holt-Winters)"),
+                                            " – Uses exponential smoothing to model level, trend, and seasonality; well-suited for seasonal time series."
+                                        ]),
+
+                                        html.Li([
+                                            html.B("ARIMA (Auto Regressive Integrated Moving Average)"),
+                                            " – Combines autoregression, differencing, and moving averages to model and forecast time series data."
+                                        ]),
+
+                                        html.Li([
+                                            html.B("CSD (Classical Seasonal Decomposition)"),
+                                            " – Decomposes a time series into trend, seasonal, and residual components to analyze underlying patterns."
+                                        ])
+                                    ],style={
+                                            "marginBottom": "0",
+                                            "paddingLeft": "16px"
+                                            })
+                                ],style={
+                                    "marginTop": "10px",
+
+                                    # 👇 CARD STYLE ONLY FOR EXPANDED AREA
+                                    "padding": "12px 14px",
+                                    "border": "1px solid #e0e0e0",
+                                    "borderRadius": "10px",
+                                    "backgroundColor": "#e8f3ff",
+                                    "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
+
+                                    "color": "#1A64BE",
+                                    "fontSize": "13px",
+                                    "lineHeight": "1.6",
+                                }),
+                            ],style={"marginTop": "10px"}
+                            )
                         ],
                         lg=4, md=12, sm=12, xs=12
                     ),

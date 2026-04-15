@@ -14,6 +14,7 @@ import json
 import os
 import openai
 import re
+import time
 
 cborg_API_KEY = os.getenv("cborg_api_key")
 
@@ -165,14 +166,19 @@ User question:
 """
 
 def get_filter_from_llm(question):
-
     prompt = build_prompt(question)
 
+    start_time = time.time()  # start timer
+
     response = client.chat.completions.create(
-        model="openai/gpt-5.1",
+        model="openai/gpt-5.4-nano",
+        # model = "gemini-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
+
+    end_time = time.time()  # end timer
+    elapsed_time = end_time - start_time
 
     content = response.choices[0].message.content.strip()
 
@@ -183,12 +189,13 @@ def get_filter_from_llm(question):
     try:
         result = json.loads(content)
     except json.JSONDecodeError:
-        # fallback response if parsing fails
         return {
+            "llm_time_seconds": elapsed_time,
             "is_pv_related": False,
             "can_be_answered_with_dataframe": False,
             "reason": "Sorry, I couldn't understand the request. Please try rephrasing your question.",
-            "filter_tree": []
+            "filter_tree": [],
+            
         }
 
     # ensure required keys exist
@@ -196,6 +203,9 @@ def get_filter_from_llm(question):
     result.setdefault("can_be_answered_with_dataframe", False)
     result.setdefault("reason", "")
     result.setdefault("filter_tree", [])
+
+    # add timing info
+    result["llm_time_seconds"] = elapsed_time
 
     return result
 

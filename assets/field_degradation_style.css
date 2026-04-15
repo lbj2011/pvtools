@@ -136,18 +136,30 @@ input[type="checkbox"] {
     margin-bottom: 12px;
 }
 
-.response-label {
-    font-weight: 700;
-    font-size: 16px;
-    margin-right: 6px;
-    /* color: #444; */
+/* field-chat-box- each row */
+.field-chat-box-metric-row {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 6px;
 }
 
-.response-text {
-    display: inline;
-    font-weight: 500;
-    font-size: 15px;
-    /* color: #063f75; */
+/* field-chat-box- label (left side) */
+.field-chat-box-metric-label {
+    min-width: 160px;
+    font-weight: 600;
+    color: #5b6b7a;
+}
+
+/* field-chat-box- value (number) */
+.field-chat-box-metric-value {
+    font-weight: 700;
+    color: #0a539c;
+}
+
+/* field-chat-box- explanation text */
+.field-chat-box-metric-text {
+    color: #1f2d3d;
+    font-weight: 600;
 }
 
 /* ================= LLM PANEL ================= */
@@ -242,23 +254,28 @@ input[type="checkbox"] {
 
 /* ================= CHAT UI ================= */
 
-.chat-input {
+.chat-input-style{
     height: 42px;
     border-radius: 12px;
-    border: 2px solid #FFC9FF;
-    background-color: #FFFFFF;
-    padding: 0 14px;
-    font-size: 15px;
-    font-weight: 600;
-    outline: none;
+    border: 2px solid #FFC9FF !important;
+    background-color: #FFFFFF !important;
+    padding: 0 14px !important;
+    font-size: 16px !important;
+    color: #1a191a !important;
+    outline: none !important;
     box-shadow: 0 1px 3px rgba(36, 186, 154, 0.08);
 }
+
+.chat-input-style .dash-input-element {
+    font-weight: 700 !important;
+}
+
 
 .send-button {
     height: 42px;
     padding: 0 18px;
     border-radius: 10px;
-    border: 1px solid #ffffff;
+    border: 1px solid #d9edf8;
     background: linear-gradient(135deg, #F0BEED, #00B0F0);
     color: white;
     font-weight: 600;

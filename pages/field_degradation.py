@@ -56,32 +56,35 @@ layout = dbc.Container([
 
     html.Hr(),
     html.Div([
-        html.H1("Worldwide PV Field Performance (Demo)"),
-    ], style={
-        # 'background-color': 'lightblue',
-        'width': '100%',
-        'padding-left': '10px',
-        'padding-right': '10px',
-        'textAlign': 'center'}),
+        html.H1(
+            "Global PV System Field Performance",
+            className="page-title"
+        ),
+    ], className="page-title-container"),
     html.Hr(),
 
-    html.H2('Overview'),
+    html.H3("Overview", className="level-2-title"),
     html.P(''),
     dbc.Row([
         dbc.Col([
-            dcc.Markdown("""This tool visualizes **worldwide PV field degradation** extracted from scientific literature using **Large Language Models (LLMs)**.
+            dcc.Markdown("""This tool visualizes **global PV field degradation** extracted from scientific literature using **Large Language Models (LLMs)**.
 
                     - Source papers (~3,900 papers) were retrieved from **Scopus** using keyword-based searches.  
-                    - **Gpt and Gemini** were applied to automatically extract degradation information.  
-
-                    **Note:** Degradation rate is reported as a **negative value when power decreases**.   
-
-                    📂 **Resources:**  
-                    - [GitHub Repository](https://github.com/DuraMAT/PV-LLM)  
-                    - [Download Raw Data (DuraMAT Datahub)](https://datahub.duramat.org/project/mapping-pv-degradation-by-llm)  
+                    - **ChatGPT and Gemini** were applied to automatically extract degradation information.  
+                    - Degradation rate is reported as a **negative value when power decreases**.   
                          
                 """.replace('    ', '')
                  ),
+                 html.Details([
+                    html.Summary(
+                        "Resources",
+                        style={"color": "#8A8A8A"}
+                    ),
+                    html.Ul([
+                        html.Li(html.A("GitHub Repository", href="https://github.com/DuraMAT/PV-LLM", target="_blank")),
+                        html.Li(html.A("Download Raw Data (DuraMAT Datahub)", href="https://datahub.duramat.org/project/mapping-pv-degradation-by-llm", target="_blank")),
+                    ])
+                ])
         ], xs=12, sm=12, md=12, lg=9, xl=9),
 
         dbc.Col([
@@ -103,12 +106,12 @@ layout = dbc.Container([
             ),
             "."
         ],
-        color="primary",
-        className="mt-2"
+        # color="primary",
+        className="mt-2 custom-alert"
     ),
     
     html.P(''),
-    html.H2('Degradation rate map'),
+    html.H2("Degradation rate map", className="level-1-title"),
     html.P(''),
     dbc.Card([
         dbc.CardBody([
@@ -156,7 +159,7 @@ layout = dbc.Container([
                                 id="chat-input",
                                 type="text",
                                 placeholder="Ask a question about the PV degradation dataset...",
-                                className="chat-input",
+                                className="chat-input-style",
                             ),
 
                             html.Button(
@@ -226,8 +229,7 @@ layout = dbc.Container([
                                     [
                                         html.Div(
                                             [
-                                                html.Span("Response:", className="response-label"),
-                                                html.Div(id="response-text", className="response-text")
+                                                html.Div(id="response-text")
                                             ],
                                             className="response-container"
                                         ),
@@ -256,7 +258,7 @@ layout = dbc.Container([
                             id="llm-result",
                             style={
                                 "whiteSpace": "pre-wrap",
-                                "background": "#f6f8fa",
+                                "backgroundColor": "rgba(255,255,255,0.6)",
                                 "padding": "12px",
                                 "borderRadius": "8px",
                                 "fontSize": "13px",
@@ -315,7 +317,7 @@ layout = dbc.Container([
     ]),
 
     html.P(''),
-    html.H2('Analysis'),
+    html.H2('Analysis', className="level-1-title"),
     html.P('(based on filtered data points)'),
     html.P(''),
     dbc.Card([
@@ -335,7 +337,7 @@ layout = dbc.Container([
     ]),
 
     html.P(''),
-    html.H2('Regional performance'),
+    html.H2('Regional performance', className="level-1-title"),
     html.P(''),
     dbc.Card([
         dbc.Row([
@@ -421,18 +423,31 @@ def fill_input(q1, q2, q3):
 @app.callback(
     Output("chat-submit", "disabled"),
     Input("chat-submit", "n_clicks"),
+    Input("chat-input", "n_submit"),   # ← add this
     prevent_initial_call=True
 )
-def disable_button_on_click(n):
+def disable_button_on_action(n_clicks, n_submit):
     return True
 
 @app.callback(
     Output("chat-submit", "disabled", allow_duplicate=True),
     Input("chat-input", "value"),
+    Input("chat-input", "n_submit"),
     prevent_initial_call=True
 )
-def toggle_send_button(value):
-    return not (value and value.strip())
+def toggle_send_button(value, n_submit):
+    ctx = callback_context
+    prop_id = ctx.triggered[0]["prop_id"]
+
+    # If Enter pressed → disable
+    if "n_submit" in prop_id:
+        return True
+
+    # If typing → enable/disable based on content
+    if "value" in prop_id:
+        return not (value and value.strip())
+
+    return True
 
 @app.callback(
     Output("response-text", "children"),
@@ -445,10 +460,11 @@ def toggle_send_button(value):
     Output("llm-result", "children"),   # ← ADD THIS
     Input("chat-submit", "n_clicks"),
     Input("chat-reset", "n_clicks"),
+    Input("chat-input", "n_submit"),   # ← ADD THIS
     State("chat-input", "value"),
     prevent_initial_call=True
 )
-def handle_chat(submit_clicks, reset_clicks, question):
+def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
 
     ctx = callback_context
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
@@ -467,13 +483,17 @@ def handle_chat(submit_clicks, reset_clicks, question):
     if trigger == "chat-reset":
         return "", "", "", "Send", True, hidden, None, ""
 
-    if trigger == "chat-submit":
+    if trigger in ["chat-submit", "chat-input"]:
 
         if not question:
             return "", "", "", "Send", True, hidden, None, ""
 
         result = get_filter_from_llm(question)
-        message = result.get("reason", "")
+        msg_text = result.get("reason", "")
+        message = html.Div([
+                html.Span("Response", className="field-chat-box-metric-label"),
+                html.Span(msg_text, className="field-chat-box-metric-text")
+            ], className="field-chat-box-metric-row")
 
         # pretty debug view
         llm_debug = json.dumps(result, indent=2)
@@ -482,6 +502,20 @@ def handle_chat(submit_clicks, reset_clicks, question):
             return message, "", "", "Send", True, visible, None, llm_debug
 
         df_filtered = apply_filters(df, result.get("filter_tree"))
+
+        n_rows = len(df_filtered)
+
+        message = html.Div([
+            html.Div([
+                html.Span("Filtered Data Points", className="field-chat-box-metric-label"),
+                html.Span(f"{n_rows}", className="field-chat-box-metric-value")
+            ], className="field-chat-box-metric-row"),
+
+            html.Div([
+                html.Span("Response", className="field-chat-box-metric-label"),
+                html.Span(msg_text, className="field-chat-box-metric-text")
+            ], className="field-chat-box-metric-row")
+        ])
 
         table = dash_table.DataTable(
             data=df_filtered.to_dict("records"),
@@ -522,6 +556,8 @@ def handle_chat(submit_clicks, reset_clicks, question):
             df_filtered.index.tolist(),
             llm_debug
         )
+    
+    return "", "", "", "Send", True, hidden, None, ""
 
 
 @app.callback(

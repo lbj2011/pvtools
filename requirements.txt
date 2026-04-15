@@ -52,3 +52,4 @@ pyarrow>=15.0.2
 python-dotenv>=1.2.2
 scikit-learn>=1.7.2
 statsmodels>=0.14.6
+dash_model_viewer >=0.0.1

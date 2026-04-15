@@ -18,6 +18,7 @@ from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.seasonal import seasonal_decompose
+import time
 
 
 load_dotenv(override=True)
@@ -157,7 +158,7 @@ def parse_contents(contents=None, filename=None, df=None):
     try:
         # Call LLM
         response = client.chat.completions.create(
-            model="openai/gpt-4.1",
+            model="openai/gpt-5.4-nano",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
         )
@@ -809,52 +810,121 @@ def compute_csd(series, period=12):
     )
 
     return rd, fig
+
 # ================================
 # get full code
 # ================================
 def get_full_code(filename, mapped_variables_dict,selected_filters, selected_metric):
 
     with open("page_supporting_files/pvcopilot_functions_code.txt", "r", encoding="utf-8") as f:
-            pvcopilot_functions_code = f.read().replace('\n', ' ').replace('"', "'")
+            pvcopilot_functions_code = f.read().replace('"', "'")
 
     with open("page_supporting_files/pvcopilot_packages_code.txt", "r", encoding="utf-8") as f:
             pvcopilot_packages_code = f.read().replace('\n', ' ').replace('"', "'")
 
     prompt = f"""
-        Your task is to generate a code:
-        * include all necessary packages on the beginning of code based on {pvcopilot_packages_code}
-        * copy the whole content (definiaiton of functions) of {pvcopilot_functions_code} here
-        * load data as df where filename is {filename}, add comment user need to provide file path if necessary
-        * define a dict 'mapped_variables_dict' from {mapped_variables_dict}
-        * use functinon df_filtered = normalize(df, mapped_variables_dict)
-        * if "low-irra-power" in selected_filters {selected_filters}:
-            use function normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
-        * if "outlier" in selected_filters {selected_filters}:
-            use function normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm")
-        * merge all normal_idx, print the total number of points, normal ones, and outliers
-        * define df_filtered_final with only normal_idx from df_filtered
-        * use function daily_data = aggregate_daily(df_filtered_final, irra_key)
-        * use function rd, yoy_dist = compute_yoy(daily_data)
-        * print rd
+        Your task is to generate Python code and return it as a JSON object with TWO keys:
+        - "packages_code": only import / package-related code
+        - "main_code": the rest of the logic
 
-        Note that: 
-        * all these functions are already defined, just use them.
-        * add comments to each part for user to understand.
+        Requirements:
 
-        No verbose.
+        1) packages_code:
+        - include packages: 
+        - import pandas as pd
+        - import numpy as np
 
+        2) main_code:
+        - add comments like 'Main code'
+        - load data as df where filename is {filename}
+        (add a comment that user may need to provide full file path)
+        - define a dict 'mapped_variables_dict' from:
+        {mapped_variables_dict}
+        - use function:
+            df_filtered = normalize(df, mapped_variables_dict)
+
+        - define selected_filters (list) from {selected_filters}
+        
+        - if "low-irra-power" in selected_filters:
+            use:
+            normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+
+        - if "outlier" in selected_filters:
+            use:
+            normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm")
+
+        - merge all normal_idx
+        - print:
+            * total number of points
+            * number of normal points
+            * number of outliers
+
+        - define:
+            df_filtered_final = df_filtered.loc[normal_idx]
+
+        - use:
+            daily_data = aggregate_daily(df_filtered_final, irra_key)
+
+        - define selected_metric (list) from {selected_metric}
+
+        - depending on selected_metric:
+            if 'YOY':
+                rd, _ = compute_yoy(daily_data)
+            if 'LR':
+                rd, _ = compute_lr(daily_data)
+            if 'ARIMA':
+                rd, _ = compute_arima(daily_data)
+            if 'CSD':
+                rd, _ = compute_csd(daily_data)
+            if 'HW':
+                rd, _ = compute_hw(daily_data)
+
+        - print rd
+
+        Notes:
+        - all functions are already defined, just call them
+        - add concise comments for each step
+        - do NOT include imports in main_code
+        - do NOT include explanations outside the code
+
+        Return format EXACTLY:
+        {{
+        "packages_code": "...",
+        "main_code": "..."
+        }}
         """
 
     # Call LLM
+    start_time = time.time()
+
     response = client.chat.completions.create(
-        model="openai/gpt-4.1",
+        model="openai/gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=1000,
     )
 
+    end_time = time.time()
+
+
+    print(f"Time taken: {end_time - start_time:.2f} seconds")
+
     res_text = response.choices[0].message.content.strip()
-    clean_text = re.sub(r"```python\n(.*?)```", r"\1", res_text, flags=re.DOTALL).strip()
+
+    # Remove possible markdown wrappers
+    clean_text = re.sub(r"```json\n(.*?)```", r"\1", res_text, flags=re.DOTALL).strip()
+    clean_text = re.sub(r"```python\n(.*?)```", r"\1", clean_text, flags=re.DOTALL).strip()
+
+    # Parse JSON
+    try:
+        parsed = json.loads(clean_text)
+        packages_code = parsed.get("packages_code", "")
+        main_code = parsed.get("main_code", "")
+        full_code = packages_code + "\n\n" + pvcopilot_functions_code + "\n\n" + main_code
+
+    except json.JSONDecodeError:
+        raise ValueError("Response is not valid JSON")
 
     with open("llm_response.txt", "w", encoding="utf-8") as f:
         f.write(clean_text)
 
-    return clean_text
+    return full_code
