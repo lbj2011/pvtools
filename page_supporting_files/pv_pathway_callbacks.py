@@ -180,7 +180,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                     html.H5(
                         row.get("title", row["eid"]),
                         style={
-                            "marginBottom": "8px",
+                            "marginBottom": "4px",
                             "display": "-webkit-box",
                             'font-weight': '600',
                             "WebkitLineClamp": 3,
@@ -201,21 +201,48 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                             href=f"https://doi.org/{row.get('doi', '')}",
                             target="_blank"
                         ),
-                    ], style={"marginBottom": "10px", "fontSize": "13px", "color": "#222324"}),
+                    ], style={"marginBottom": "4px", "fontSize": "13px", "color": "#222324"}),
                     html.Hr(),
                     html.Div([
                         html.B("Module components:"),
                         html.P(str(row.get("components", "N/A")),
-                               style={"marginTop": "4px", "fontSize": "13px"}),
+                               style={"marginTop": "0px", "fontSize": "13px"}),
                         html.B("Major degradation:"),
                         html.P(str(row.get("major_mechanisms_faults", "N/A")),
-                               style={"marginTop": "4px", "fontSize": "13px"}),
-                    ], style={"marginBottom": "10px"}),
+                               style={"marginTop": "0px", "fontSize": "13px"}),
+                    ], style={"marginBottom": "0px"}),
                     html.Div([
                         html.B("Summary:"),
                         html.P(str(row.get("summary_x", "N/A")),
-                               style={"marginTop": "4px", "fontSize": "13px", "lineHeight": "1.5"})
+                               style={"marginTop": "0px", "fontSize": "13px", "lineHeight": "1.5"})
                     ]),
+
+                    # ── View Pathway button ───────────────────────────
+                    html.Button(
+                        [
+                            html.Span("View Degradation Pathway"),
+                            html.Span(" →", style={"marginLeft": "6px", "fontSize": "15px"}),
+                        ],
+                        id="open-pathway-modal-btn",
+                        n_clicks=0,
+                        className="view-pathway-btn",
+                        style={
+                            "marginTop": "0px",
+                            "display": "inline-flex",
+                            "alignItems": "center",
+                            "padding": "9px 16px",
+                            "background": "#1f2937",
+                            "color": "white",
+                            "border": "none",
+                            "borderRadius": "8px",
+                            "fontWeight": "600",
+                            "fontSize": "13px",
+                            "cursor": "pointer",
+                            "letterSpacing": "0.3px",
+                            "transition": "background 0.15s ease, transform 0.1s ease",
+                        }
+                    ),
+
                     DashModelViewer(
                         id="pv-model",
                         src="/assets/Untitled4.glb",
@@ -226,7 +253,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                         ar=False,
                         style={
                             "width": "100%", "height": "150px",
-                            "marginTop": "-10px",
+                            "marginTop": "2px",
                             "marginLeft": "-15px",
                         }
                     ),
@@ -269,15 +296,15 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 f"Pathway {i+1}",
                 id={'type': 'pathway-btn', 'index': i},
                 style={
-                    "margin": "4px",
-                    "backgroundColor": "#a8aeb4",
-                    "color": "white",
-                    "border": "none",
-                    "padding": "10px 16px",
-                    "fontSize": "16px",
+                    "backgroundColor": "#f3f4f6",
+                    "color": "#1f2937",
+                    "border": "1px solid #d1d5db",
+                    "padding": "5px 12px",
+                    "fontSize": "12px",
                     "fontWeight": "600",
                     "borderRadius": "6px",
-                    "cursor": "pointer"
+                    "cursor": "pointer",
+                    "letterSpacing": "0.5px",
                 }
             )
             for i in range(num_pathways)
@@ -286,7 +313,36 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         return elements, pathway_buttons, file_idx, map_detail_children, map_detail_style
 
     # =========================================================================
-    # COMMON PATHWAY GRAPH — fault button selector
+    # PATHWAY MODAL — open/close + update title and stats
+    # =========================================================================
+    @app.callback(
+        Output("pathway-modal", "is_open"),
+        Output("modal-paper-title", "children"),
+
+        Input("open-pathway-modal-btn", "n_clicks"),
+        Input("pathway-modal", "is_open"),
+
+        State("selected-file", "data"),
+        State("graph", "elements"),
+        prevent_initial_call=True,
+    )
+    def toggle_pathway_modal(open_clicks, is_open, file_idx, elements):
+        ctx = dash.callback_context
+        triggered = ctx.triggered_id
+
+        if triggered == "open-pathway-modal-btn" and open_clicks:
+            title = ""
+            if file_idx is not None and file_idx in INDEX_MAP:
+                file_name = INDEX_MAP[file_idx]
+                row = DF[DF["eid"] == file_name]
+                if not row.empty:
+                    title = row.iloc[0].get("title", file_name)
+
+            return True, title
+
+        return False, dash.no_update
+
+
     # =========================================================================
     @app.callback(
         Output('common-pathway-graph', 'elements'),
@@ -473,7 +529,9 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
             mapbox=dict(
                 zoom=2,
                 center={"lat": 20, "lon": 0},
-                bounds=dict(west=-360, east=360, south=-80, north=80),
+                bounds=dict(west=-360, east=360, south=-60, north=70),
+                # minZoom=1.5,
+                # maxZoom=10,
             ),
             uirevision="constant"
         )
@@ -525,14 +583,17 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 )
 
             return html.Div([
-                html.H4(data["label"], style={"marginBottom": "8px", "fontWeight": "600",
-                                              "letterSpacing": "0.3px"}),
+                html.P(data["label"], style={
+                    "marginBottom": "6px", "fontWeight": "700",
+                    "fontSize": "17px", "lineHeight": "1.4",
+                    "color": "#1f2937", "letterSpacing": "0.2px",
+                }),
                 html.Div([
                     html.Div(style={
-                        "width": "12px", "height": "12px",
+                        "width": "11px", "height": "11px",
                         "backgroundColor": CATEGORY_COLORS.get(data["category"], "#999"),
-                        "borderRadius": "3px", "marginRight": "8px",
-                        "boxShadow": "0 0 6px rgba(0,0,0,0.3)"
+                        "borderRadius": "3px", "marginRight": "7px",
+                        "flexShrink": "0",
                     }),
                     html.Span(
                         data["category"].replace("_", " ").title(),
@@ -542,11 +603,11 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                             "fontWeight": "600", "letterSpacing": "0.3px"
                         }
                     )
-                ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
-                html.Hr(style={"borderColor": "#eee"}),
+                ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
+                html.Hr(style={"borderColor": "#eee", "margin": "8px 0"}),
                 html.P(data.get("title", ""), style={
-                    "color": "#777", "fontSize": "13px",
-                    "lineHeight": "1.6", "marginTop": "10px"
+                    "color": "#666", "fontSize": "14px",
+                    "lineHeight": "1.7", "marginTop": "8px"
                 })
             ])
 

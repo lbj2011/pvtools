@@ -192,3 +192,104 @@
         transform: translateY(0);
     }
 }
+/* =========================
+   Pathway Modal backdrop blur
+   ========================= */
+
+.modal-backdrop {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    background-color: rgba(0, 0, 0, 0.4) !important;
+    opacity: 1 !important;
+}
+
+/* Modal detail panel: fixed height on wide, auto on narrow */
+#pathway-modal .pv-pathway-detail-panel {
+    height: 420px !important;
+    min-height: unset !important;
+}
+
+@media (max-width: 767px) {
+    #pathway-modal .pv-pathway-detail-panel {
+        height: auto !important;
+        max-height: 300px;
+    }
+}
+
+/* =========================
+   Pathway Modal — responsive graph/detail layout
+   ========================= */
+
+/* Row container: side-by-side, both children stretch to same height */
+.modal-graph-detail-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: stretch;   /* children fill row height */
+}
+
+/* Graph box: fixed height drives the row height */
+.modal-graph-box {
+    position: relative;
+    flex: 2 1 400px;
+    height: 400px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fafafa;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Detail panel: stretch to match graph height via align-items:stretch */
+.modal-detail-panel {
+    flex: 1 1 260px;
+    height: auto;           /* let stretch do the work on wide screens */
+    min-height: 0 !important;
+    min-width: 0;
+    overflow-y: auto;
+}
+
+/* Mid screens: shrink graph, detail follows via stretch */
+@media (max-width: 900px) {
+    .modal-graph-box {
+        height: 300px;
+    }
+}
+
+/* Narrow screens: stack vertically — detail becomes small fixed box */
+@media (max-width: 620px) {
+    .modal-graph-box {
+        flex: 1 1 100%;
+        height: 260px;
+    }
+    .modal-detail-panel {
+        flex: 1 1 100%;
+        height: 200px !important;
+        overflow-y: auto;
+    }
+}
+
+/* Override the generic pv-pathway-detail-panel class inside modal */
+#pathway-modal .pv-pathway-detail-panel {
+    min-height: unset !important;
+    height: auto !important;
+}
+@media (max-width: 620px) {
+    #pathway-modal .pv-pathway-detail-panel {
+        height: 200px !important;
+    }
+}
+
+/* =========================
+   View Degradation Pathway button
+   ========================= */
+
+.view-pathway-btn:hover {
+    background: #374151 !important;
+    transform: translateY(-1px);
+}
+
+.view-pathway-btn:active {
+    background: #111827 !important;
+    transform: translateY(0);
+}

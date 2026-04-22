@@ -177,7 +177,7 @@ def create_map_section():
     return html.Div([
         dcc.Graph(
             id="map",
-            style={"height": "650px", "width": "100%"},
+            style={"height": "700px", "width": "100%"},
             config={"displayModeBar": False, "scrollZoom": True}
         ),
         dbc.Container(
@@ -347,8 +347,97 @@ def create_common_pathway_wiki():
     )
 
 
+def create_pathway_modal():
+    """Modal containing the per-paper pathway graph with detail panel on the right."""
+
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                html.Div([
+                    html.P("DEGRADATION PATHWAY", style={
+                        "fontSize": "12px", "fontWeight": "700",
+                        "letterSpacing": "1.5px", "color": "#9ca3af",
+                        "marginBottom": "3px",
+                    }),
+                    html.Div(id="modal-paper-title", style={
+                        "fontSize": "16px", "fontWeight": "600", "color": "#1f2937",
+                    }),
+                ], style={"width": "100%"}),
+                close_button=True,
+            ),
+
+            dbc.ModalBody([
+                # ── legend row ────────────────────────────────────────
+                html.Div(
+                    [html.Div([
+                        html.Div(style={
+                            "width": "13px", "height": "13px",
+                            "backgroundColor": allc[i],
+                            "borderRadius": "3px", "marginRight": "6px",
+                            "display": "inline-block",
+                        }),
+                        html.Span(label, style={"fontSize": "14px", "color": "#6b7280"})
+                    ], style={"display": "flex", "alignItems": "center", "marginRight": "18px"})
+                    for i, label in enumerate(["Stressor", "Mechanism", "Failure", "Performance Impact"])],
+                    style={"display": "flex", "flexWrap": "wrap", "marginBottom": "10px"}
+                ),
+
+                html.Hr(style={"margin": "0 0 12px 0", "borderColor": "#f0f0f0"}),
+
+                # ── graph + detail: side by side on wide, stacked on narrow ──
+                html.Div([
+
+                    # graph box — height controlled by CSS class
+                    html.Div([
+                        cyto.Cytoscape(
+                            id='graph',
+                            layout={'name': 'preset'},
+                            style={'width': '100%', 'height': '100%'},
+                            elements=[],
+                            stylesheet=create_stylesheet(
+                                attr_key="category",
+                                perf_value="performance_impact"
+                            ),
+                            minZoom=0.3,
+                            maxZoom=2.0,
+                        ),
+                        html.Div(
+                            id="pathway-buttons",
+                            style={
+                                "position": "absolute", "left": "8px", "top": "8px",
+                                "display": "flex", "gap": "6px", "zIndex": 10,
+                            }
+                        ),
+                    ], className="modal-graph-box"),
+
+                    # detail panel
+                    html.Div(
+                        id="detail-panel",
+                        className="pv-pathway-detail-panel modal-detail-panel",
+                        style={
+                            "overflowY": "auto",
+                            "background": "#fff",
+                            "padding": "18px",
+                            "borderRadius": "10px",
+                            "border": "1px solid #eee",
+                            "boxShadow": "0 2px 8px rgba(0,0,0,0.05)",
+                        }
+                    ),
+
+                ], className="modal-graph-detail-row"),
+            ]),
+        ],
+        id="pathway-modal",
+        is_open=False,
+        centered=True,
+        size="xl",
+        className="pathway-modal-blur",
+        style={"fontFamily": "inherit"},
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# DETAIL PANEL  (per-paper pathway, right column)
+# DETAIL PANEL  (per-paper pathway, right column) — kept for import compatibility
 # ─────────────────────────────────────────────────────────────────────────────
 def create_detail_panel():
     return html.Div(
@@ -456,11 +545,16 @@ def create_filter_section():
 def create_layout(file_list):
     return html.Div([
 
+        # pathway modal (lives outside map so it can overlay everything)
+        create_pathway_modal(),
+
         dbc.Container([
             html.Div([
                 dcc.Store(id="selected-file", data=0),
                 dcc.Store(id="wiki-node-id", data=None),
-                html.Hr(),
+                # placeholder buttons registered before any map click
+                html.Button(id="open-pathway-modal-btn", n_clicks=0,
+                            style={"display": "none"}),
                 html.Div(
                     html.H1("PV Module Degradation Pathway Explorer (Demo)"),
                     style={'width': '100%', 'padding': '0 10px', 'textAlign': 'center'}
@@ -470,13 +564,6 @@ def create_layout(file_list):
         ]),
 
         create_map_section(),
-
-        dbc.Container([
-            html.Div([
-                html.H3('Material degradation pathways', style={"marginTop": "20px"}),
-                create_graph_container(),
-            ])
-        ]),
 
         dbc.Container([
             html.Div([
