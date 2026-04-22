@@ -1,0 +1,152 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-alox-rear-polarization",
+  "title": "AlOx Rear Passivation Layer Polarization (PERC)",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "PID at the Rear of Bifacial PERC",
+      "detail": "Bifacial PERC modules in glass/glass packaging experience two distinct PID modes:\n\n- **Front-side PID-shunting (PID-s):** Na⁺ migrates through front glass/encapsulant/SiNx into stacking faults (standard mechanism)\n- **Rear-side PID-polarization (PID-p):** Positive charge (Na⁺ or hole injection) accumulates in the negatively charged AlOx rear passivation layer, neutralizing the built-in negative field charge\n\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=1|Chen et al. (2019), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Rear-Side Bias Conditions",
+      "detail": "Rear-side PID-p occurs when the rear cell surface is held at **positive potential** relative to the aluminum rear frame (i.e., cells at the positive end of a string, with rear glass grounded through the frame). This is the mirror condition of front-side PID:\n\n- Under the standard −1000 V front test, the rear face simultaneously experiences a condition that can induce AlOx charge neutralization\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=2|Chen et al. (2019), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Charge Neutralization of AlOx",
+      "detail": "The negative fixed charge density in AlOx is typically $Q_f \\approx -10^{12}$ cm$^{-2}$ before PID. Accumulated positive charges (Na⁺) neutralize this, reducing $|Q_f|$ and decreasing the surface field:\n\n- Neutralization eliminates the minority carrier (hole) repulsion at the rear p-Si surface\n- Without the field, minority carriers recombine rapidly at defect sites on the rear surface\n- The fundamental distinction from front-side PID: no conductive shunt paths are formed; only the electrostatic passivation is lost",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Quantitative Degradation in Bifacial PERC",
+      "detail": "After 136 hours of combined front+rear PID stress at 1000 V, 85°C:\n\n- **Front-side losses:** FF loss 37–40%, Voc loss 17–20%, Isc loss 4–6%\n- **Rear-side losses:** FF loss 37–42%, Voc loss 28–36%, Isc loss 28–40%\n- **Rear shunt resistance:** dropped from 162 kΩ·cm² to 0.034–0.044 kΩ·cm²\n- **Total Pmax loss:** 50–78%\n\nRear-side losses are dominated by Isc and Voc reduction (from increased rear SRV), whereas front-side losses are dominated by FF reduction (from shunt formation).\n\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Role of Gradient-Designed SiNx/SiNxOy/SiOx Capping",
+      "detail": "A gradient-designed multi-layer front capping (SiNx/SiNxOy/SiOx) reduces Pmax degradation:\n\n- **Baseline (no gradient layer):** 24.2% Pmax loss after 672 hours\n- **Gradient design:** 13.08% Pmax loss after 672 hours (~2× improvement in degradation rate)\n- Shunt resistance decrease: 14.06% (vs. 33.55% baseline)\n\n- [[papers/Elsevier-318-1928-2-s2.0-85111494015-2021-J-Suppression of potential induced degradation in monofacial PERC solar cells with gradient designed c.pdf#page=3|Duan et al. (2021), p.3]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-high-system-voltage",
+      "display_name": "High System Voltage (Negative Bias)",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-temperature",
+      "display_name": "High Temperature",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-rear-passivation-loss",
+      "display_name": "Rear Passivation Quality Loss (PERC)",
+      "node_type": "failure",
+      "child_reasoning": "** — When Na⁺ (or other positive charges) accumulate within the AlOx layer and neutralize its built-in negative fixed charge ($Q_f \\approx -10^{12}$ cm$^{-2}$), the field-effect passivation that repels minority carriers (holes in p-type Si base) from the rear surface is destroyed. Without this elect",
+      "source_locations": [
+        {
+          "key": "alox_child",
+          "pdf_path": "papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf",
+          "page": 2,
+          "section": "Chen et al. (2019) measured electrical parameters separately for front and rear sides of bifacial p-PERC modules (glass/glass, 136 h, 1000 V, 85°C). Rear shunt resistance dropped from 162 kΩ·cm² to 0.",
+          "quote": "This degradation mechanism is witnessed as a substantial decrease of the ISC and the VOC while the decrease in FF is negligible",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "alox_quote",
+          "pdf_path": "papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf",
+          "page": 1,
+          "section": "Chen et al. (2019) define the AlOx polarization mechanism in the introduction: \"In bifacial p-PERC solar cells the negative charge in the AlOx rear passivation layer is cancelled out by positive charg",
+          "quote": "In bifacial p-PERC solar cells the negative charge in the AlOx rear passivation layer is cancelled out by positive charges, such as Na⁺ ions, deteriorating the proper functioning of the passivation layer, and therefore increasing surface recombination.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

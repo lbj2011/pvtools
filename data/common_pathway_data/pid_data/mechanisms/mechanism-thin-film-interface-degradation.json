@@ -1,0 +1,139 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-thin-film-interface-degradation",
+  "title": "Thin-Film Si Interface Electrochemical Degradation",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Structural Difference from c-Si",
+      "detail": "Superstrate thin-film Si modules have the glass cover **directly bonded to the TCO cell layer** — there is no encapsulant between the glass and the cell. The only encapsulant (typically ionomer) is on the back side. This means:\n\n- Na⁺ from glass can reach the TCO directly with minimal resistance\n- High-resistivity ionomer on the back cannot block Na⁺ migration (it is on the wrong side)\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=1|Shioda et al. (2017), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Degradation Progression (Distinct Temporal Phases)",
+      "detail": "Thin-film Si PID follows a two-phase progression, unlike c-Si:\n\n- **Phase 1 (0–150 h):** Isc and FF decrease and saturate; current initially flows primarily through surface pathways and causes interface weakening\n- **Phase 2 (150–310 h):** Voc continues declining without saturation; progressive electrochemical attack deepens\n- **Total power loss:** ~40% Pmax at 96 hours; complete degradation by 310 hours under −1000 V, 85°C, < 2% RH\n- **No shunt resistance reduction** — confirming delamination (not shunting) as the failure mode\n\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=3|Shioda et al. (2017), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Delamination Morphologies",
+      "detail": "Two types of delamination form:\n\n1. **Linear-shape delamination:** Grows uniformly from scribe lines (P1, P2, P3 scribes) across the module width; found after first PID stress cycle; irreversible once formed\n2. **Spot-shape delamination:** ~200 µm diameter spots at the TCO/thin-film Si interface; appear predominantly after the second −1000 V stress cycle (following a +1000 V recovery cycle)\n\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=4|Shioda et al. (2017), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Catastrophic Acceleration After Recovery Cycle",
+      "detail": "A striking feature of thin-film Si PID is that degradation **accelerates dramatically** after each recovery/stress cycle:\n\n- **First −1000 V stress (300 h):** Gradual degradation to ~60% of initial Pmax\n- **+1000 V recovery:** Complete recovery of all parameters\n- **Second −1000 V stress:** Extreme rapid degradation — equivalent damage in only **36 hours** (vs. 250+ hours first cycle)\n- Each cycle nucleates more delamination sites, making recovery increasingly difficult until linear delamination forms and recovery fails entirely\n\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=5|Shioda et al. (2017), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Field Validation",
+      "detail": "Modules after 5 years of outdoor exposure showed:\n\n- Linear-shape delamination near the bottom Al frame (primary water vapor entry point)\n- Delamination at junction box cutouts (secondary moisture penetration sites)\n- Spot-shaped features matching laboratory observations\n\nThis confirms delamination as the dominant real-world failure mode in thin-film Si modules.\n\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=6|Shioda et al. (2017), p.6]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-high-system-voltage",
+      "display_name": "High System Voltage (Negative Bias)",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-humidity-moisture",
+      "display_name": "High Humidity and Moisture Ingress",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Interface Delamination in Thin-Film Si Modules",
+      "node_type": "failure",
+      "child_reasoning": "** — Na⁺ ions from the glass cover that reach the glass/FTO or FTO/a-Si:H interfaces initiate an electrochemical reaction that weakens interfacial adhesion. Shioda et al. (2017) identify the root cause as \"Na-related atoms and/or ions that drifted from the glass possibly chemically react at the inte",
+      "source_locations": [
+        {
+          "key": "tf_child",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 4,
+          "section": "Shioda et al. (2017) directly compared thin-film Si PID to c-Si PID, noting the decisive diagnostic difference: \"The root cause of PID of thin-film Si PV modules is not shunt induced by Na drift but t",
+          "quote": "The root cause of PID of thin-film Si PV modules is not shunt induced by Na drift but the above-mentioned delamination.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

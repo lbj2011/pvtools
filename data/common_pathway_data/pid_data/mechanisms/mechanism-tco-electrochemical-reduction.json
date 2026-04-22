@@ -1,0 +1,115 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-tco-electrochemical-reduction",
+  "title": "TCO Layer Electrochemical Reduction (HJT)",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Two-Level Degradation in HJT",
+      "detail": "HJT modules experience moisture-dependent, two-level degradation:\n\n- **Level 1 (moisture alone, no voltage bias):** Damp heat (500 hours) causes ~20% Isc loss through water-induced glass corrosion, which produces NaOH molecules that attack the TCO layer even without applied bias\n- **Level 2 (negative bias + moisture):** Applied negative voltage accelerates Na⁺ drift through the EVA encapsulant to the TCO layer, creating recombination centers at the a-Si:H/c-Si interface\n\n- [[papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf#page=2|Zu et al. (2018), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Front vs. Rear Degradation (Bifacial HJT)",
+      "detail": "In bifacial HJT modules, the two sides degrade through distinct pathways:\n\n- **Front side (under negative bias):** Isc loss dominates, reaching **53.9% Pmax loss** after 800 h, driven by optical degradation from metallic indium formation in the ITO layer\n- **Rear side (different bias polarity):** FF loss dominates, reaching **40.4% Pmax loss** after 800 h\n- Positive bias on either face prevents all degradation\n\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=3|Luo et al. (2024), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "TCO Layer Structural Damage",
+      "detail": "Scanning electron microscopy (SEM) and TEM analysis reveal:\n\n- **Nano-cracks** form at the ITO surface under PID conditions\n- Na⁺ and OH⁻ groups migrate through these nano-cracks into the a-Si:H layers\n- Na⁺ creates recombination centers at the a-Si:H/c-Si interface, reducing passivation quality\n- Metallic indium (In⁰) is reduced from ITO at sites of Na⁺ accumulation, causing optical absorption losses\n\n- [[papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf#page=3|Zu et al. (2018), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Ionomer Encapsulant Mitigation",
+      "detail": "Ionomer encapsulant reduces PID in HJT modules dramatically:\n\n- **EVA encapsulant:** 31% Pmax loss after 500 h under PID conditions\n- **Ionomer encapsulant:** < 5% Pmax loss after 500 h under the same conditions\n\nThis confirms that restricting Na⁺ transport through the encapsulant is the dominant mitigation lever for HJT modules.\n\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=5|Luo et al. (2024), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-tco-degradation",
+      "display_name": "TCO Layer Optical and Electrical Degradation (HJT)",
+      "node_type": "failure",
+      "child_reasoning": "** — Electrochemical reduction of the ITO layer produces two distinct failure modes that jointly reduce module performance. First, metallic indium (In⁰) nanoparticles formed at Na⁺ accumulation sites absorb incident light, reducing optical transmittance and directly lowering Isc (front-side: 53.9% P",
+      "source_locations": [
+        {
+          "key": "tco_child",
+          "pdf_path": "papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf",
+          "page": 4,
+          "section": "Luo et al. (2024) measured front-side (Isc-dominated) and rear-side (FF-dominated) degradation separately in bifacial HJT modules stressed at 800 h. They attribute \"the front-side ITO reduction by Na⁺",
+          "quote": "the front-side ITO reduction by Na⁺...optical absorption in the ITO layer",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

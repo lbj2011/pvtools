@@ -1,0 +1,155 @@
+{
+  "node_type": "failure",
+  "id": "failure-micro-crack-shunting",
+  "title": "Na⁺-Decorated Micro-Crack Shunting",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Micro-Crack Geometry",
+      "detail": "- Micro-crack width: **15–40 µm** (below the standard 100 µm definition of a crack)\n- Micro-cracks penetrate from the Si front surface through the p-n junction to the back electrode — a complete electrical short path\n- Formed during cell processing, handling, or from thermal cycling during field operation\n- [[papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf#page=1|Li et al. (2018), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Na⁺ Accumulation in Micro-Cracks",
+      "detail": "Under PID stress, Na⁺ ions transported by leakage current accumulate along the entire cross-section of micro-cracks:\n\n- EDX analysis confirms dramatically increased Na concentration along micro-crack surfaces after PID stress\n- Na ions decorate the full crack surface from front cell surface to back electrode\n- Na concentration increases proportionally with PID stress duration\n- [[papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf#page=2|Li et al. (2018), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Ohmic Shunt Path Formation",
+      "detail": "Na-decorated micro-crack surfaces form ohmic recombination centers:\n\n- Na-decorated micro-crack regions become high-density recombination centers\n- Local defect concentration sufficient to form ohmic shunting paths across the p-n junction\n- Shunt resistance (Rsh) degradation is **directly proportional to micro-crack area and PID duration**\n- [[papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf#page=3|Li et al. (2018), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Leakage Current Characteristics",
+      "detail": "The leakage current enabling micro-crack decoration has a measurable activation energy:\n\n- Leakage current activation energy through EVA: **62 kJ/mol** (measured between 45°C and 90°C)\n- Leakage current increases from **~0.5 mA at 45°C** to **~9 mA at 90°C** (18× increase over 45°C range)\n- Module wet surface conductivity dominates, with water acting as a conductive bridge from frame to cell\n- [[papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf#page=4|Li et al. (2018), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Interaction with Conventional Stacking Fault Shunting",
+      "detail": "Micro-crack shunting co-exists with and accelerates stacking-fault shunting:\n\n- Micro-cracks concentrate the local electric field, promoting faster Na⁺ migration into nearby stacking faults\n- Modules with more micro-cracking show faster PID progression and more severe Rsh collapse\n- [[papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf#page=5|Li et al. (2018), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Na-decorated micro-cracks create high-density recombination regions (ohmic shunt paths) across the full p-n junction depth. These shunts bypass the load and reduce shunt resistance (Rsh), causing FF to collapse in proportion to the micro-crack area and PID duration.[^mcs_ff] Because micro-crack",
+      "source_locations": [
+        {
+          "key": "mcs_ff",
+          "pdf_path": "papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf",
+          "page": 3,
+          "section": "Li et al. (2018) measured Rsh of cells with controlled micro-crack populations under PID stress, finding \"shunt resistance (Rsh) degradation is directly proportional to micro-crack area and PID durati",
+          "quote": "shunt resistance (Rsh) degradation is directly proportional to micro-crack area and PID duration.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Pmax loss from micro-crack shunting reflects the FF reduction (the primary loss mode), with Isc remaining relatively stable unless delamination of the cell fragment occurs. At elevated temperatures and voltages, micro-crack shunting accelerates rapidly: leakage current increases from ~0.5 mA at",
+      "source_locations": [
+        {
+          "key": "mcs_pmax",
+          "pdf_path": "papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf",
+          "page": 4,
+          "section": "Li et al. (2018) characterized the temperature-dependent leakage current activation energy through EVA at 62 kJ/mol (measured between 45°C and 90°C), with leakage increasing from \"~0.5 mA at 45°C to ~",
+          "quote": "~0.5 mA at 45°C to ~9 mA at 90°C (18× increase over 45°C range).",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

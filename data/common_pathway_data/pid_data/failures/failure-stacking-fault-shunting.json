@@ -1,0 +1,195 @@
+{
+  "node_type": "failure",
+  "id": "failure-stacking-fault-shunting",
+  "title": "Na⁺-Decorated Stacking Fault Shunting",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Stacking Fault Geometry and Penetration",
+      "detail": "Stacking faults (SFs) in silicon are extrinsic planar defects on {111} crystal planes:\n\n- Penetrate **> 1 µm into silicon**, completely crossing the p-n junction depth (~200–300 nm from surface)\n- Burgers vector: **a/3[111]** (extrinsic stacking fault, ESF)\n- Thin Na-decorated layer: only **a few tenths of a nanometer** thick, but sufficient to create an ohmic channel\n- HAADF STEM imaging confirms a dark region (Na accumulation) within the defect plane; this dark region disappears after thermal recovery, confirming reversibility\n\n- [[papers/Wiley-311-3837-2-s2.0-84939654596-2015-J-Nanoscopic studies of 2D-extended defects in silicon that cause shunting of Si-solar cells.pdf#page=2|Naumann et al. (2015), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Na Area Density Required for Shunting",
+      "detail": "Na⁺ decoration creates a highly conductive metallic-like channel:\n\n- Na area density within the stacking fault plane: **$\\sim 10^{15}$ cm$^{-2}$**\n- This density creates a shunt conductivity: $\\sigma_{sf}(t) \\propto n(0,t)$, where $n$ is the Na concentration at the stacking fault center\n- Shunt resistance relationship: $1/R_{sh} = \\sigma_0 + \\sigma_{sf}(t)$\n\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=3|Schulze et al. (2020), p.3]]\n- [[papers/Wiley-311-3837-2-s2.0-84939654596-2015-J-Nanoscopic studies of 2D-extended defects in silicon that cause shunting of Si-solar cells.pdf#page=3|Naumann et al. (2015), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Shunt Resistance (Rsh) Collapse",
+      "detail": "The collapse of shunt resistance is the primary measurable indicator of stacking fault shunting:\n\n- **Before PID:** Rsh ~ 1000 Ω (module level)\n- **After 48 h severe PID (−1000 V, 85°C/85% RH):** Rsh ~ 2 Ω — a **500× reduction** to 0.2% of original\n- After 491 days natural recovery: Rsh = 18.1 Ω (still only 1.8% of original; incomplete recovery)\n- [[papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf#page=3|Kwembur et al. (2022), p.3]]\n\nAt the cell level (multicrystalline Si, 85°C, 1000 V, 1.5 h):\n- Rsh drops from 10+ kΩ to effectively 0 (full shunting)\n- EL images show complete blackout of entire cell area by 2.5 h\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=4|Luo et al. (2016), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Spatial Distribution of Shunts: EL Imaging",
+      "detail": "Electroluminescence (EL) imaging is the primary diagnostic for stacking fault shunts:\n\n- Dark areas expand in EL images starting from corners/edges (high field regions) and spreading inward\n- Dark areas correlate with shunt locations and reduced photocurrent generation\n- In cells where Na was applied to a half-area: dark areas expand from the application point and cover the entire cell over 6–7 h\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=3|Luo et al. (2016), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Reversibility: Na Out-Diffusion",
+      "detail": "Na-decorated stacking faults are partially or fully reversible through Na out-diffusion:\n\n- **Natural recovery (dark, open-circuit, room temperature):** Pmax recovers to 95.6% after 487 days (moderate PID) or 62.8% after 491 days (severe PID)\n- **Thermal annealing / positive voltage application:** Complete recovery of Rsh requires ~2500 h at 90°C; full cell performance recovers faster (before Rsh fully recovers)\n- **After recovery:** Remaining extrinsic stacking fault (without Na) shows **no conductivity** — confirming the stacking fault itself is not the shunt; Na decoration is essential\n\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=5|Schulze et al. (2020), p.5]]\n- [[papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf#page=4|Kwembur et al. (2022), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Ohmic vs. Non-Ohmic Shunts",
+      "detail": "Not all PID-induced shunts are equivalent in recovery potential:\n\n- **Non-ohmic shunts:** Higher recovery potential (surface recombination effects, reversible)\n- **Ohmic shunts:** Limited recovery potential (structural Na⁺ incorporation, often irreversible); ~10–40% of severely PID-affected cells show permanent ohmic shunts\n- [[papers/Wiley-58-403-2-s2.0-105002608539-2025-J-Identification of Recoverable and Non-Recoverable Potential-Induced Degradation-Shunted Cells in Cry.pdf#page=4|Kumar & Gupta (2025), p.4]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Na-decorated stacking faults create ohmic shunt paths across the p-n junction, causing shunt resistance (Rsh) to collapse from ~1000 Ω to as low as 2 Ω (500× reduction). As Rsh decreases, increasing current bypasses the load through the shunt path instead of delivering useful power, directly re",
+      "source_locations": [
+        {
+          "key": "sf_ff",
+          "pdf_path": "papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf",
+          "page": 4,
+          "section": "Luo et al. (2016) measured FF continuously during PID stress on multicrystalline Si cells at 85°C/1000 V, reporting FF collapse from \"0.75 to 0.40 (47% reduction) after 1.5 h\" and to \"0.24 (68% reduct",
+          "quote": "0.75 to 0.40 (47% reduction) after 1.5 h",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-voc-reduction",
+      "display_name": "Open-Circuit Voltage (Voc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Ohmic shunt paths across the junction increase the dark current at any given forward bias, reducing the ratio of photocurrent to recombination current and thereby lowering Voc. In field-degraded modules, Voc loss scales with shunt severity: Module 3 (severe, Rsh ≈ 2 Ω) shows −30.31% Voc loss vs",
+      "source_locations": [
+        {
+          "key": "sf_voc",
+          "pdf_path": "papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf",
+          "page": 3,
+          "section": "Wang et al. (2018) measured Voc, FF, and Isc separately across three field-degraded modules from a 2-year grid-connected plant, finding that the Voc and FF losses dominate and that the spatial gradien",
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Pmax loss from stacking fault shunting reflects the combined FF and Voc losses, since Isc remains relatively stable (~1–2% loss even in severe c-Si PID). Moderate PID (40% initial loss) recovers to 95.6% of original Pmax after 487 days natural recovery; severe PID (88% loss) recovers to only 62",
+      "source_locations": [
+        {
+          "key": "sf_pmax",
+          "pdf_path": "papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf",
+          "page": 4,
+          "section": "Kwembur et al. (2022) tracked natural recovery of PID-affected poly-crystalline modules over 491 days at open circuit, room temperature, in the dark. The moderate PID module (40% initial loss) showed ",
+          "quote": "recovery to 95.6% of original Pmax after 487 days,",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

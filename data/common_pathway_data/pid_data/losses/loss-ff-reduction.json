@@ -1,0 +1,175 @@
+{
+  "node_type": "performance_loss",
+  "id": "loss-ff-reduction",
+  "title": "Fill Factor (FF) Reduction",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "FF Loss as the Primary Indicator in p-type c-Si",
+      "detail": "In field-degraded p-type modules, FF loss dominates over Isc loss:\n\n| Module | Pmax Loss | Voc Loss | Isc Loss | FF Loss |\n|--------|----------|---------|---------|--------|\n| Module 1 (mild) | −3.00% | −0.29% | −1.40% | **−1.97%** |\n| Module 2 (moderate) | −21.90% | −10.00% | −1.75% | **−19.82%** |\n| Module 3 (severe) | −48.67% | −30.31% | −1.75% | **−26.95%** |\n\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=3|Wang et al. (2018), p.3]]\n\nFF loss is directly linked to shunt resistance (Rsh) collapse. As Rsh decreases, current bypasses the p-n junction through shunt paths, reducing the FF:\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=4|Luo et al. (2016), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "FF Collapse at Cell Level",
+      "detail": "In multicrystalline Si cells under accelerated PID (85°C, 1000 V):\n\n- **Before PID:** FF ≈ 0.75\n- **After 1.5 h:** FF ≈ 0.40 (47% reduction)\n- **After 2.5 h:** FF ≈ 0.24 (68% reduction)\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=5|Luo et al. (2016), p.5]]\n\nAt higher voltages (−2000 V, 85°C):\n- Pmax drops to 20% of initial in 2.5 h\n- FF accounts for most of this loss (Isc remains relatively stable)",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Rsh Collapse: The Physical Mechanism",
+      "detail": "FF loss is directly tied to shunt resistance collapse:\n\n- **Before PID:** Rsh ~ 1000 Ω\n- **After 48 h severe stress:** Rsh ~ 2 Ω (500× reduction)\n- **After 491 days recovery:** Rsh = 18.1 Ω (still only 1.8% of original)\n- [[papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf#page=3|Kwembur et al. (2022), p.3]]\n\nThe relationship between Rsh and FF:\n- $1/R_{sh} = \\sigma_0 + \\sigma_{sf}(t)$, where $\\sigma_{sf}$ is the shunt conductivity from Na-decorated stacking faults\n- Full cell performance recovery occurs before $R_{sh}$ fully recovers — meaning FF can recover faster than $R_{sh}$ alone suggests\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=4|Schulze et al. (2020), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Bifacial PERC Front and Rear FF Loss",
+      "detail": "In bifacial PERC (glass/glass, 136 h, 1000 V, 85°C):\n\n- **Front-side FF loss:** 37–40% (shunting dominant)\n- **Rear-side FF loss:** 37–42% (increased surface recombination also degrades FF)\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "HJT Rear-Side FF Loss",
+      "detail": "In bifacial HJT modules, rear-side PID is primarily FF-dominated:\n\n- **Rear-side FF loss:** 40.4% Pmax loss after 800 h, primarily from interface recombination at the a-Si:H/c-Si interface\n- Front-side PID is Isc-dominated (optical loss from ITO reduction)\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=5|Luo et al. (2024), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Perovskite PID-p: Catastrophic FF Collapse",
+      "detail": "In perovskite polarization-type PID (800 V, 50°C), FF collapses catastrophically in Stage 2:\n\n- **Stage 1 (0–20 h):** FF 81.09% → 71.89% (11% relative reduction)\n- **Stage 2 (20–100 h):** FF 71.89% → 26.86% (63% relative reduction from initial)\n- Jsc collapses together with FF; Voc remains stable — characteristic of charge transport disruption at the buried interface, not shunting\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=5|Li et al. (2025), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Recovery of FF",
+      "detail": "FF recovery tracks Rsh recovery:\n- **Recoverable portion (non-ohmic shunts):** FF recovers significantly (up to 95.6% for moderate PID)\n- **Non-recoverable portion (ohmic shunts):** Permanent FF reduction of 10–40% in severely degraded cells\n- [[papers/Wiley-58-403-2-s2.0-105002608539-2025-J-Identification of Recoverable and Non-Recoverable Potential-Induced Degradation-Shunted Cells in Cry.pdf#page=5|Kumar & Gupta (2025), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-stacking-fault-shunting",
+      "display_name": "Na⁺-Decorated Stacking Fault Shunting",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-pn-junction-modification",
+      "display_name": "p-n Junction Carrier Concentration Modification",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-micro-crack-shunting",
+      "display_name": "Na⁺-Decorated Micro-Crack Shunting",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-tco-degradation",
+      "display_name": "TCO Layer Optical and Electrical Degradation (HJT)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Interface Delamination in Thin-Film Si Modules",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-perovskite-interface",
+      "display_name": "Perovskite Buried Interface Degradation",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

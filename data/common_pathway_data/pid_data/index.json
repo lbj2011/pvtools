@@ -1,0 +1,130 @@
+{
+  "node_type": "index",
+  "wiki_name": "PID Degradation Pathway Wiki",
+  "description": "",
+  "hierarchy_label": "",
+  "pdf_folder": "papers",
+  "disclaimer": null,
+  "sections": [
+    {
+      "node_type_key": "stressor",
+      "display_name": "Stressors",
+      "description": "",
+      "nodes": [
+        {
+          "id": "stressor-high-system-voltage",
+          "display_name": "High System Voltage (Negative Bias)"
+        },
+        {
+          "id": "stressor-high-temperature",
+          "display_name": "High Temperature"
+        },
+        {
+          "id": "stressor-high-humidity-moisture",
+          "display_name": "High Humidity and Moisture Ingress"
+        }
+      ]
+    },
+    {
+      "node_type_key": "mechanism",
+      "display_name": "Mechanisms",
+      "description": "",
+      "nodes": [
+        {
+          "id": "mechanism-na-ion-migration",
+          "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC"
+        },
+        {
+          "id": "mechanism-surface-leakage-current",
+          "display_name": "Surface and Bulk Leakage Current Flow"
+        },
+        {
+          "id": "mechanism-alox-rear-polarization",
+          "display_name": "AlOx Rear Passivation Layer Polarization (PERC)"
+        },
+        {
+          "id": "mechanism-tco-electrochemical-reduction",
+          "display_name": "TCO Layer Electrochemical Reduction (HJT)"
+        },
+        {
+          "id": "mechanism-cigs-alkali-cation-drift",
+          "display_name": "CIGS Alkali Metal Cation Drift"
+        },
+        {
+          "id": "mechanism-thin-film-interface-degradation",
+          "display_name": "Thin-Film Si Interface Electrochemical Degradation"
+        },
+        {
+          "id": "mechanism-perovskite-ion-migration",
+          "display_name": "Perovskite Layer Ion Migration"
+        }
+      ]
+    },
+    {
+      "node_type_key": "failure",
+      "display_name": "Failures",
+      "description": "",
+      "nodes": [
+        {
+          "id": "failure-stacking-fault-shunting",
+          "display_name": "Na⁺-Decorated Stacking Fault Shunting"
+        },
+        {
+          "id": "failure-pn-junction-modification",
+          "display_name": "p-n Junction Carrier Concentration Modification"
+        },
+        {
+          "id": "failure-micro-crack-shunting",
+          "display_name": "Na⁺-Decorated Micro-Crack Shunting"
+        },
+        {
+          "id": "failure-sinx-conversion",
+          "display_name": "SiNx ARC Conversion to Sodium Silicate"
+        },
+        {
+          "id": "failure-rear-passivation-loss",
+          "display_name": "Rear Passivation Quality Loss (PERC)"
+        },
+        {
+          "id": "failure-tco-degradation",
+          "display_name": "TCO Layer Optical and Electrical Degradation (HJT)"
+        },
+        {
+          "id": "failure-cigs-junction-accumulation",
+          "display_name": "CIGS Junction Alkali Cation Accumulation"
+        },
+        {
+          "id": "failure-thin-film-delamination",
+          "display_name": "Interface Delamination in Thin-Film Si Modules"
+        },
+        {
+          "id": "failure-perovskite-interface",
+          "display_name": "Perovskite Buried Interface Degradation"
+        }
+      ]
+    },
+    {
+      "node_type_key": "performance_losse",
+      "display_name": "Performance Losses",
+      "description": "",
+      "nodes": [
+        {
+          "id": "loss-pmax-reduction",
+          "display_name": "Maximum Power (Pmax) Reduction"
+        },
+        {
+          "id": "loss-voc-reduction",
+          "display_name": "Open-Circuit Voltage (Voc) Reduction"
+        },
+        {
+          "id": "loss-ff-reduction",
+          "display_name": "Fill Factor (FF) Reduction"
+        },
+        {
+          "id": "loss-isc-reduction",
+          "display_name": "Short-Circuit Current (Isc) Reduction"
+        }
+      ]
+    }
+  ]
+}

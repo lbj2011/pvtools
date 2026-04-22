@@ -1,0 +1,170 @@
+{
+  "node_type": "performance_loss",
+  "id": "loss-isc-reduction",
+  "title": "Short-Circuit Current (Isc) Reduction",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Isc in p-type c-Si: Minor Loss Compared to FF and Voc",
+      "detail": "In standard p-type crystalline silicon, Isc is relatively resistant to PID at early and moderate stages:\n\n| Module | Pmax Loss | Voc Loss | Isc Loss | FF Loss |\n|--------|----------|---------|---------|--------|\n| Module 1 (mild) | −3.00% | −0.29% | **−1.40%** | −1.97% |\n| Module 2 (moderate) | −21.90% | −10.00% | **−1.75%** | −19.82% |\n| Module 3 (severe) | −48.67% | −30.31% | **−1.75%** | −26.95% |\n\nIsc loss is capped at ~1–2% even for severely degraded p-type c-Si modules.\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=3|Wang et al. (2018), p.3]]\n\nAt cell level, Isc is relatively stable during early PID (8.66 → 8.36 A over 1.5 h), then shows progressive reduction in later stages (to 6.58 A at 4.5 h):\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=4|Luo et al. (2016), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Isc Loss in IOP-53: EVA vs. Ionomer",
+      "detail": "In Masuda et al. (2016), Isc shows little change while Voc and FF drop markedly:\n- **Little Isc change** confirmed for EVA-encapsulated multicrystalline Si at −1000 to −2000 V\n- [[papers/IOP-53-3675-2-s2.0-84956692262-2016-J-Consideration on Na diffusion and recovery phenomena in potential-induced degradation for crystallin.pdf#page=3|Masuda et al. (2016), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "HJT Front-Side: Isc as Primary Loss",
+      "detail": "In bifacial HJT modules, front-side PID is dominated by Isc loss due to optical absorption in reduced metallic indium (In⁰) nanoparticles within the ITO layer:\n\n- TOPCon dark accelerated test (96 h, −1000 V, 60°C): **Isc loss = 16.4%** (the largest individual parameter loss)\n- HJT front side (800 h): Isc loss drives ~53.9% total Pmax loss\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=4|Luo et al. (2024), p.4]]\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=5|Luo et al. (2024), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "PERC Rear-Side: Significant Isc Loss",
+      "detail": "In bifacial PERC rear-side PID-polarization (AlOx charge neutralization), Isc loss is substantial:\n\n- **Rear-side Isc loss:** 28–40% after 136 h (very different from front-side PID where Isc loss is only 4–6%)\n- This large rear Isc loss reflects the destruction of field-effect passivation, which allows minority carriers generated in the Si bulk to recombine at the rear surface before being collected\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Thin-Film Si: Isc Loss from Delamination",
+      "detail": "In thin-film a-Si:H/µc-Si:H modules:\n\n- **Phase 1 (0–150 h):** Isc decreases and saturates — delamination at scribe lines reduces active cell area\n- Active area loss from delamination reduces the total photocurrent the module can generate\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=3|Shioda et al. (2017), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Perovskite: Isc Loss as Key Indicator",
+      "detail": "In perovskite cells under PID:\n\n- **PID-p (polarization-type, 800 V, 50°C):**\n  - Stage 1 (0–20 h): Jsc 24.14 → 18.41 mA/cm² (24% reduction)\n  - Stage 2 (20–100 h): Jsc → 15.22 mA/cm² (37% total reduction from initial)\n  - Electron inversion layer at buried interface disrupts hole transport and charge collection\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=5|Li et al. (2025), p.5]]\n\n- **Shunting-type (1000 V):**\n  - EQE reduces by > 50% in negatively biased cells\n  - Partial recovery via positive voltage application\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=3|Nakka et al. (2023), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Isc as Diagnostic Tool",
+      "detail": "The pattern of Isc vs. FF vs. Voc losses helps identify the PID mechanism:\n\n- **p-type c-Si PID-s:** Isc stable; FF and Voc decrease → shunt resistance collapse\n- **PERC rear PID-p:** Isc and Voc both decrease → rear surface recombination increase\n- **HJT PID:** Front — Isc dominates → optical loss; Rear — FF dominates → interface recombination\n- **Perovskite PID-p:** Jsc and FF decrease; Voc stable → charge transport disruption\n- **Perovskite PID-s:** All parameters decrease; Voc drops → shunting across junction\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-rear-passivation-loss",
+      "display_name": "Rear Passivation Quality Loss (PERC)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-tco-degradation",
+      "display_name": "TCO Layer Optical and Electrical Degradation (HJT)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Interface Delamination in Thin-Film Si Modules",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-sinx-conversion",
+      "display_name": "SiNx ARC Conversion to Sodium Silicate",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-perovskite-interface",
+      "display_name": "Perovskite Buried Interface Degradation",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

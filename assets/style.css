@@ -149,7 +149,33 @@
     }
 }
 
-/* alert slide in  */
+/* =========================
+   Wiki Source Chips
+   ========================= */
+
+.wiki-source-chip:hover {
+    background: #e5e7eb !important;
+    color: #111827 !important;
+}
+
+/* =========================
+   Wiki Connection Chips
+   ========================= */
+
+.wiki-conn-chip {
+    transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.wiki-conn-chip:hover {
+    background: var(--chip-hover-bg, #f3f4f6) !important;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12) !important;
+    transform: translateY(-1px);
+}
+
+.wiki-conn-chip:active {
+    transform: translateY(0px);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
+}
 .slide-in-top {
     animation: slideInTop 0.4s ease-out;
     animation-delay: 0.05s;

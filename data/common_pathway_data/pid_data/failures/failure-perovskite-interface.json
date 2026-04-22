@@ -1,0 +1,216 @@
+{
+  "node_type": "failure",
+  "id": "failure-perovskite-interface",
+  "title": "Perovskite Buried Interface Degradation",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Electron Inversion Layer at Buried Interface (Polarization-Type)",
+      "detail": "Under 800 V/50°C in anoxic conditions, a polarization-type failure occurs:\n\n- Na⁺ accumulates at the glass/FTO interface (front of device), not penetrating deeply into the perovskite bulk (blocked by the built-in field of the p-i-n structure)\n- The positive charge at the front interface **attracts electrons** at the buried perovskite/HTL interface (electrostatic coupling through the thin perovskite layer)\n- An **electron inversion layer** forms at the buried interface, disrupting hole transport to the HTL\n- Interface recombination increases, reducing photocurrent collection\n\nEvidence from Kelvin Probe Force Microscopy (KPFM) and conductive AFM (C-AFM):\n- Work function decreases at the buried interface (indicating electron accumulation)\n- Local conductivity increases at grain boundaries\n- Young's modulus increases by 5–10 GPa at grain boundaries (Na⁺-induced hydrogen bonding)\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=4|Li et al. (2025), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Shunting-Type Failure Under High Voltage/Humidity (Shunting-Type)",
+      "detail": "At higher voltage (1000 V) and/or elevated humidity, Na⁺ penetrates deeply into the perovskite layer:\n\n- Na⁺ forms NaI and NaIBr compounds at grain boundaries and interfaces throughout the perovskite layer\n- These create conducting inhomogeneities (shunt paths) across the cell\n- Large dark regions (20–80% of cell area) visible in EL imaging, indicating extensive shunting\n- Complete failure (Voc → 0) in 7/8 cells after 1000 h at 1000 V negative bias\n- [[papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf#page=3|Brecl et al. (2022), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Ag⁺ Migration into Perovskite Layer",
+      "detail": "Simultaneously with Na⁺ ingress from the front, Ag⁺ ions from the rear silver electrode migrate into the perovskite:\n\n- Ag⁺ forms AgI bonds — **more stable** than NaI (harder to reverse)\n- Ag⁺ diffuses into the perovskite/ETL interface region\n- Creates stable recombination centers at the rear junction\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=5|Nakka et al. (2023), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Halide Segregation Under Elevated Stress (60°C, 60% RH)",
+      "detail": "Under elevated temperature and humidity, additional bulk degradation occurs:\n\n- **PbI₂ formation** detected by XRD — a well-known perovskite decomposition product\n- PbI₂ nucleates at grain boundaries and interfaces, blocking charge transport\n- PL emission red-shifts by **22 nm** (vs. 8 nm at room conditions), indicating iodine-rich phase separation\n- PL intensity quenches by **> 62.5%** (indicating dense nonradiative recombination centers)\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=4|Nakka et al. (2023), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Two-Stage Degradation Timeline (Polarization-Type)",
+      "detail": "Under 800 V/50°C:\n\n- **Stage 1 (0–20 h):** Diode-like J-V preserved; primarily Jsc and FF losses (charge transport disruption at buried interface); PCE drops to 68.56% of initial\n- **Stage 2 (20–100 h):** J-V curves become nearly linear (severe shunting-like behavior); FF collapses to 33% of pristine; PCE drops to 20.91% of initial; Voc remains relatively stable throughout both stages\n\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=5|Li et al. (2025), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Recovery",
+      "detail": "- **Polarization-type (PID-p):** Partial recovery to 62.97% of original PCE after 47 days of dark storage\n- **Shunting-type (PID-s):** Recoverable via positive voltage application (Na⁺ driven back to glass) if damage is not too severe\n- **Elevated stress (ESC):** Very poor recovery (~10% efficiency retained) because PbI₂ formation is largely irreversible; only ~10% of degradation recovers vs. 58% at room conditions\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=6|Nakka et al. (2023), p.6]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-perovskite-ion-migration",
+      "display_name": "Perovskite Layer Ion Migration",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-isc-reduction",
+      "display_name": "Short-Circuit Current (Isc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — In polarization-type failure, the electron inversion layer at the buried perovskite/HTL interface disrupts hole selectivity: holes photogenerated in the perovskite bulk cannot efficiently transfer to the HTL because the inverted interface presents an energetic barrier. Additionally, under eleva",
+      "source_locations": [
+        {
+          "key": "per_isc",
+          "pdf_path": "papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf",
+          "page": 5,
+          "section": "Li et al. (2025) identify Jsc loss as the primary Stage 1 (0–20 h) indicator in polarization-type PID: \"primarily Jsc and FF losses (charge transport disruption at buried interface); PCE drops to 68.5",
+          "quote": "primarily Jsc and FF losses (charge transport disruption at buried interface); PCE drops to 68.56% of initial.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — FF collapse is the dominant and earliest loss in both failure types. In Stage 1 polarization-type PID (0–20 h at 800 V/50°C), Jsc and FF loss are primary while Voc remains relatively stable — the inversion layer selectively disrupts the transport quality of the junction without destroying the b",
+      "source_locations": [
+        {
+          "key": "per_ff",
+          "pdf_path": "papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf",
+          "page": 5,
+          "section": "Li et al. (2025) describe the two-stage FF collapse: \"Stage 1 (0–20 h): Diode-like J-V preserved; primarily Jsc and FF losses.\" Stage 2 (20–100 h): \"J-V curves become nearly linear (severe shunting-li",
+          "quote": "Stage 1 (0–20 h): Diode-like J-V preserved; primarily Jsc and FF losses.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-voc-reduction",
+      "display_name": "Open-Circuit Voltage (Voc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — In polarization-type PID, Voc is notably stable: it remains relatively unchanged through both Stage 1 and Stage 2 degradation (0–100 h at 800 V/50°C), confirming that the buried interface failure primarily disrupts carrier transport rather than destroying the built-in potential. Voc loss become",
+      "source_locations": [
+        {
+          "key": "per_voc",
+          "pdf_path": "papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf",
+          "page": 3,
+          "section": "Brecl et al. (2022) demonstrate shunting-type Voc collapse: \"Complete failure (Voc → 0) in 7/8 cells after 1000 h at 1000 V negative bias,\" with \"large dark regions (20–80% of cell area) visible in EL",
+          "quote": "Complete failure (Voc → 0) in 7/8 cells after 1000 h at 1000 V negative bias,",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Pmax loss follows a two-stage profile in polarization-type failure: PCE drops to 68.56% of initial after Stage 1 (Jsc + FF loss with stable Voc), then to 20.91% after Stage 2 (near-linear J-V, FF collapses to 33%). Partial recovery to 62.97% of original PCE occurs after 47 days of dark storage.",
+      "source_locations": [
+        {
+          "key": "per_pmax",
+          "pdf_path": "papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf",
+          "page": 5,
+          "section": "Li et al. (2025) quantify the two-stage PCE timeline: \"Stage 1 (0–20 h): PCE drops to 68.56% of initial. Stage 2 (20–100 h): PCE drops to 20.91% of initial.\" Partial recovery of 62.97% of original PCE",
+          "quote": "Stage 1 (0–20 h): PCE drops to 68.56% of initial. Stage 2 (20–100 h): PCE drops to 20.91% of initial.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

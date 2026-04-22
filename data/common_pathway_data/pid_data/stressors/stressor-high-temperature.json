@@ -1,0 +1,229 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-high-temperature",
+  "title": "High Temperature",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Thermally Activated Ion Drift",
+      "detail": "Na⁺ drift in SiNx follows an Arrhenius relationship. Key activation energies measured:\n\n- **Activation energy for Na⁺ drift through PECVD SiNx:** $E_a = 0.51$ eV (from corona bias-temperature stress experiments)\n- [[papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf#page=2|Wilson et al. (2015), p.2]]\n\n- **Activation energy for Na⁺ diffusion in SiN (leakage current):** $E_a = 0.93$ eV\n- **Activation energy for Na atom out-diffusion (recovery):** $E_a = 0.96$ eV\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=2|Schulze et al. (2020), p.2]]\n\n- **Activation energy for module-level leakage current (dry conditions):** $E_a = 0.809$ eV (glass: 0.814 eV, EVA: 0.782 eV)\n- [[papers/IEEE-171-2371-2-s2.0-85099585463-2020-C-Modeling of Leakage Currents in c-Si PV Modules and Investigation of their Arrhenius Behavior.pdf#page=2|Spataru et al. (2020), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Onset Temperature",
+      "detail": "Na⁺ drift in SiNx begins at approximately **50°C**, which overlaps with normal solar cell operating temperatures. This makes field-deployed modules continuously susceptible under normal operating conditions:\n- [[papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf#page=1|Wilson et al. (2015), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Acceleration Factor (Temperature)",
+      "detail": "Degradation at 90°C is dramatically faster than at 49°C for the same applied voltage:\n\n- Parameter controlling initial leakage current (c) increases **45-fold** from 49°C to 90°C\n- Degradation arrival time (t₀) decreases **12-fold**\n- Degradation completes in **1.73 hours at 90°C** vs. **40.2 hours at 49°C** (23× faster)\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=4|Schulze et al. (2020), p.4]]\n\nThe Al plate method (direct contact, low humidity) at 60°C produces PID **110 times faster** than conventional climate chamber testing at 60°C, 85% RH:\n- [[papers/IOP-53-3675-2-s2.0-84956692262-2016-J-Consideration on Na diffusion and recovery phenomena in potential-induced degradation for crystallin.pdf#page=2|Masuda et al. (2016), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Negligible Degradation Below 45°C",
+      "detail": "Temperature dependence is strongly non-linear:\n- Negligible PID degradation below **45°C**\n- Severe degradation at **65°C and above** (for the same applied voltage)\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=2|Luo et al. (2016), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "CIGS Thermal Diffusion Effect",
+      "detail": "At 85°C without any applied voltage bias, thermal diffusion alone causes a **2–3× reduction in carrier concentration** in CIGS cells. This is a reversible process (recovers on cooling), distinct from true electric-field-driven PID:\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=2|Theelen et al. (2018), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "TOPCon Activation Energy",
+      "detail": "For TOPCon PID-polarization, the thermal activation energy for degradation is $E_a = 0.71$ eV and for dark recovery is $E_a = 0.58$ eV:\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=2|Luo et al. (2024), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Perovskite: Temperature–Humidity Synergy",
+      "detail": "Elevated stress conditions (60°C, 60% RH) cause **>90% efficiency loss** in perovskite cells, compared to **59% loss** at room conditions (25°C, 20% RH) under the same −1000 V stress:\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=2|Nakka et al. (2023), p.2]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Na⁺ drift through the SiNx ARC follows an Arrhenius relationship with activation energy 0.51 eV, making it strongly temperature-dependent. At 90°C, degradation proceeds 23× faster than at 49°C under the same voltage: the leakage current parameter (c) increases 45-fold and the degradation arriva",
+      "source_locations": [
+        {
+          "key": "ht_nam",
+          "pdf_path": "papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf",
+          "page": 4,
+          "section": "Schulze et al. (2020) quantify the temperature acceleration for Na⁺ ion migration: \"Degradation at 90°C is 23× faster than at 49°C; parameter c (initial leakage current) increases 45-fold; degradation",
+          "quote": "Degradation at 90°C is 23× faster than at 49°C; parameter c (initial leakage current) increases 45-fold; degradation arrival time t₀ decreases 12-fold.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-alox-rear-polarization",
+      "display_name": "AlOx Rear Passivation Layer Polarization (PERC)",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Temperature thermally activates hole drift and Na⁺ mobility within the AlOx layer and the surrounding SiO₂/SiNx stack. The PERC rear polarization mechanism requires thermal activation in addition to voltage: Wang et al. (2022) show that SiNx refractive index (which controls Si-richness and elec",
+      "source_locations": [
+        {
+          "key": "ht_alox",
+          "pdf_path": "papers/Wiley-178-1653-2-s2.0-85127380886-2022-J-Effects of SiNx refractive index and SiO2 thickness on polarization-type potential-induced degradati.pdf",
+          "page": 5,
+          "section": "Wang et al. (2022) show that the SiNx RI / SiO₂ thickness interaction (which governs AlOx rear polarization severity) has thermal components: electron tunneling through thin SiO₂ (1 nm) with high-RI S",
+          "quote": "nearly eliminates PID (~1% degradation)",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-cigs-alkali-cation-drift",
+      "display_name": "CIGS Alkali Metal Cation Drift",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Temperature has a dual role in CIGS PID: (1) it thermally activates Na⁺ drift through the Mo back contact (field-driven), and (2) at 85°C, thermal diffusion alone — without any applied voltage bias — reduces carrier concentration by 2–3× in CIGS cells through thermally activated Na redistributi",
+      "source_locations": [
+        {
+          "key": "ht_cigs",
+          "pdf_path": "papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf",
+          "page": 2,
+          "section": "Theelen et al. (2018) identify thermal diffusion as a distinct CIGS degradation pathway: \"At 85°C without any applied voltage bias, thermal diffusion alone causes a 2–3× reduction in carrier concentra",
+          "quote": "At 85°C without any applied voltage bias, thermal diffusion alone causes a 2–3× reduction in carrier concentration in CIGS cells. This is a reversible process (recovers on cooling), distinct from true electric-field-driven PID.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-perovskite-ion-migration",
+      "display_name": "Perovskite Layer Ion Migration",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Temperature dramatically increases the severity of perovskite PID through two additive pathways: (1) increased Na⁺ and Ag⁺ diffusion and drift rates through the perovskite bulk and grain boundaries, and (2) thermally activated halide segregation and PbI₂ formation. Nakka et al. (2023) demonstra",
+      "source_locations": [
+        {
+          "key": "ht_per",
+          "pdf_path": "papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf",
+          "page": 2,
+          "section": "Nakka et al. (2023) demonstrate the temperature–humidity synergy in perovskite PID: \"Elevated stress conditions (60°C, 60% RH) cause >90% efficiency loss in perovskite cells, compared to 59% loss at r",
+          "quote": "Elevated stress conditions (60°C, 60% RH) cause >90% efficiency loss in perovskite cells, compared to 59% loss at room conditions (25°C, 20% RH) under the same −1000 V stress.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

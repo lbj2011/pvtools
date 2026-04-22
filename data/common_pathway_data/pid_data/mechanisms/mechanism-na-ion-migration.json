@@ -1,0 +1,218 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-na-ion-migration",
+  "title": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Na⁺ Sources",
+      "detail": "Three principal Na⁺ sources have been identified:\n\n1. **Front cover glass (soda-lime glass):** Contains ~12–15 wt% Na₂O; the dominant long-term source\n2. **Cell surface contamination:** Baseline Na⁺ surface contamination of **$7.0 \\times 10^{13}$ atoms/cm$^2$** is present on commercial cells prior to encapsulation; this is the fastest-acting source (PID visible within 1 day)\n3. **EVA encapsulant:** Na can leach from glass through EVA and accumulate at cell; transit time through 900 µm EVA is **3–7 days**\n\n- [[papers/AIP-127-2944-2-s2.0-85056609634-2018-J-Origin of Na causing potential-induced degradation for p-type crystalline Si photovoltaic modules.pdf#page=1|Jonai & Masuda (2018), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Transport Pathway and Kinetics",
+      "detail": "Under applied field, Na⁺ drift through 80 nm PECVD SiNx follows Stern-Eyring hopping kinetics:\n\n- **Without field:** thermal diffusion time for Na⁺ across 80 nm SiNx ≈ **1 million years**\n- **With 0.5 MV/cm field at 80°C:** transit time ≈ **25 minutes**\n- **Drift velocity:** $v = \\mu E$ (mobility × electric field), with activation energy **0.51 eV** in SiNx\n- [[papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf#page=2|Wilson et al. (2015), p.2]]\n\nNa⁺ drift through the module stack follows three temporal phases (Schulze et al., 2020):\n\n- **Phase 1 (constant current):** Low, time-independent current from surface contamination and small holes in SiNx\n- **Phase 2 (accelerated):** Electric field builds across SiNx as Na⁺ accumulates at outer surface; current increases exponentially following: $J_{Na} \\propto \\sinh(\\gamma E)$. At 49°C/1000 V this phase spans ~40 hours; at 90°C/1000 V it spans **1.73 hours**\n- **Phase 3 (recovery):** After voltage removal, Na⁺ decays via one-dimensional diffusion $\\propto 1/t^{0.5}$\n\n- [[papers/IEEE-164-2299-2-s2.0-85087499813-2020-J-A Drift and Diffusion Model for PID-s in Solar Modules.pdf#page=2|Schulze et al. (2020), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Na⁺ Accumulation at the Si/SiNx Interface",
+      "detail": "Na⁺ accumulates at the Si/SiNx interface and in the silicon cell:\n\n- Peak Na concentration after PID stress: **$\\sim 10^{20}$ cm$^{-3}$** (a few atomic %) measured by dynamic SIMS\n- Na area density within stacking fault planes: **$\\sim 10^{15}$ cm$^{-2}$**\n- Na onset drift temperature: **~50°C**, overlapping with normal module operating temperatures\n- Na drift peak temperature in SiNx: **~115°C**\n- [[papers/AIP-127-2944-2-s2.0-85056609634-2018-J-Origin of Na causing potential-induced degradation for p-type crystalline Si photovoltaic modules.pdf#page=4|Jonai & Masuda (2018), p.4]]\n- [[papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf#page=3|Wilson et al. (2015), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "EVA vs. Ionomer Encapsulants",
+      "detail": "Na⁺ diffusion occurs in both EVA and ionomer encapsulants, but only EVA leads to PID, confirming that Na⁺ arrival is necessary but not sufficient — the encapsulant's ability to transmit ions to the cell surface determines PID outcome:\n\n- Na concentration after PID in EVA: **$\\sim 10^{20}$ cm$^{-3}$** (few atomic %)\n- EVA resistivity: ~$10^{14}$ Ω·cm; Ionomer: ~$10^{16}$ Ω·cm; Polyolefin: ~$10^{17}$ Ω·cm\n- Modules with ionomer encapsulant maintained stable Pmax despite confirmed Na diffusion through ionomer\n- [[papers/IOP-53-3675-2-s2.0-84956692262-2016-J-Consideration on Na diffusion and recovery phenomena in potential-induced degradation for crystallin.pdf#page=2|Masuda et al. (2016), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "PERC Cell-Specific Pathway",
+      "detail": "In PERC cells, the SiO₂ passivation layer between the emitter and SiNx controls whether Na⁺ can disrupt the ARC:\n\n- **Thin SiO₂ (1 nm) with high-RI SiNx (n=2.2):** enables electron tunneling that dissipates charge, nearly eliminating PID (~1% degradation)\n- **Thick SiO₂ (9 nm):** blocks electron tunneling regardless of SiNx RI; both RI=2.0 and 2.2 show identical rapid PID (10–15% power loss)\n- **Critical threshold:** ~2 nm SiO₂ where RI effects begin to emerge\n- [[papers/Wiley-178-1653-2-s2.0-85127380886-2022-J-Effects of SiNx refractive index and SiO2 thickness on polarization-type potential-induced degradati.pdf#page=1|Wang et al. (2022), p.1]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-surface-leakage-current",
+      "display_name": "Surface and Bulk Leakage Current Flow",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-stacking-fault-shunting",
+      "display_name": "Na⁺-Decorated Stacking Fault Shunting",
+      "node_type": "failure",
+      "child_reasoning": "** — Na⁺ ions that have traversed the SiNx ARC enter the silicon emitter and decorate pre-existing {111} stacking fault planes. These faults penetrate the full depth of the p-n junction (~200–300 nm); an area density of ~10¹⁵ cm⁻² Na is sufficient to create an ohmic metallic-like channel across the ",
+      "source_locations": [
+        {
+          "key": "nam_sf",
+          "pdf_path": "papers/Wiley-311-3837-2-s2.0-84939654596-2015-J-Nanoscopic studies of 2D-extended defects in silicon that cause shunting of Si-solar cells.pdf",
+          "page": 2,
+          "section": "Naumann et al. (2015) used HAADF STEM to image Na decoration of stacking faults at the atomic scale, reporting \"a dark region\" (Na accumulation) within the stacking fault plane that \"disappears after ",
+          "quote": "a dark region",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "failure-pn-junction-modification",
+      "display_name": "p-n Junction Carrier Concentration Modification",
+      "node_type": "failure",
+      "child_reasoning": "** — Na⁺ ions diffusing into the n-type emitter act as compensation centers for phosphorus donor atoms, reducing local n-type carrier concentration and shrinking the depletion region. Scanning capacitance microscopy (SCM) confirms \"carrier concentration changes at the p-n junction after PID\" and a \"",
+      "source_locations": [
+        {
+          "key": "nam_pnj",
+          "pdf_path": "papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf",
+          "page": 5,
+          "section": "Luo et al. (2016) used scanning capacitance microscopy (SCM) to directly image junction modification: \"carrier concentration changes at the p-n junction\" were observed after PID, and \"a shallow p-n ju",
+          "quote": "carrier concentration changes at the p-n junction",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "failure-micro-crack-shunting",
+      "display_name": "Na⁺-Decorated Micro-Crack Shunting",
+      "node_type": "failure",
+      "child_reasoning": "** — Pre-existing micro-cracks (15–40 µm wide, penetrating fully through the p-n junction) provide low-resistance channels for Na⁺ to access the entire junction depth. EDX analysis confirms Na accumulation along the full cross-section of micro-cracks after PID stress; the decorated crack surface cre",
+      "source_locations": [
+        {
+          "key": "nam_mcs",
+          "pdf_path": "papers/Elsevier-465-2953-2-s2.0-85052760427-2018-J-The influence of sodium ions decorated micro cracks on the evolution of potential induced degradatio.pdf",
+          "page": 2,
+          "section": "Li et al. (2018) applied EDX elemental mapping to micro-crack cross-sections before and after PID stress, confirming \"dramatically increased Na concentration along micro-crack surfaces after PID stres",
+          "quote": "dramatically increased Na concentration along micro-crack surfaces after PID stress",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "failure-sinx-conversion",
+      "display_name": "SiNx ARC Conversion to Sodium Silicate",
+      "node_type": "failure",
+      "child_reasoning": "** — As Na⁺ ions transit through the SiNx ARC, OH⁻ ions (generated at the glass surface under the applied field) attack the SiNxOy network at gridline contact points, converting it to sodium silicate via: SiNxOy + 2 Na⁺ + (3−y)H₂O → Na₂SiO₃ + x NH₃ + 2 H₃O⁺.[^nam_sinx] This chemical conversion disru",
+      "source_locations": [
+        {
+          "key": "nam_sinx",
+          "pdf_path": "papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf",
+          "page": 5,
+          "section": "Vogt et al. (2023) tabulate electrochemical reactions at the polymer/SiNxOy interface under negative bias. The sodium silicate reaction equation given is: \"SiNxOy + 2 Na⁺ + (3-y) H₂O → Na₂SiO₃ + x NH₃",
+          "quote": "SiNxOy + 2 Na⁺ + (3-y) H₂O → Na₂SiO₃ + x NH₃ + 2 H₃O⁺",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-tco-electrochemical-reduction",
+      "display_name": "TCO Layer Electrochemical Reduction (HJT)",
+      "node_type": "mechanism",
+      "child_reasoning": "** — In HJT modules, Na⁺ ions completing migration through the EVA encapsulant arrive at the indium tin oxide (ITO) surface. At this interface, Na⁺ drives the electrochemical reduction of In₂O₃·SnO₂ to form metallic indium (In⁰) nanoparticles and creates nano-cracks through which OH⁻ ions penetrate ",
+      "source_locations": [
+        {
+          "key": "nam_tco",
+          "pdf_path": "papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf",
+          "page": 2,
+          "section": "Zu et al. (2018) report from X-ray absorption fine structure spectroscopy: \"the formation of metallic indium (In) in the IWO layers of a degraded cell, which suggests that the root cause of the optica",
+          "quote": "the formation of metallic indium (In) in the IWO layers of a degraded cell, which suggests that the root cause of the optical loss was a darkening of the front IWO layers caused by the precipitation of metallic In.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

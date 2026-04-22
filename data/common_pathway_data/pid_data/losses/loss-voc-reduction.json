@@ -1,0 +1,189 @@
+{
+  "node_type": "performance_loss",
+  "id": "loss-voc-reduction",
+  "title": "Open-Circuit Voltage (Voc) Reduction",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Voc Loss in p-type c-Si (Field Measurements)",
+      "detail": "Real-world field data from a 2-year grid-connected plant (Wang et al., 2018):\n\n| Module | Pmax Loss | Voc Loss | Isc Loss | FF Loss |\n|--------|----------|---------|---------|--------|\n| Module 1 (mild PID) | −3.00% | −0.29% | −1.40% | −1.97% |\n| Module 2 (moderate PID) | −21.90% | −10.00% | −1.75% | −19.82% |\n| Module 3 (severe PID) | −48.67% | −30.31% | −1.75% | −26.95% |\n\n**Pattern:** Voc and FF losses dominate; Isc loss is minor (~1–2%) in p-type c-Si.\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=3|Wang et al. (2018), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Voc Loss in Laboratory Accelerated Testing (p-type multi-c-Si)",
+      "detail": "At cell level, −1000 V, 85°C:\n- After 1.5 h: Voc drops from **0.61 V to 0.30 V** (51% reduction)\n- After 2.5 h: Voc drops to **0.12 V** (80% reduction)\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=3|Luo et al. (2016), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Physical Cause: Recombination Current Increase",
+      "detail": "The recombination current density ($J_R$) in the depletion region increases with Na⁺ concentration:\n\n- $V_{oc} \\propto \\ln(J_{ph} / J_R)$; as $J_R$ increases, $V_{oc}$ decreases\n- At $1.0 \\times 10^{16}$ cm$^{-3}$ metal ion concentration: minority carrier lifetime drops from $2.18 \\times 10^{-6}$ s to $1.0 \\times 10^{-8}$ s → $V_{oc}$ drops from 0.640 V to 0.337 V (~47% reduction)\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=4|Wang et al. (2018), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Spatial Gradient: Substring Analysis",
+      "detail": "Voc degradation is most severe in substrings at the module edges (highest negative bias):\n\n- **Substring 1 (near frame):** Voc −38.50%\n- **Substring 2 (center):** Voc −8.97%\n- **Substring 3 (near frame):** Voc −44.30%\n\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=5|Wang et al. (2018), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Voc Loss in CIGS",
+      "detail": "CIGS PID preferentially reduces Voc as the primary loss mechanism (unlike FF-dominated c-Si PID):\n\n- $V_{oc}$ drops first and most severely as cation accumulation at the CIGS/CdS junction reduces the built-in voltage $V_{bi}$\n- Isc is relatively preserved until late-stage complete failure\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=3|Theelen et al. (2018), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Bifacial PERC Rear-Side Voc Loss",
+      "detail": "Rear-side PID-polarization produces substantial Voc loss from increased surface recombination:\n\n- Rear-side Voc loss: **28–36%** after 136 h of PID stress\n- Front-side Voc loss: 17–20% (lower than rear, which suffers complete AlOx charge neutralization)\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "TOPCon: Significant Voc Loss Under Dark Stress",
+      "detail": "TOPCon PID-polarization under dark accelerated conditions:\n- Voc loss: **11.1%** (at 96 h, −1000 V, 60°C, dark)\n- Recovers rapidly under illumination (photoconductivity of SiNx dissipates accumulated charge)\n- Under field-realistic conditions with 0.1-sun UV: Voc loss is much smaller (~few percent)\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=4|Luo et al. (2024), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Perovskite: Voc Stability Is a Diagnostic Marker",
+      "detail": "In perovskite polarization-type PID (PID-p), Voc **remains stable** even as Jsc and FF collapse:\n\n- Stage 1 (0–20 h): Voc stable; Jsc 24.14 → 18.41 mA/cm²; FF 81.09% → 71.89%\n- Stage 2 (20–100 h): Voc still stable; Jsc → 15.22 mA/cm²; FF → 26.86%\n- Voc stability distinguishes polarization-type from shunting-type PID in perovskites\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=5|Li et al. (2025), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-stacking-fault-shunting",
+      "display_name": "Na⁺-Decorated Stacking Fault Shunting",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-pn-junction-modification",
+      "display_name": "p-n Junction Carrier Concentration Modification",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-rear-passivation-loss",
+      "display_name": "Rear Passivation Quality Loss (PERC)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-cigs-junction-accumulation",
+      "display_name": "CIGS Junction Alkali Cation Accumulation",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-perovskite-interface",
+      "display_name": "Perovskite Buried Interface Degradation",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

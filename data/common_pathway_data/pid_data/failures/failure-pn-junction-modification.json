@@ -1,0 +1,195 @@
+{
+  "node_type": "failure",
+  "id": "failure-pn-junction-modification",
+  "title": "p-n Junction Carrier Concentration Modification",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Na⁺ Neutralizes n-Type Doping",
+      "detail": "Na⁺ ions in the silicon emitter act as compensation centers for the donor species (phosphorus in p-type Si cells). At sufficient concentrations:\n\n- Scanning capacitance microscopy (SCM) shows **carrier concentration changes at the p-n junction** after PID\n- Na diffusion onto Si cell surface reduces n-type layer carrier concentration\n- A **shallow p-n junction** is observed after PID, compared to a clear depletion region before\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=5|Luo et al. (2016), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Increased Recombination Current",
+      "detail": "Metal ion (Na⁺) accumulation in the depletion region increases recombination current density (J_R), which directly reduces Voc:\n\n- Simulated effect at 300 K with iron-group metal ions:\n  - 0 metal ions: minority carrier lifetime τ = 2.18 × 10⁻⁶ s, Voc = 0.640 V\n  - 1.0 × 10¹⁶ cm⁻³ ions: τ = 1.0 × 10⁻⁸ s, Voc = 0.337 V\n  - A 218× reduction in lifetime yields ~47% reduction in Voc\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=4|Wang et al. (2018), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Dark J-V Signature of Junction Modification",
+      "detail": "PID-affected modules show characteristic changes in the dark forward J-V curve:\n\n- Increased forward dark current density (steeper rise in dark J-V)\n- Module 3 (severe PID, 48.67% power loss): steeper forward current rise than Module 2 (moderate PID, 21.9% loss)\n- This signature indicates increased recombination current in the depletion region — a direct indicator of junction degradation\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=5|Wang et al. (2018), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Spatial Non-Uniformity: Edge vs. Center Cells",
+      "detail": "Junction modification is spatially non-uniform, being most severe near module edges (highest electric field):\n\n- **Substring 1 (near frame):** Pmax −59.77%, Voc −38.50%, FF −35.21%\n- **Substring 2 (center):** Pmax −21.98%, Voc −8.97%, FF −14.57%\n- **Substring 3 (near frame):** Pmax −64.98%, Voc −44.30%, FF −38.03%\n- [[papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf#page=6|Wang et al. (2018), p.6]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "TOPCon: Polarization-Type Junction Effect",
+      "detail": "In TOPCon cells, PID is classified as **PID-polarization** rather than shunting. Positive charge drift in the SiNx ARC alters the surface potential:\n\n- Low boron doping in the p⁺ emitter (~180 Ω/sq, concentration ~1 × 10¹⁹ cm⁻³) produces a weak surface field\n- Charge accumulation in SiNx reduces repulsion of minority carrier electrons from the front surface\n- This results in: Isc loss **16.4%**, Voc loss **11.1%**, FF loss **1.3%** under dark 60°C/96 h stress\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=3|Luo et al. (2024), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Partial Irreversibility Under Severe Stress",
+      "detail": "Moderate PID produces reversible junction modification; severe PID leads to permanent changes:\n\n- Moderate PID: near-complete recovery (95.6% Pmax after 487 days natural recovery)\n- Severe PID (complete blackout in EL): incomplete recovery (62.8% Pmax after 491 days)\n- The irreversible portion corresponds to Na⁺ that has diffused into the bulk p-n junction and cannot out-diffuse thermally at room temperature\n- [[papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf#page=5|Kwembur et al. (2022), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-voc-reduction",
+      "display_name": "Open-Circuit Voltage (Voc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Na⁺ ions in the depletion region introduce recombination-active defects that increase the recombination current density (J_R). Since Voc ∝ ln(J_ph / J_R), a higher J_R directly reduces Voc. Simulations show that a Na⁺ concentration of 1.0 × 10¹⁶ cm⁻³ in the depletion region reduces minority car",
+      "source_locations": [
+        {
+          "key": "pnj_voc",
+          "pdf_path": "papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf",
+          "page": 4,
+          "section": "Wang et al. (2018) modeled the recombination current increase using measured dark J-V curves from PID-affected monocrystalline Si modules. They state: \"At 1.0 × 10¹⁶ cm⁻³ metal ion concentration: mino",
+          "quote": "At 1.0 × 10¹⁶ cm⁻³ metal ion concentration: minority carrier lifetime drops from 2.18 × 10⁻⁶ s to 1.0 × 10⁻⁸ s → Voc drops from 0.640 V to 0.337 V (~47% reduction).",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Junction modification by Na⁺ contributes to FF reduction through two routes: (1) increased recombination current raises the \"diode factor\" of the junction, steepening the forward dark J-V curve; and (2) reduced built-in voltage decreases the potential barrier against forward current injection. ",
+      "source_locations": [
+        {
+          "key": "pnj_ff",
+          "pdf_path": "papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf",
+          "page": 5,
+          "section": "Wang et al. (2018) report the spatial gradient of Voc and FF losses across substrings (near-frame vs. center): \"Substring 1 (near frame): Pmax −59.77%, Voc −38.50%, FF −35.21%; Substring 2 (center): P",
+          "quote": "Substring 1 (near frame): Pmax −59.77%, Voc −38.50%, FF −35.21%; Substring 2 (center): Pmax −21.98%, Voc −8.97%, FF −14.57%.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Pmax reduction from p-n junction modification combines the Voc and FF losses. In the most severe field case, a module with 30.31% Voc loss and 26.95% FF loss shows 48.67% Pmax loss, with Isc loss remaining limited to 1.75% (confirming that junction modification — not photocurrent reduction — do",
+      "source_locations": [
+        {
+          "key": "pnj_pmax",
+          "pdf_path": "papers/Elsevier-498-3124-2-s2.0-85033564380-2018-J-Performance variation of dark current density voltage characteristics for PID affected monocrystalli.pdf",
+          "page": 3,
+          "section": "Wang et al. (2018) field data from Module 3 (severe PID): Pmax loss 48.67%, Voc loss 30.31%, Isc loss 1.75%, FF loss 26.95%. The negligible Isc loss alongside large Voc and FF losses is the diagnostic",
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

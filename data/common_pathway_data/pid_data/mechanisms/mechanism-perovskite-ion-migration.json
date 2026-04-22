@@ -1,0 +1,163 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-perovskite-ion-migration",
+  "title": "Perovskite Layer Ion Migration",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Na⁺ Migration from Glass (Extrinsic)",
+      "detail": "Na⁺ ions from soda-lime glass migrate into the perovskite device under negative bias, confirmed by Time-of-Flight Secondary Ion Mass Spectrometry (ToF-SIMS) and EDX:\n\n- Na⁺ penetrates through FTO/ITO and into the perovskite layer under sufficiently high negative bias (1000 V)\n- Na⁺ forms NaI or NaIBr compounds at grain boundaries and interfaces\n- At moderate bias (500 V per device, representative of current 1000 V systems), cells withstand > 2500 h with no degradation\n\n- [[papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf#page=2|Brecl et al. (2022), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Ag⁺ Ion Migration from Rear Electrode (Extrinsic)",
+      "detail": "Simultaneously, Ag⁺ ions from the silver rear electrode migrate into the perovskite under PID:\n\n- Ag⁺ forms AgI bonds, which are **more stable** than NaI bonds\n- This makes Ag⁺ migration harder to reverse than Na⁺ migration\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=3|Nakka et al. (2023), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Polarization-Type PID (PID-p): Na⁺ at Glass/FTO Interface",
+      "detail": "In anoxic, anhydrous conditions at 800 V/50°C, a distinct polarization-type mechanism operates:\n\n- Na⁺ accumulates at the **glass/FTO interface** (outer surface), **not** penetrating deeply into the perovskite bulk\n- The built-in electric field in the p-i-n device repels Na⁺ from diffusing further into the perovskite\n- Na⁺ accumulation creates a positively charged region at the top interface\n- This positive charge **attracts electrons** at the buried (bottom) perovskite/HTL interface\n- An **electron inversion layer** forms at the buried interface, disrupting hole transport and increasing interface recombination\n- Work function decreases and conductivity increases at the buried interface (measured by KPFM and C-AFM)\n\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=3|Li et al. (2025), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Halide Segregation Under Elevated Temperature/Humidity",
+      "detail": "Under elevated stress conditions (60°C, 60% RH), moisture and heat trigger additional decomposition:\n\n- PbI₂ formation detected by XRD (halide segregation marker)\n- 22 nm red-shift in photoluminescence (vs. 8 nm at room conditions), indicating iodine-rich phase formation\n- PL intensity quenching > 62.5% at elevated stress (vs. 50% at room conditions)\n- Leakage current increases to **58.0 mA/cm²** at elevated stress\n\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=4|Nakka et al. (2023), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Two-Stage Degradation Timeline (PID-p)",
+      "detail": "Under 800 V/50°C (anoxic conditions):\n\n- **Stage 1 (0–20 h):** Diode-like J-V preserved; Jsc decreases 24.14 → 18.41 mA/cm²; FF decreases 81.09% → 71.89%; Voc stable; PCE drops to 68.56% of initial\n- **Stage 2 (20–100 h):** J-V becomes nearly linear (severe); Jsc further decreases to 15.22 mA/cm²; FF crashes to 26.86% (33% of pristine); Voc remains stable; PCE drops to 20.91% of initial\n\n- [[papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf#page=4|Li et al. (2025), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Voltage Threshold",
+      "detail": "Current 1000 V string systems present each perovskite cell with **~500 V** (split across top and bottom contacts). At 500 V, perovskite cells show no degradation for > 2500 h, suggesting a safety margin exists. However, increases in system voltage could remove this margin:\n\n- [[papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf#page=3|Brecl et al. (2022), p.3]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-high-system-voltage",
+      "display_name": "High System Voltage (Negative Bias)",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-temperature",
+      "display_name": "High Temperature",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-humidity-moisture",
+      "display_name": "High Humidity and Moisture Ingress",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-perovskite-interface",
+      "display_name": "Perovskite Buried Interface Degradation",
+      "node_type": "failure",
+      "child_reasoning": "** — Ion migration produces degradation at two distinct interfaces depending on the voltage level and environmental conditions. Under moderate voltage (800 V, dry/anoxic), Na⁺ accumulates at the glass/FTO interface and — through electrostatic coupling across the thin perovskite layer — induces an el",
+      "source_locations": [
+        {
+          "key": "per_child",
+          "pdf_path": "papers/Wiley-45-301-2-s2.0-105008480848-2025-J-Failure Analysis of Polarization-Type Potential-Induced Degradation of Perovskite Solar Cells.pdf",
+          "page": 4,
+          "section": "Li et al. (2025) define the two-stage PID-p timeline (800 V, 50°C, anoxic): Stage 1 (0–20 h) — \"Diode-like J-V preserved; Jsc decreases 24.14 → 18.41 mA/cm²; FF decreases 81.09% → 71.89%; Voc stable\";",
+          "quote": "Diode-like J-V preserved; Jsc decreases 24.14 → 18.41 mA/cm²; FF decreases 81.09% → 71.89%; Voc stable",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

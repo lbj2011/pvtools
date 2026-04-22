@@ -1,0 +1,133 @@
+{
+  "node_type": "performance_loss",
+  "id": "loss-pmax-reduction",
+  "title": "Maximum Power (Pmax) Reduction",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Severity Range Across Technologies and Conditions",
+      "detail": "**Standard p-type crystalline silicon:**\n- Mild field PID: 3–10% Pmax loss (real-world, lower string voltages)\n- Severe laboratory PID (−1000 V, 85°C, 85% RH):\n  - At 48 h: 25% average loss across 28 modules tested\n  - At 120 h: 35% loss\n  - At 19 h (cell level, 85°C, 1000 V): efficiency drops from 16.4% to 0.1%\n- [[papers/MDPI-36-1297-2-s2.0-86000085439-2023-J-Potential Induced Degradation in Photovoltaic Modules: A Review of the Latest Research and Developme.pdf#page=5|Badran & Dhimish (2023), p.5]]\n\n**Voltage dependence of Pmax loss (multi-crystalline Si, 1.5 h, 85°C):**\n- At −1000 V: Pmax retained at **70%** of initial (30% loss)\n- At −1500 V: Pmax retained at **60%** of initial (40% loss)\n- At −2000 V: Pmax retained at **40%** of initial (60% loss)\n- [[papers/IOP-53-3675-2-s2.0-84956692262-2016-J-Consideration on Na diffusion and recovery phenomena in potential-induced degradation for crystallin.pdf#page=3|Masuda et al. (2016), p.3]]\n\n**Monofacial PERC (192–672 h, −1000 V, 60°C):**\n- Baseline (no gradient coating): 24.2% Pmax loss at 672 h\n- Gradient SiNx/SiNxOy/SiOx: 13.08% Pmax loss at 672 h\n- [[papers/Elsevier-318-1928-2-s2.0-85111494015-2021-J-Suppression of potential induced degradation in monofacial PERC solar cells with gradient designed c.pdf#page=5|Duan et al. (2021), p.5]]\n\n**Bifacial PERC (glass/glass, 136 h):** 50–78% Pmax loss\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]\n\n**TOPCon (96 h dark, 60°C, −1000 V):** ~30% Pmax loss; under 0.1-sun UV illumination ~3% loss (field-representative)\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=4|Luo et al. (2024), p.4]]\n\n**HJT bifacial (800 h):**\n- Front side: 53.9% Pmax loss\n- Rear side: 40.4% Pmax loss\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=5|Luo et al. (2024), p.5]]\n\n**CIGS on soda-lime glass (25 h, −1000 V, 85°C):** 100% Pmax loss (complete failure from 14.9% efficiency)\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=4|Theelen et al. (2018), p.4]]\n\n**Perovskite (55 h, −1000 V, 25°C):** 59% Pmax loss; (55 h, −1000 V, 60°C/60% RH): >90% Pmax loss\n- [[papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf#page=3|Nakka et al. (2023), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Field vs. Laboratory Loss Rates",
+      "detail": "Field PID losses are typically lower than laboratory accelerated test losses:\n\n- One-to-one quantitative relationship between charge transferred to active cell area and power loss\n- Power loss saturates at higher voltages (−2000 to −3000 V) because Q = CV limits maximum Na⁺ accumulation\n- At moderate field voltages (400–800 V), losses accumulate slowly over years\n- [[papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf#page=3|Kawamura et al. (2017), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Recovery Rates (Natural Recovery, p-type c-Si)",
+      "detail": "- **Moderate PID (40% initial loss):** Recovery to **95.6%** of original Pmax after 487 days at room temperature, open-circuit, in dark\n- **Severe PID (88% initial loss):** Recovery to **62.8%** of original Pmax after 491 days (incomplete)\n- Recovery kinetics: fast initial recovery (first 3–11 days), then slow plateau\n- [[papers/Other-81-1747-2-s2.0-85129456088-2022-other-Monitoring the natural recovery of potential induced degradation in poly-crystalline photovoltaic mo.pdf#page=4|Kwembur et al. (2022), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "String-Level Impact",
+      "detail": "A single PID-affected module reduces string performance by **5–7%**. In field installations:\n- 2% of modules showing PID can affect **12% of all strings** due to non-uniform distribution\n- PID is concentrated at the negative-end modules in each string\n- [[papers/Elsevier-148-757-2-s2.0-85202303009-2024-J-Polymer encapsulation impact on potential induced degradation in PV modules revealed by a multi moda.pdf#page=5|Buerhop et al. (2024), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-stacking-fault-shunting",
+      "display_name": "Na⁺-Decorated Stacking Fault Shunting",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-pn-junction-modification",
+      "display_name": "p-n Junction Carrier Concentration Modification",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-micro-crack-shunting",
+      "display_name": "Na⁺-Decorated Micro-Crack Shunting",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-sinx-conversion",
+      "display_name": "SiNx ARC Conversion to Sodium Silicate",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-rear-passivation-loss",
+      "display_name": "Rear Passivation Quality Loss (PERC)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-tco-degradation",
+      "display_name": "TCO Layer Optical and Electrical Degradation (HJT)",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-cigs-junction-accumulation",
+      "display_name": "CIGS Junction Alkali Cation Accumulation",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Interface Delamination in Thin-Film Si Modules",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-perovskite-interface",
+      "display_name": "Perovskite Buried Interface Degradation",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

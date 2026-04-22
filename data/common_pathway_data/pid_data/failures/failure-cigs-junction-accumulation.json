@@ -1,0 +1,176 @@
+{
+  "node_type": "failure",
+  "id": "failure-cigs-junction-accumulation",
+  "title": "CIGS Junction Alkali Cation Accumulation",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Cation Accumulation at CIGS/CdS Interface",
+      "detail": "Na⁺ ions migrating through Mo accumulate preferentially at the CIGS/CdS buffer junction:\n\n- Na concentration at CIGS surface increases from **$1.2 \\times 10^{19}$ to $4.2 \\times 10^{19}$ cm$^{-3}$** during PID stress\n- Depletion region expands from **~500 nm to ~1.5 µm** toward the Mo back contact as acceptors are compensated\n- Cation compensation reduces hole carrier concentration by **2–3×** from thermal effects alone at 85°C\n\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=3|Theelen et al. (2018), p.3]]\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=4|Mansfield et al. (2019), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Na Segregation at ZnO:Al Surface",
+      "detail": "At high ionic doses (21.1 mC/cm²), Na⁺ propagates all the way through the CIGS layer to the front TCO:\n\n- Na segregates visibly at the ZnO:Al (front TCO) surface as white spots\n- ZnO:Al layer is penetrated and partially demolished\n- Na reacts with surface moisture/CO₂ to form sodium carbonate (Na₂CO₃) spots\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=5|Mansfield et al. (2019), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Reduced Built-in Voltage",
+      "detail": "Acceptor compensation by Na⁺ in the p-type CIGS reduces the built-in voltage ($V_{bi}$) of the p-n junction:\n\n- Lower $V_{bi}$ reduces the maximum achievable $V_{oc}$\n- This is the primary source of $V_{oc}$ degradation in CIGS PID (unlike FF-dominated shunting in c-Si)\n- $I_{sc}$ remains relatively constant until advanced degradation stages\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=4|Theelen et al. (2018), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Degradation Rate and Threshold (Mo-Dependent)",
+      "detail": "The degradation threshold and rate depend critically on the Mo back contact microstructure:\n\n- **PID-susceptible Mo:** Degradation threshold ~2.7 mC/cm²; efficiency drops to 74% of initial at 21.1 mC/cm²\n- **PID-stable Mo:** Threshold > 10× higher (> 27 mC/cm²); only slight Na increase in CdS at equivalent charge levels\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=3|Mansfield et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Catastrophic Failure Timescale for Soda-Lime Glass Substrates",
+      "detail": "CIGS on soda-lime glass (SLG) substrate shows extremely rapid degradation:\n\n- After **25 hours** at −1000 V, 85°C: efficiency collapses from **14.9% to ~0%** (complete failure)\n- This is far more rapid than c-Si PID because Na⁺ concentration in SLG is very high and the Mo-to-CIGS junction is the shortest possible path\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=5|Theelen et al. (2018), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-cigs-alkali-cation-drift",
+      "display_name": "CIGS Alkali Metal Cation Drift",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-voc-reduction",
+      "display_name": "Open-Circuit Voltage (Voc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Na⁺ cations accumulating at the CIGS/CdS junction compensate p-type acceptors in the CIGS absorber, reducing hole carrier concentration and shrinking the built-in voltage ($V_{bi}$). Since $V_{oc}$ cannot exceed $V_{bi}$, reduction in $V_{bi}$ directly caps and reduces $V_{oc}$. Theelen et al. ",
+      "source_locations": [
+        {
+          "key": "cigs_voc",
+          "pdf_path": "papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf",
+          "page": 3,
+          "section": "Theelen et al. (2018) identify Voc as the primary CIGS PID loss: \"For all samples, the losses in efficiency after PID were in VOC and FF, whereas JSC stayed relatively constant. This coincided with a ",
+          "quote": "For all samples, the losses in efficiency after PID were in VOC and FF, whereas JSC stayed relatively constant. This coincided with a decrease in carrier concentration.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — The expanded depletion region (from ~500 nm to ~1.5 µm toward the Mo back contact as acceptors are compensated) increases series resistance, changes the diode ideality factor, and reduces the junction's ability to support a forward-biased operating point. This manifests as FF degradation alongs",
+      "source_locations": [
+        {
+          "key": "cigs_ff",
+          "pdf_path": "papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf",
+          "page": 4,
+          "section": "Mansfield et al. (2019) measured the depletion region expansion by C-V profiling: from ~500 nm to ~1.5 µm toward Mo, as Na⁺ compensates CIGS acceptors. The charge-threshold behavior was identified: \"d",
+          "quote": "degradation threshold ~2.7 mC/cm²; at 5.7 mC/cm² Voc and FF begin declining.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — CIGS on soda-lime glass (SLG) substrates, which provide the highest Na⁺ reservoir and lowest-resistance path through Mo, shows catastrophically rapid Pmax collapse: efficiency drops from 14.9% to ~0% within 25 h at −1000 V, 85°C. This is among the fastest reported PID failures for any technolog",
+      "source_locations": [
+        {
+          "key": "cigs_pmax",
+          "pdf_path": "papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf",
+          "page": 4,
+          "section": "Theelen et al. (2018) tested CIGS cells on soda-lime glass (SLG) vs. borosilicate glass (BSG) substrates: SLG showed \"efficiency collapse from 14.9% to ~0% within 25 hours at −1000 V, 85°C.\" BSG (lowe",
+          "quote": "efficiency collapse from 14.9% to ~0% within 25 hours at −1000 V, 85°C.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

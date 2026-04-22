@@ -1,0 +1,176 @@
+{
+  "node_type": "failure",
+  "id": "failure-thin-film-delamination",
+  "title": "Interface Delamination in Thin-Film Si Modules",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Two Delamination Morphologies",
+      "detail": "**Linear-shape delamination:**\n- Grows uniformly from scribe lines (P1, P2, P3) across the full module width\n- Occurs at or near the P1, P2, P3 scribing areas where the glass/TCO and TCO/thin-film Si interfaces are exposed\n- Forms during the **first PID stress cycle**; once formed, it is **irreversible**\n- Visible in outdoor field modules after 5 years of operation, concentrated near the bottom Al frame\n\n**Spot-shape delamination:**\n- Circular spots, approximately **200 µm diameter**\n- Located at the TCO/thin-film Si interface within the cell area\n- Appear predominantly after the **second negative voltage stress cycle** (following a +1000 V recovery cycle)\n- Larger number of spots correlates directly with larger Pmax loss\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=4|Shioda et al. (2017), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Chemical Mechanism of Delamination",
+      "detail": "Na⁺ ions from glass reach the interface between FTO and a-Si:H directly (no encapsulant barrier):\n\n- Na⁺ reacts chemically with the TCO/a-Si:H interface, weakening interfacial adhesion\n- The electrochemical reaction creates gas or reaction products at the interface, causing physical separation\n- OH⁻ ions generated at the surface also contribute to hydrolytic attack of the interface\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=3|Shioda et al. (2017), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "No Shunt Resistance Reduction",
+      "detail": "A critical diagnostic distinguisher from c-Si PID:\n\n- **Shunt resistance (Rsh) does NOT decrease** in thin-film Si PID\n- This absence of shunting confirms delamination (loss of electrical contact) rather than shunt formation as the dominant failure\n- The equivalent circuit changes as delaminated areas become inactive rather than shunted\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=2|Shioda et al. (2017), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Degradation Rate: Before and After Recovery Cycle",
+      "detail": "A characteristic feature of thin-film Si PID is catastrophic acceleration after a recovery/re-stress cycle:\n\n- **First −1000 V stress (300 h):** Gradual degradation to ~60% Pmax\n- **+1000 V recovery:** Complete recovery of all electrical parameters\n- **Second −1000 V stress:** Catastrophic degradation — equivalent damage in **36 hours** vs. 250+ hours in first cycle\n- Each cycle nucleates additional delamination sites; once linear delamination forms, complete recovery is impossible\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=5|Shioda et al. (2017), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Field Evidence of Delamination",
+      "detail": "Outdoor modules aged 5 years showed:\n- Linear delamination concentrated near the bottom Al frame (primary moisture/Na ingress point)\n- Delamination at junction box cutouts (secondary entry path)\n- Spot-shaped delamination matching laboratory accelerated test morphologies\n- [[papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf#page=6|Shioda et al. (2017), p.6]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-thin-film-interface-degradation",
+      "display_name": "Thin-Film Si Interface Electrochemical Degradation",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-isc-reduction",
+      "display_name": "Short-Circuit Current (Isc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Linear delamination propagating from scribe lines (P1, P2, P3) electrically disconnects sections of the thin-film cell from the circuit. Because thin-film Si modules are series-connected through scribing, a delaminated zone at a scribe line removes active area proportionally from photocurrent g",
+      "source_locations": [
+        {
+          "key": "tf_isc",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 4,
+          "section": "Shioda et al. (2017) describe two delamination morphologies contributing to Isc loss: linear delamination growing \"uniformly from scribe lines (P1, P2, P3) across the full module width\" during the fir",
+          "quote": "uniformly from scribe lines (P1, P2, P3) across the full module width",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Spot-shaped delamination within the cell area disrupts lateral current collection paths across the TCO layer. Where the a-Si:H film has physically separated from the TCO, carrier collection becomes inhomogeneous: current must detour around delaminated spots, increasing effective series resistan",
+      "source_locations": [
+        {
+          "key": "tf_ff",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 2,
+          "section": "Shioda et al. (2017) confirm that \"shunt resistance (Rsh) does NOT decrease\" in thin-film Si PID, distinguishing this FF degradation from shunt-dominated c-Si PID. The absence of Rsh reduction confirm",
+          "quote": "shunt resistance (Rsh) does NOT decrease",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Pmax loss reflects the combined Isc and FF degradation from delamination, with a defining characteristic: catastrophic acceleration after a recovery/re-stress cycle. In the first stress cycle (−1000 V, 300 h), Pmax declines gradually to ~60% of initial. A +1000 V recovery restores all electrica",
+      "source_locations": [
+        {
+          "key": "tf_pmax",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 5,
+          "section": "Shioda et al. (2017) quantify the catastrophic re-stress acceleration: \"First −1000 V stress (300 h): gradual degradation to ~60% Pmax. +1000 V recovery: complete recovery of all electrical parameters",
+          "quote": "First −1000 V stress (300 h): gradual degradation to ~60% Pmax. +1000 V recovery: complete recovery of all electrical parameters. Second −1000 V stress: catastrophic degradation — equivalent damage in 36 hours vs. 250+ hours in first cycle.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

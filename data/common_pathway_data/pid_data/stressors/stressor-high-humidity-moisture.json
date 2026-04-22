@@ -1,0 +1,269 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-high-humidity-moisture",
+  "title": "High Humidity and Moisture Ingress",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Surface Conductivity Enhancement",
+      "detail": "Glass surface resistance is the dominant lateral leakage current pathway. Humidity exponentially reduces this resistance:\n\n- A realistic diurnal humidity cycle (20°C/100% RH at night → 40°C/31.2% RH at midday) reduces glass surface conductivity by a factor of **63**\n- **Glass surface resistivity activation energy:** 99 ± 14 kJ/mol with strong relative-humidity dependence\n- [[papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf#page=1|Vogt et al. (2023), p.1]]\n\nWet module conditions increase leakage current by approximately **35×** compared to dry conditions:\n- [[papers/IEEE-171-2371-2-s2.0-85099585463-2020-C-Modeling of Leakage Currents in c-Si PV Modules and Investigation of their Arrhenius Behavior.pdf#page=2|Spataru et al. (2020), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Encapsulant Conductivity Changes",
+      "detail": "Water ingress raises the conductivity of EVA encapsulant by orders of magnitude:\n\n- Dry EVA specific resistance: ~$10^6$–$10^7$ Ω·cm² (high variability between materials)\n- Water-saturated EVA: ~100–1000 Ω·cm² (all materials converge to similar values)\n- The resistance collapse occurs because water enables ionic conduction through the polymer matrix\n- [[papers/AIP-114-2645-2-s2.0-85071569696-2019-C-Influence of soiling and moisture ingress on long term PID susceptibility of photovoltaic modules.pdf#page=2|Richter et al. (2019), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Moisture Ingress Timeline",
+      "detail": "EVA-encapsulated modules reach significant moisture saturation during field aging:\n\n- Initially dry modules (< 0.01% water content) reach saturation (~0.2% water content) within **500–2000 hours** of 85°C/85% RH damp-heat exposure (equivalent to 1–3 years of tropical field conditions)\n- PID-free modules in initial dry state develop pronounced PID susceptibility after damp-heat soaking, with shunt conductance increasing proportionally with soaking duration\n- [[papers/AIP-114-2645-2-s2.0-85071569696-2019-C-Influence of soiling and moisture ingress on long term PID susceptibility of photovoltaic modules.pdf#page=1|Richter et al. (2019), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Na⁺ Leaching from Glass",
+      "detail": "Moisture dramatically accelerates Na⁺ leaching from soda-lime glass:\n\n- Na concentrations in EVA at the glass interface increase with temperature above 55°C in the presence of moisture\n- At 85% RH vs. 25% RH, Na concentrations in EVA were **two orders of magnitude higher** ($\\sim 10^2\\times$)\n- Na concentrations increase exponentially with temperature: **0.422 ppm at 25°C** rising to **4.573 ppm at 75–85°C**\n- [[papers/Wiley-286-871-2-s2.0-85183870882-2024-J-Prevention of potential-induced degradation using a moisture barrier in crystalline silicon photovol.pdf#page=2|Alnuaimi et al. (2024), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Soiling Amplification (Capillary Condensation)",
+      "detail": "Surface soiling lowers the humidity threshold at which conductive water films form:\n\n- Arizona Test Dust at 20% surface coverage enables capillary condensation at moderate humidity (60–85% RH), forming conductive water films at lower humidity levels than clean glass requires\n- This \"boosted areal grounding\" of the glass surface promotes PID of the **whole module area** rather than just edge regions\n- [[papers/AIP-114-2645-2-s2.0-85071569696-2019-C-Influence of soiling and moisture ingress on long term PID susceptibility of photovoltaic modules.pdf#page=3|Richter et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Backsheet and Encapsulant Material Dependence",
+      "detail": "The rate of moisture ingress, and thus PID susceptibility, depends strongly on encapsulant and backsheet material choice:\n\n- **EVA volumetric resistance:** $10^{13}$–$10^{14}$ Ω·cm (more susceptible to moisture-enhanced conduction)\n- **POE volumetric resistance:** $10^{15}$–$10^{16}$ Ω·cm (water solubility 1 g/m³/mbar; far more resistant)\n- POE encapsulant achieves near **0% Pmax degradation** across all backsheet types under PID testing, even when the backsheet allows some moisture ingress\n- [[papers/Elsevier-242-1379-2-s2.0-85147101243-2023-J-Impact of different backsheets and encapsulant types on potential induced degradation (PID) of silic.pdf#page=4|Mahmood & TamizhMani (2023), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Moisture Barrier Effectiveness",
+      "detail": "A PTFE moisture barrier reduces Na⁺ penetration into EVA by approximately half at the glass/EVA interface:\n- WVTR improved by **29.3%** with PTFE coating; Na concentration in EVA approximately halved\n- [[papers/Wiley-286-871-2-s2.0-85183870882-2024-J-Prevention of potential-induced degradation using a moisture barrier in crystalline silicon photovol.pdf#page=3|Alnuaimi et al. (2024), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "HJT Module Moisture Coupling",
+      "detail": "In silicon heterojunction (HJT) modules, damp heat alone (without applied bias) causes **20% loss in Isc** after 500 hours via water-induced glass corrosion creating NaOH molecules, which then attack the TCO layer:\n- [[papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf#page=2|Zu et al. (2018), p.2]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-surface-leakage-current",
+      "display_name": "Surface and Bulk Leakage Current Flow",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Humidity is the primary variable controlling the resistance of the glass surface leakage path. Glass surface resistivity depends exponentially on relative humidity (activation energy 99 ± 14 kJ/mol): a realistic diurnal humidity cycle causes 63× variation in glass surface conductivity. Wet modu",
+      "source_locations": [
+        {
+          "key": "hum_slc",
+          "pdf_path": "papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf",
+          "page": 1,
+          "section": "Vogt et al. (2023) quantify the humidity–leakage current relationship: \"a realistic diurnal humidity cycle reduces glass surface conductivity by a factor of 63.\" Spataru et al. (2020) confirm: \"Wet mo",
+          "quote": "a realistic diurnal humidity cycle reduces glass surface conductivity by a factor of 63.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Moisture dramatically amplifies Na⁺ availability and transport in two ways: (1) it leaches Na⁺ from the glass matrix — Na concentrations in EVA at the glass/EVA interface are 2 orders of magnitude higher at 85% RH vs. 25% RH, and increase from 0.422 ppm at 25°C to 4.573 ppm at 75–85°C; (2) wate",
+      "source_locations": [
+        {
+          "key": "hum_nam",
+          "pdf_path": "papers/Wiley-286-871-2-s2.0-85183870882-2024-J-Prevention of potential-induced degradation using a moisture barrier in crystalline silicon photovol.pdf",
+          "page": 2,
+          "section": "Alnuaimi et al. (2024) demonstrate the humidity–Na⁺ leaching relationship: \"Na concentrations in EVA at the glass/EVA interface were two orders of magnitude higher at 85% RH vs. 25% RH\" and \"Na concen",
+          "quote": "Na concentrations in EVA at the glass/EVA interface were two orders of magnitude higher at 85% RH vs. 25% RH",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-tco-electrochemical-reduction",
+      "display_name": "TCO Layer Electrochemical Reduction (HJT)",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Moisture enables TCO electrochemical reduction in HJT modules even without applied voltage bias. Water-induced glass corrosion creates NaOH molecules at the glass/EVA/ITO interface, which chemically attack ITO. Zu et al. (2018) measure 20% Isc loss after 500 h of damp heat (85°C/85%RH) with no ",
+      "source_locations": [
+        {
+          "key": "hum_tco",
+          "pdf_path": "papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf",
+          "page": 3,
+          "section": "Zu et al. (2018) demonstrate moisture-only HJT TCO degradation: \"Water-induced glass corrosion creates NaOH at the glass/EVA/ITO interface; NaOH chemically attacks ITO...20% Isc loss after 500 h of da",
+          "quote": "Water-induced glass corrosion creates NaOH at the glass/EVA/ITO interface; NaOH chemically attacks ITO...20% Isc loss after 500 h of damp heat (85°C, 85% RH) with no applied bias.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-perovskite-ion-migration",
+      "display_name": "Perovskite Layer Ion Migration",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Elevated humidity synergizes with temperature and voltage to dramatically accelerate perovskite PID. At 60°C/60% RH, the same −1000 V stress that causes 59% efficiency loss at room conditions (25°C/20%RH) causes >90% loss, with only ~10% recovery (vs. 58% at room conditions). The humidity effec",
+      "source_locations": [
+        {
+          "key": "hum_per",
+          "pdf_path": "papers/Wiley-141-1314-2-s2.0-85153703868-2023-J-Study of Potential-Induced Degradation in Glass-Encapsulated Perovskite Solar Cells under Different .pdf",
+          "page": 2,
+          "section": "Nakka et al. (2023) quantify the humidity–temperature–voltage interaction: \"elevated stress conditions (60°C, 60% RH) cause >90% efficiency loss vs. 59% loss at room conditions (25°C, 20% RH) under th",
+          "quote": "elevated stress conditions (60°C, 60% RH) cause >90% efficiency loss vs. 59% loss at room conditions (25°C, 20% RH) under the same −1000 V stress.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-thin-film-interface-degradation",
+      "display_name": "Thin-Film Si Interface Electrochemical Degradation",
+      "node_type": "mechanism",
+      "child_reasoning": "** — In superstrate thin-film Si modules, moisture at the module edge (bottom Al frame, junction box cutouts) is the entry point for the degradation pathway. Field evidence from Shioda et al. (2017) shows 5-year-aged modules with \"linear delamination concentrated near the bottom Al frame\" and at jun",
+      "source_locations": [
+        {
+          "key": "hum_tf",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 6,
+          "section": "Shioda et al. (2017) provide field evidence of moisture-entry-point correlation with thin-film delamination: \"5-year-aged outdoor modules showed linear delamination concentrated near the bottom Al fra",
+          "quote": "5-year-aged outdoor modules showed linear delamination concentrated near the bottom Al frame (primary moisture/Na ingress point)",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+{
+  "node_type": "failure",
+  "id": "failure-rear-passivation-loss",
+  "title": "Rear Passivation Quality Loss (PERC)",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "AlOx Negative Fixed Charge and Its Function",
+      "detail": "The AlOx layer in PERC cells provides passivation in two ways:\n\n1. **Chemical passivation:** Saturates dangling bonds at the rear Si surface\n2. **Field-effect passivation:** The negative fixed charge ($Q_f \\approx -10^{12}$ cm$^{-2}$) repels minority carriers (holes in p-type Si base) from the rear surface, preventing recombination\n\nUnder PID-polarization, positive charge accumulation (Na⁺) neutralizes $Q_f$:\n\n- As $|Q_f|$ decreases, minority carrier repulsion weakens\n- Holes flow to the rear surface and recombine at interface defects\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=2|Chen et al. (2019), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Quantitative Degradation Signatures",
+      "detail": "Rear passivation loss manifests primarily as Isc and Voc reduction (unlike front-side PID-s, which is FF-dominated):\n\nAfter 136 h of PID stress at 1000 V, 85°C (bifacial PERC, glass/glass):\n\n- **Rear-side Isc loss:** 28–40%\n- **Rear-side Voc loss:** 28–36%\n- **Rear-side FF loss:** 37–42%\n- **Rear shunt resistance:** Dropped from 162 kΩ·cm² to 0.034–0.044 kΩ·cm²\n- [[papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf#page=3|Chen et al. (2019), p.3]]\n\nMonofacial PERC (front PID-s only), Rsh decrease after 192 h:\n\n- **Baseline:** 33.55% Rsh decrease\n- **Gradient SiNx/SiNxOy/SiOx capping:** 14.06% Rsh decrease (2.4× improvement)\n- [[papers/Elsevier-318-1928-2-s2.0-85111494015-2021-J-Suppression of potential induced degradation in monofacial PERC solar cells with gradient designed c.pdf#page=4|Duan et al. (2021), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "SiO₂ Thickness Effect on Charge Dissipation",
+      "detail": "The tunnel SiO₂ layer between the emitter and the SiNx ARC layer controls PID severity by governing charge dissipation:\n\n- **Thick SiO₂ (9 nm):** Completely blocks electron tunneling; no charge dissipation possible; both SiNx RI = 2.0 and 2.2 show identical rapid PID (10–15% loss in 15 minutes)\n- **Thin SiO₂ (1 nm) with high-RI SiNx (n = 2.2):** Electron tunneling dissipates accumulated charge in SiNx; PID nearly eliminated (~1% degradation)\n- **Thin SiO₂ (1 nm) with low-RI SiNx (n = 2.0):** No Si-rich SiNx; insufficient electron supply for dissipation; ~10% degradation\n- [[papers/Wiley-178-1653-2-s2.0-85127380886-2022-J-Effects of SiNx refractive index and SiO2 thickness on polarization-type potential-induced degradati.pdf#page=3|Wang et al. (2022), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Recovery Characteristics",
+      "detail": "Rear passivation loss is partially reversible:\n\n- Light soaking or positive voltage application can partially restore the effective negative charge in AlOx\n- Recovery rate increases dramatically with decreasing SiO₂ thickness (when RI is high), confirming tunneling-mediated charge redistribution\n- PERC cells recover faster than standard p-type cells from PID-s under comparable conditions\n- [[papers/Wiley-178-1653-2-s2.0-85127380886-2022-J-Effects of SiNx refractive index and SiO2 thickness on polarization-type potential-induced degradati.pdf#page=5|Wang et al. (2022), p.5]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-alox-rear-polarization",
+      "display_name": "AlOx Rear Passivation Layer Polarization (PERC)",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-isc-reduction",
+      "display_name": "Short-Circuit Current (Isc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Loss of field-effect passivation dramatically increases the rear surface recombination velocity (SRV). Minority carriers (electrons) photogenerated in the p-type Si bulk that reach the rear surface now recombine at interface defect states rather than being collected. This reduces the effective ",
+      "source_locations": [
+        {
+          "key": "rpl_isc",
+          "pdf_path": "papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf",
+          "page": 3,
+          "section": "Chen et al. (2019) report rear-side Isc loss of 28–40% (vs. front-side 4–6%) for bifacial p-PERC after 136 h at 1000 V, 85°C. The paper notes that rear SRV increase is the root cause: \"This degradatio",
+          "quote": "This degradation mechanism is witnessed as a substantial decrease of the ISC and the VOC while the decrease in FF is negligible",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-voc-reduction",
+      "display_name": "Open-Circuit Voltage (Voc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Increased rear SRV elevates the dark saturation current density $J_0$, which directly reduces $V_{oc}$ (since $V_{oc} \\propto \\ln(J_{ph}/J_0)$). Rear-side Voc loss (28–36%) exceeds front-side Voc loss (17–20%) at the same stress conditions because rear passivation loss uniformly destroys field-",
+      "source_locations": [
+        {
+          "key": "rpl_voc",
+          "pdf_path": "papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf",
+          "page": 3,
+          "section": "Chen et al. (2019) quantify the front vs. rear Voc asymmetry: \"Front-side Voc loss: 17–20%; Rear-side Voc loss: 28–36%.\" The greater rear loss reflects complete neutralization of the AlOx fixed charge",
+          "quote": "Front-side Voc loss: 17–20%; Rear-side Voc loss: 28–36%.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Combined Isc and Voc losses from rear passivation degradation contribute to total Pmax loss of 50–78% for bifacial PERC modules stressed at 136 h/1000 V/85°C (combining both front and rear degradation). The rear-side contribution is larger in magnitude for bifacial modules than for monofacial P",
+      "source_locations": [
+        {
+          "key": "rpl_pmax",
+          "pdf_path": "papers/Elsevier-424-2622-2-s2.0-85065845673-2019-J-Physics of potential induced degradation in bifacial p PERC solar cells.pdf",
+          "page": 3,
+          "section": "Chen et al. (2019) measured total Pmax loss of 50–78% for glass/glass bifacial PERC at 1000 V, 85°C, 136 h, combining front PID-s and rear PID-p contributions. The rear shunt resistance dropped from 1",
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,254 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-high-system-voltage",
+  "title": "High System Voltage (Negative Bias)",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Voltage Magnitude and Degradation Onset",
+      "detail": "Standard accelerated PID testing applies **−1000 V** DC bias between the shorted cell terminals and the module frame, based on IEC 62804 protocols. However, degradation has been observed at much lower voltages:\n\n- Minimal PID degradation occurs below **200 V**; significant degradation appears above **400 V**; drastic degradation at **1000 V** and above.\n- [[papers/Elsevier-541-3483-2-s2.0-84991699729-2016-J-Microscopic aspects of potential induced degradation phenomena and their recovery processes for p ty.pdf#page=1|Luo et al. (2016), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Polarity Dependence",
+      "detail": "PID is strongly polarity-dependent. Negative bias on the cell (relative to the frame) drives Na⁺ ions from the front glass toward the cell. Positive bias reverses or suppresses this migration:\n\n- Complete PID suppression observed when a positive voltage (+1000 V) was applied at 85°C, compared to essentially no suppression at +1000 V and 25°C.\n- [[papers/IOP-53-3675-2-s2.0-84956692262-2016-J-Consideration on Na diffusion and recovery phenomena in potential-induced degradation for crystallin.pdf#page=1|Masuda et al. (2016), p.1]]\n\nIn TOPCon modules, no degradation was observed on the rear face in either polarity, and no degradation on the front face with positive voltage:\n- [[papers/Wiley-105-888-2-s2.0-85183130481-2024-J-Field-representative evaluation of PID-polarization in TOPCon PV modules by accelerated stress testi.pdf#page=1|Luo et al. (2024), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Electric Field in SiNx ARC",
+      "detail": "The applied system voltage creates an electric field of approximately **0.5–1 MV/cm** across the 80–200 nm SiNx antireflective coating (ARC). This field:\n\n- Reduces Na⁺ transit time through 80 nm PECVD SiNx from ~1 million years (diffusion only) to **~25 minutes** at 80°C with $0.5$ MV/cm applied field.\n- [[papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf#page=2|Wilson et al. (2015), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Leakage Current and Charge Transfer",
+      "detail": "The system voltage drives a leakage current through the path: Al frame → glass surface → encapsulant bulk → cell ARC. This current carries ionic charge (primarily Na⁺) to the cell surface:\n\n- A one-to-one quantitative relationship was established between **charge transferred onto the active cell area** and **power loss**, demonstrating that accumulated ionic dose directly controls degradation magnitude.\n- [[papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf#page=1|Kawamura et al. (2017), p.1]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "CIGS and Thin-Film Cells",
+      "detail": "For CIGS modules, a negative bias causes alkali metal cations (Na⁺ from soda-lime glass substrate) to drift through the Mo back contact into the CIGS absorber. Borosilicate glass substrates (with K⁺ instead of Na⁺) show **35× lower leakage current** and dramatically reduced degradation due to lower K⁺ mobility:\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=1|Theelen et al. (2018), p.1]]\n\nFor perovskite cells, negative bias at 1000 V causes complete failure in the majority of cells (7/8 cells) within 1000 hours:\n- [[papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf#page=2|Brecl et al. (2022), p.2]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-surface-leakage-current",
+      "display_name": "Surface and Bulk Leakage Current Flow",
+      "node_type": "mechanism",
+      "child_reasoning": "** — The voltage potential difference between the negatively biased cell circuit and the grounded module frame is the direct driving force for leakage current. Current flows through the path: Al frame → wet glass surface → encapsulant → cell ARC. The magnitude of this leakage current is proportional",
+      "source_locations": [
+        {
+          "key": "sv_slc",
+          "pdf_path": "papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf",
+          "page": 1,
+          "section": "Kawamura et al. (2017) established the one-to-one relationship between transferred charge and Pmax loss: \"the transferred charge...can be considered as a representation of the Na⁺ ions accumulated on ",
+          "quote": "the transferred charge...can be considered as a representation of the Na⁺ ions accumulated on the cells.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism",
+      "child_reasoning": "** — The applied system voltage creates an electric field of ~0.5–1 MV/cm across the 80–200 nm SiNx ARC layer, which is the rate-limiting barrier for Na⁺ migration. Without this field, Na⁺ transit through SiNx by diffusion alone would take ~1 million years at 80°C; at 0.5 MV/cm field, transit time c",
+      "source_locations": [
+        {
+          "key": "sv_nam",
+          "pdf_path": "papers/Elsevier-564-3774-2-s2.0-84940452054-2015-J-Drift characteristics of mobile ions in SiNx films and solar cells.pdf",
+          "page": 2,
+          "section": "Wilson et al. (2015) demonstrate the field-acceleration of Na⁺ transit: \"reduces Na⁺ transit time through 80 nm PECVD SiNx from ~1 million years (diffusion only) to ~25 minutes at 80°C with 0.5 MV/cm ",
+          "quote": "reduces Na⁺ transit time through 80 nm PECVD SiNx from ~1 million years (diffusion only) to ~25 minutes at 80°C with 0.5 MV/cm applied field.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-alox-rear-polarization",
+      "display_name": "AlOx Rear Passivation Layer Polarization (PERC)",
+      "node_type": "mechanism",
+      "child_reasoning": "** — In bifacial PERC modules with glass/glass construction, the rear glass sheet is also at system voltage (ground potential), creating a voltage potential across the rear AlOx passivation layer. This drives positive charges (Na⁺ from rear glass or holes from the Si bulk) through the AlOx layer, ne",
+      "source_locations": [
+        {
+          "key": "sv_alox",
+          "pdf_path": "papers/Wiley-178-1653-2-s2.0-85127380886-2022-J-Effects of SiNx refractive index and SiO2 thickness on polarization-type potential-induced degradati.pdf",
+          "page": 3,
+          "section": "Wang et al. (2022) demonstrate the voltage-charge coupling for AlOx rear polarization: \"Thick SiO₂ (9 nm): Completely blocks electron tunneling; no charge dissipation possible; both SiNx RI = 2.0 and ",
+          "quote": "Thick SiO₂ (9 nm): Completely blocks electron tunneling; no charge dissipation possible; both SiNx RI = 2.0 and 2.2 show identical rapid PID (10–15% loss in 15 minutes)",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-tco-electrochemical-reduction",
+      "display_name": "TCO Layer Electrochemical Reduction (HJT)",
+      "node_type": "mechanism",
+      "child_reasoning": "** — In HJT modules, negative voltage applied to the front cell circuit drives Na⁺ from the glass/EVA stack through the encapsulant to the ITO surface, providing both the ionic reactant (Na⁺) and the electrochemical driving force for ITO reduction to metallic In⁰. Applied negative voltage dramatical",
+      "source_locations": [
+        {
+          "key": "sv_tco",
+          "pdf_path": "papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf",
+          "page": 3,
+          "section": "Zu et al. (2018) show that \"applied negative voltage accelerates this [NaOH/moisture] process dramatically,\" with pure damp heat (no voltage) causing \"20% Isc loss after 500 h\" while voltage + humidit",
+          "quote": "applied negative voltage accelerates this [NaOH/moisture] process dramatically,",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-cigs-alkali-cation-drift",
+      "display_name": "CIGS Alkali Metal Cation Drift",
+      "node_type": "mechanism",
+      "child_reasoning": "** — In CIGS modules, negative voltage applied to the back contact drives Na⁺ ions from the soda-lime glass substrate through the Mo back contact into the CIGS absorber. Borosilicate glass (K⁺ instead of Na⁺, 35× lower leakage current at equivalent voltage) shows dramatically lower degradation, conf",
+      "source_locations": [
+        {
+          "key": "sv_cigs",
+          "pdf_path": "papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf",
+          "page": 1,
+          "section": "Theelen et al. (2018) confirm voltage-driven CIGS drift: BSG (borosilicate glass, K⁺) shows \"35× lower leakage current\" than SLG (soda-lime glass, Na⁺) at equivalent voltage, demonstrating that voltag",
+          "quote": "35× lower leakage current",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-thin-film-interface-degradation",
+      "display_name": "Thin-Film Si Interface Electrochemical Degradation",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Applied negative voltage drives Na⁺ from the glass superstrate directly to the FTO/a-Si:H interface (no encapsulant barrier in superstrate configuration), supplying the ionic reactant for chemical attack and providing the electrochemical driving force for interface hydrolysis. Unlike c-Si PID w",
+      "source_locations": [
+        {
+          "key": "sv_tf",
+          "pdf_path": "papers/IOP-48-3326-2-s2.0-85017152617-2017-J-Potential-induced degradation of thin-film Si photovoltaic modules.pdf",
+          "page": 3,
+          "section": "Shioda et al. (2017) characterize the voltage-driven thin-film delamination: first −1000 V stress (300 h) causes gradual degradation; the delamination morphologies (linear at scribe lines, spot within",
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-perovskite-ion-migration",
+      "display_name": "Perovskite Layer Ion Migration",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Voltage controls the depth of Na⁺ penetration into the perovskite device, determining whether polarization-type (500–800 V, Na⁺ stays at glass/FTO) or shunting-type (1000 V, Na⁺ penetrates to perovskite grain boundaries) failure occurs. At 1000 V, complete failure (Voc → 0) occurred in 7/8 cell",
+      "source_locations": [
+        {
+          "key": "sv_per",
+          "pdf_path": "papers/Wiley-190-1756-2-s2.0-85121464246-2022-J-Are Perovskite Solar Cell Potential-Induced Degradation Proof?.pdf",
+          "page": 2,
+          "section": "Brecl et al. (2022) establish the perovskite voltage threshold: \"complete failure (Voc → 0) in 7/8 cells after 1000 h at 1000 V negative bias\" with \"large dark regions (20–80% of cell area) visible in",
+          "quote": "complete failure (Voc → 0) in 7/8 cells after 1000 h at 1000 V negative bias",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

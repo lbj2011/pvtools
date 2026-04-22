@@ -1,0 +1,152 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-cigs-alkali-cation-drift",
+  "title": "CIGS Alkali Metal Cation Drift",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Substrate as the Ion Source",
+      "detail": "Unlike c-Si modules where Na⁺ originates from the front glass cover, in CIGS modules the glass is the **substrate** (superstrate structure reversed). Na⁺ originates from the back-side soda-lime glass:\n\n- Soda-lime glass (SLG) substrate: **catastrophic PID** at −1000 V, 85°C within 25 hours (efficiency collapses from 14.9% to ~0%)\n- Borosilicate glass (BSG) substrate: **35× lower leakage current** (due to lower K⁺ mobility); only marginal degradation after 25 hours; slow PID after 600 h\n- When normalized to **equal Coulombs transferred**, SLG and BSG produce similar degradation, confirming this is a charge-based (ionic dose) mechanism\n\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=2|Theelen et al. (2018), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Mo Back Contact as Critical Gatekeeper",
+      "detail": "The microstructure of the Mo back contact determines whether Na⁺ from the glass substrate can reach the CIGS absorber:\n\n- **PID-susceptible Mo:** Higher Na and Ga content in seed layer; denser, more continuous crystallite structure; less grain boundary oxygen; closed grain structure impedes Na diffusion away from the surface\n- **PID-stable Mo:** Higher oxygen content in grain boundaries; larger, less dense crystallites; greater inter-crystallite distance; open granular structure where oxygen \"traps\" Na, hindering migration into CIGS\n\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=3|Mansfield et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Migration Path through Mo: Charge-Threshold Behavior",
+      "detail": "Na⁺ transport through Mo into CIGS is threshold-governed:\n\n- **PID-susceptible Mo:** Degradation begins after **~2.7 mC/cm²** transferred; at 5.7 mC/cm² Voc and FF begin declining; at 8.9 mC/cm² Na segregates at ZnO:Al surface\n- **PID-stable Mo:** Requires **>10× more charge** (> ~27 mC/cm²) before degradation begins\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=4|Mansfield et al. (2019), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Cation Accumulation at CIGS/CdS Junction",
+      "detail": "Na⁺ ions accumulate primarily at the CIGS/CdS buffer layer junction:\n\n- Na concentration at CIGS surface increases from **1.2 × 10¹⁹** to **4.2 × 10¹⁹ cm⁻³** under PID stress\n- Accumulated cations expand the depletion region from ~500 nm to ~1.5 µm toward the Mo contact\n- Cations compensate p-type acceptors, reducing hole carrier concentration\n- At 21.1 mC/cm², Na segregates at the ZnO:Al (front TCO) surface with visible surface spots\n\n- [[papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf#page=5|Mansfield et al. (2019), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Polarity Dependence and Partial Recovery",
+      "detail": "- **Negative bias (Mo as cathode):** Drives Na⁺ from glass toward CIGS junction — catastrophic degradation\n- **Positive bias:** Minimal or beneficial effect; reversing polarity partially compensates accumulated charge and allows partial recovery\n- Degradation is partially reversible by reversing voltage polarity\n\n- [[papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf#page=3|Theelen et al. (2018), p.3]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-high-system-voltage",
+      "display_name": "High System Voltage (Negative Bias)",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-temperature",
+      "display_name": "High Temperature",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-cigs-junction-accumulation",
+      "display_name": "CIGS Junction Alkali Cation Accumulation",
+      "node_type": "failure",
+      "child_reasoning": "** — Na⁺ ions that cross the Mo back contact accumulate preferentially at the CIGS/CdS p-n junction. This is the complete failure from CIGS alkali cation drift: Na⁺ compensates p-type acceptors in the CIGS absorber, expands the depletion region from ~500 nm to ~1.5 µm toward the Mo back contact, and",
+      "source_locations": [
+        {
+          "key": "cigs_child",
+          "pdf_path": "papers/MDPI-74-2828-2-s2.0-85078032594-2019-J-Influence of molybdenum back contact on the pid effect for Cu(In,Ga)Se2 solar cells.pdf",
+          "page": 4,
+          "section": "Mansfield et al. (2019) measured Na concentration depth profiles by SIMS before and after PID. Na concentration at the CIGS surface increased from 1.2 × 10¹⁹ to 4.2 × 10¹⁹ cm⁻³, while the depletion re",
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "cigs_quote",
+          "pdf_path": "papers/IEEE-267-2998-2-s2.0-85051002389-2018-J-Potential-Induced Degradation of Cu(In,Ga)Se2 Solar Cells: Alkali Metal Drift and Diffusion Effects.pdf",
+          "page": 3,
+          "section": "Theelen et al. (2018) identified Voc and FF as the primary PID losses in CIGS, with Jsc remaining relatively stable: \"For all samples, the losses in efficiency after PID were in VOC and FF, whereas JS",
+          "quote": "For all samples, the losses in efficiency after PID were in VOC and FF, whereas JSC stayed relatively constant. This coincided with a decrease in carrier concentration.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

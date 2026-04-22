@@ -1,0 +1,209 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-surface-leakage-current",
+  "title": "Surface and Bulk Leakage Current Flow",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Dominant Conduction Pathways",
+      "detail": "At least six leakage current pathways have been identified in a standard glass-encapsulant-cell-backsheet module stack, with glass surface conduction dominant at high humidity:\n\n1. Along the front glass surface and through the glass/encapsulant bulk\n2. Through the front glass bulk laterally, then through the encapsulant\n3. Along the glass/encapsulant interface, then through the encapsulant\n4. Through the encapsulant bulk only\n5. Along the encapsulant/backsheet interface, then through the encapsulant\n6. Along the backsheet surface and through the backsheet/encapsulant\n\nPathway 1 (glass surface) dominates at realistic humidity levels because glass surface resistivity drops far more steeply with humidity than encapsulant bulk resistivity:\n- [[papers/MDPI-36-1297-2-s2.0-86000085439-2023-J-Potential Induced Degradation in Photovoltaic Modules: A Review of the Latest Research and Developme.pdf#page=4|Badran & Dhimish (2023), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Glass as Predominantly Ionic Conductor",
+      "detail": "Leakage current through glass is **almost exclusively ionic** (Na⁺ ions); the polymer (EVA, POE) shows primarily ionic conduction with some electronic contribution:[^slc_ionic]\n\n- Glass resistance at 23°C, 50% RH: ~$1.0 \\times 10^{10}$ to $1.1 \\times 10^{11}$ Ω\n- EVA resistance: ~$1.7 \\times 10^{14}$ Ω\n- **Glass surface resistivity activation energy:** 99 ± 14 kJ/mol (strong humidity dependence)\n- **EVA volumetric resistivity activation energy:** 102 ± 6 kJ/mol\n- **POE volumetric resistivity activation energy:** 84 ± 6 kJ/mol\n\n- [[papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf#page=2|Vogt et al. (2023), p.2]]",
+      "source_locations": [
+        {
+          "key": "slc_ionic",
+          "pdf_path": "papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf",
+          "page": 2,
+          "section": "Vogt et al. (2023) measured impedance spectra of individual module stack layers (glass, EVA, SiNx) separately. They identify that \"The Na⁺ ions from the glass, or present initially in the encapsulant,",
+          "quote": "The Na⁺ ions from the glass, or present initially in the encapsulant, or even the cell surface, drift toward the cell through the encapsulant under the electrical field and can accumulate near the metallization fingers as ionic species, in silicon stacking faults causing PID-shunting, or on the SiOxNy surface when the cells are at negative potential.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Dry vs. Wet Module Leakage",
+      "detail": "- **Dry module steady-state leakage current:** ~10 nA\n- **Wet module leakage current:** ~35× higher than dry\n- EVA resistivity is two orders of magnitude higher than glass resistivity (10¹⁴ vs. 10¹² Ω·cm)\n- Glass surface resistance becomes the critical limiting factor at high humidity\n- [[papers/IEEE-171-2371-2-s2.0-85099585463-2020-C-Modeling of Leakage Currents in c-Si PV Modules and Investigation of their Arrhenius Behavior.pdf#page=2|Spataru et al. (2020), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Three-Stage Current Transient Under Voltage Application",
+      "detail": "When system voltage is applied, the leakage current exhibits three temporal stages:\n\n1. **0–6 seconds:** Displacement (capacitive) current dominates; 15–20× larger than steady-state conduction current\n2. **6–10 seconds:** Linear voltage ramp; displacement current continues\n3. **After 10 seconds:** Conduction current dominates at steady state; ~35 nA/m² at 1000 V\n\n- [[papers/IEEE-183-2385-2-s2.0-85099531570-2020-C-Theoretical insight into leakage current of solar module under high system voltage.pdf#page=2|Zhao et al. (2020), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Spatial Distribution: Distance from Frame",
+      "detail": "Leakage current is not uniform across the module area; it decreases from frame edge toward module center:\n\n- **Dry conditions (40°C):** Current density nearly constant (~0.14 nA/cm²) regardless of distance from frame because glass surface resistance dominates\n- **Wet moderate humidity (75% RH, saturated EVA):** Current density varies 10-fold from frame edge to cell center, depending on whether the surface is soiled or clean\n- **Fully wet (90% RH):** Current density reaches ~19 nA/cm² maximum, relatively flat distribution\n\n- [[papers/AIP-114-2645-2-s2.0-85071569696-2019-C-Influence of soiling and moisture ingress on long term PID susceptibility of photovoltaic modules.pdf#page=3|Richter et al. (2019), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "PID Onset Threshold",
+      "detail": "A voltage of at least **~10 V** must drop across the SiNx ARC layer to initiate significant PID. This corresponds to leakage current densities of **10–30 nA/cm²**. Soiling can push cells near frame edges over this threshold even at moderate system voltages:\n- [[papers/AIP-114-2645-2-s2.0-85071569696-2019-C-Influence of soiling and moisture ingress on long term PID susceptibility of photovoltaic modules.pdf#page=2|Richter et al. (2019), p.2]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Quantitative Relationship to Power Loss",
+      "detail": "A one-to-one relationship exists between **total charge transferred to the active cell area** and **power loss**. Power loss is directly proportional to accumulated Na⁺ dose. At higher voltages (−2000 to −3000 V), degradation saturates because $Q = CV$ limits maximum Na⁺ accumulation:[^slc_charge]\n- [[papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf#page=2|Kawamura et al. (2017), p.2]]",
+      "source_locations": [
+        {
+          "key": "slc_charge",
+          "pdf_path": "papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf",
+          "page": 2,
+          "section": "Kawamura et al. (2017) measured leakage current and power loss simultaneously for multi-crystalline Si modules at −1000 V to −3000 V. The key passage states: \"It was found that there is a one-to-one r",
+          "quote": "It was found that there is a one-to-one relationship between the charge transferred onto the active cell area and the power loss of a module. This result suggests that the PID power loss is due to the amount of Na⁺ ions accumulated on the active cell area.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Hydrophobic Surface Interruption as Mitigation",
+      "detail": "Applying hydrophobic PTFE tape at module edges breaks the surface conduction pathway and reduced power loss from **29% to 15–17%** under PID stress. Complete elimination requires non-conductive barriers such as Corning Willow Glass:\n- [[papers/SPIE-139-3142-2-s2.0-85056841926-2018-C-Addressing potential-induced degradation of field-installed PV modules by reducing surface conductiv.pdf#page=3|Hacke et al. (2018), p.3]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-high-system-voltage",
+      "display_name": "High System Voltage (Negative Bias)",
+      "node_type": "stressor"
+    },
+    {
+      "id": "stressor-high-humidity-moisture",
+      "display_name": "High Humidity and Moisture Ingress",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "mechanism-na-ion-migration",
+      "display_name": "Na⁺ Ion Migration through Glass, Encapsulant, and ARC",
+      "node_type": "mechanism",
+      "child_reasoning": "** — Surface leakage current is the primary ionic transport vehicle that delivers Na⁺ from the grounded module frame to the active cell surface. The leakage current carries Na⁺ ions (and OH⁻ counterions) along the glass surface and through the encapsulant bulk. Kawamura et al. (2017) demonstrated a ",
+      "source_locations": [
+        {
+          "key": "slc_to_nam",
+          "pdf_path": "papers/IOP-44-3195-2-s2.0-85039161903-2017-J-Quantitative analysis of relationship between leakage current and power loss of multi-crystalline si.pdf",
+          "page": 2,
+          "section": "Kawamura et al. (2017) measured leakage current and Pmax loss simultaneously across −1000 V to −3000 V on multi-crystalline Si cells, finding that \"there is a one-to-one relationship between the charg",
+          "quote": "there is a one-to-one relationship between the charge transferred onto the active cell area and the power loss of a module. This result suggests that the PID power loss is due to the amount of Na⁺ ions accumulated on the active cell area.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "slc_ionic",
+          "pdf_path": "papers/Wiley-136-1282-2-s2.0-85148423463-2023-J-Electrochemical mechanisms of leakage-current in photovoltaic modules.pdf",
+          "page": 2,
+          "section": "Vogt et al. (2023) measured impedance spectra of individual module stack layers (glass, EVA, SiNx) separately. They identify that \"The Na⁺ ions from the glass, or present initially in the encapsulant,",
+          "quote": "The Na⁺ ions from the glass, or present initially in the encapsulant, or even the cell surface, drift toward the cell through the encapsulant under the electrical field and can accumulate near the metallization fingers as ionic species, in silicon stacking faults causing PID-shunting, or on the SiOxNy surface when the cells are at negative potential.",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "node_type": "failure",
+  "id": "failure-tco-degradation",
+  "title": "TCO Layer Optical and Electrical Degradation (HJT)",
+  "introduction": "",
+  "reasoning": "",
+  "key_findings": [
+    {
+      "claim": "Metallic Indium Reduction (Optical Loss Mechanism)",
+      "detail": "Under negative bias, Na⁺ ions arriving at the ITO surface cause local reduction:\n\n- Metallic indium (In⁰) is reduced from ITO (In₂O₃·SnO₂) at sites of Na⁺ accumulation\n- Metallic indium nanoparticles absorb incident light, reducing optical transmittance through the TCO\n- This manifests primarily as **Isc loss** (less light reaching the a-Si:H/c-Si absorber)\n- Front-side HJT degradation under negative bias: Isc loss of **53.9% after 800 h**\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=4|Luo et al. (2024), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Nano-Crack Formation and Ion Penetration (Passivation Loss Mechanism)",
+      "detail": "SEM and TEM imaging of PID-stressed HJT cells reveals:\n\n- Nano-cracks form at the ITO surface under electrochemical attack\n- Na⁺ and OH⁻ groups migrate through nano-cracks into the a-Si:H intrinsic layer\n- Na⁺ creates recombination centers at the a-Si:H/c-Si interface\n- These recombination centers reduce interface passivation quality (increasing surface SRV)\n- This manifests primarily as **FF loss** (increased series/shunt resistance and recombination)\n- [[papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf#page=4|Zu et al. (2018), p.4]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Front vs. Rear Side Degradation Signatures",
+      "detail": "The failure mode differs between front and rear TCO layers:\n\n| Parameter | Front Side (negative bias) | Rear Side |\n|-----------|--------------------------|-----------|\n| Dominant loss | Isc (optical absorption) | FF (recombination) |\n| Pmax loss (800 h) | 53.9% | 40.4% |\n| Primary mechanism | Metallic In⁰ formation | Interface passivation loss |\n\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=5|Luo et al. (2024), p.5]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Moisture-Driven NaOH Attack (Without Applied Bias)",
+      "detail": "Even without voltage bias, moisture alone degrades HJT TCO:\n\n- Water-induced glass corrosion creates NaOH at the glass/EVA/ITO interface\n- NaOH chemically attacks ITO, causing structural changes to the TCO layer\n- **20% Isc loss** after 500 h of damp heat (85°C, 85% RH) with no applied bias\n- Applied negative voltage accelerates this process dramatically\n- [[papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf#page=3|Zu et al. (2018), p.3]]",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Near-Irreversibility",
+      "detail": "Unlike p-type c-Si PID-s, HJT PID shows very limited reversibility:\n\n- Slight initial recovery followed by a plateau\n- Recovery fails because metallic indium formation and nano-crack damage are largely irreversible structural changes\n- [[papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf#page=7|Luo et al. (2024), p.7]]\n\n---",
+      "source_locations": [
+        {
+          "key": "_placeholder",
+          "pdf_path": null,
+          "page": null,
+          "section": null,
+          "quote": null,
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-tco-electrochemical-reduction",
+      "display_name": "TCO Layer Electrochemical Reduction (HJT)",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "loss-isc-reduction",
+      "display_name": "Short-Circuit Current (Isc) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Metallic indium (In⁰) nanoparticles reduced from ITO absorb incident photons in the visible-near-infrared range (plasmonic absorption), reducing optical transmittance through the front TCO layer. Fewer photons reach the a-Si:H/c-Si absorber, directly reducing Jsc. On the front side of bifacial ",
+      "source_locations": [
+        {
+          "key": "tco_isc",
+          "pdf_path": "papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf",
+          "page": 4,
+          "section": "Luo et al. (2024) directly measured the front-side HJT Pmax loss breakdown: \"front-side ITO reduction by Na⁺...optical absorption in the ITO layer\" is identified as the root cause of Isc loss. Bifacia",
+          "quote": "front-side ITO reduction by Na⁺...optical absorption in the ITO layer",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-ff-reduction",
+      "display_name": "Fill Factor (FF) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Na⁺ and OH⁻ penetrating through ITO nano-cracks reach the a-Si:H intrinsic passivation layers at the a-Si:H/c-Si interface, creating recombination centers that increase interface SRV. This interface degradation manifests primarily as FF reduction (rather than Isc reduction) because interface re",
+      "source_locations": [
+        {
+          "key": "tco_ff",
+          "pdf_path": "papers/Wiley-251-3004-2-s2.0-85045834850-2018-J-Comprehensive study of potential-induced degradation in silicon heterojunction photovoltaic cell mod.pdf",
+          "page": 4,
+          "section": "Zu et al. (2018) used SEM and TEM to reveal that \"nano-cracks form at the ITO surface under PID conditions\" and that \"Na⁺ creates recombination centers at the a-Si:H/c-Si interface, reducing interface",
+          "quote": "nano-cracks form at the ITO surface under PID conditions",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "loss-pmax-reduction",
+      "display_name": "Maximum Power (Pmax) Reduction",
+      "node_type": "performance_loss",
+      "child_reasoning": "** — Combined Isc and FF losses from TCO degradation drive total Pmax loss. The HJT bifacial failure is notable for being near-irreversible: metallic indium formation and nano-crack structural damage do not reverse on removing stress voltage, making HJT PID particularly damaging compared to recovera",
+      "source_locations": [
+        {
+          "key": "tco_pmax",
+          "pdf_path": "papers/Wiley-107-890-2-s2.0-85180462440-2024-J-Potential-induced degradation in bifacial silicon heterojunction solar modules: Insights and mitigat.pdf",
+          "page": 5,
+          "section": "Luo et al. (2024) demonstrated near-irreversibility of HJT PID: \"slight initial recovery followed by a plateau\" occurs upon removing stress, because metallic indium formation and nano-crack damage are",
+          "quote": "slight initial recovery followed by a plateau",
+          "authors": null,
+          "year": null,
+          "line": null,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}
