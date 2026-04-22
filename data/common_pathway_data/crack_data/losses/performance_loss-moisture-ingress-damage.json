@@ -1,0 +1,86 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-moisture-ingress-damage",
+  "title": "Moisture Ingress and Accelerated Internal Degradation",
+  "introduction": "Moisture ingress and accelerated internal degradation is the performance loss that results when structural failures — either edge seal cracking or glass breakage — compromise the module's moisture barrier. Water vapor entering through crack pathways reaches internal metal conductors, silicon cell surfaces, and the desiccant. This triggers corrosion of conductor leads, creation of short circuits, and silicon surface degradation that can produce hot spots. The desiccant eventually saturates and loses its moisture-controlling function. All of these degradation processes accelerate module performance decline and can introduce electrical safety hazards.",
+  "reasoning": "Both failure-edge-seal-crack (1564-SPIE) and failure-glass-breakage (1217-MDPI) are documented causes of moisture ingress that leads to the same set of internal degradation consequences, warranting a shared performance loss node.",
+  "key_findings": [
+    {
+      "claim": "Water vapor entering through seal cracks corrodes conductor leads and can cause hot spots on silicon surfaces",
+      "detail": "When water vapor enters the module interior through a seal crack, it adheres to the battery conductor leads and corrodes them, leading to reduced power output efficiency. [^spie1564a] Corrosion on the surface of silicon chips can cause the battery to produce hot spots, representing a severe thermal and electrical consequence of moisture ingress. [^spie1564b]",
+      "source_locations": [
+        {
+          "key": "spie1564a",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "If the water vapor goes inside the panel, it will Sticking to the battery conductor leads and corrode the conductor leads and lead to power output efficiency reduce.",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "the corrosion on the surface of a silicon chip will cause the battery to produce hot spots",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Water vapor entering through broken glass creates short circuits and safety risks in the solar cells",
+      "detail": "Shattering or breakage of the module's glass allows water vapor to enter the solar cells, creating short circuits and safety risks such as electrical shock. [^mdpi1217a] Moisture entering through junction box failures also allows water vapor to reach the interior, further illustrating the multiple pathways through which cracking failures deliver moisture ingress damage. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Shattering or breakage of the module's glass allows water vapor to enter the solar cells, creating short circuits and safety risks like electrical shock",
+          "authors": null,
+          "year": 2024,
+          "line": 7,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 13,
+          "section": "2.5. Junction Box and Bypass Diodes",
+          "quote": "Most J-box failures allow for the ingress of water vapor",
+          "authors": null,
+          "year": 2024,
+          "line": 13,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-edge-seal-crack",
+      "display_name": "Edge Seal Cracking",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-glass-breakage",
+      "display_name": "Protective Glass Breakage",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

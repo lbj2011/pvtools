@@ -1,0 +1,90 @@
+{
+  "node_type": "failure",
+  "id": "failure-edge-seal-crack",
+  "title": "Edge Seal Cracking",
+  "introduction": "Edge seal cracking is the structural failure of the adhesive bond at the perimeter of a PV module where the cover plate meets the sealant material. After many cycles of thermal expansion and contraction, the CTE mismatch between the cover plate and sealant accumulates cyclic fatigue damage in the adhesive bond until the seal fails and cracks form. Once cracked, the seal can no longer act as a moisture barrier — air and water vapor enter through the crack into the module interior, where they initiate further internal degradation of cells, conductors, and the desiccant.",
+  "reasoning": "The 1564-SPIE accelerated durability test directly observes seal crack formation after thermal cycling, identifies thermal expansion mismatch as the cause, and documents air and moisture ingress as the immediate consequence.",
+  "key_findings": [
+    {
+      "claim": "Accelerated thermal cycling produces cracks in the edge seal adhesion between the cover plate and sealing rubber",
+      "detail": "After accelerated thermal endurance testing, failure components showed cracks in the adhesion of the component cover at the seal, while non-failing components showed no such bubbles or cracks. [^spie1564a] The cracks result from the mismatched thermal expansion between the cover plate and the sealant material after many cycles of heat expansion and shrinkage.",
+      "source_locations": [
+        {
+          "key": "spie1564a",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "Compared with other components did not appear bubbles, We found that the seal of the failure component had cracks in the adhesion of the component cover",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Seal cracks allow air and water vapor to enter the module interior, initiating moisture ingress and internal degradation",
+      "detail": "Once the seal crack forms, air and water vapor enter the module through the sealant crack. [^spie1564b] The ingressed moisture corrodes conductor leads and silicon surfaces, and can cause hot spots; the desiccant (molecular sieve) absorbs the moisture until it becomes saturated and ineffective. [^spie1564c]",
+      "source_locations": [
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "air enters the component with water vapor, bubble is expanding at the sealant crack.",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "spie1564c",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "If the water vapor goes inside the panel, it will Sticking to the battery conductor leads and corrode the conductor leads and lead to power output efficiency reduce.",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-seal-thermal-mismatch",
+      "display_name": "Seal Cracking from Thermal Expansion Mismatch",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-moisture-ingress-damage",
+      "display_name": "Moisture Ingress and Accelerated Internal Degradation",
+      "node_type": "performance_loss",
+      "child_reasoning": "Cracks in the edge seal break the module's moisture barrier, allowing water vapor to enter and corrode conductor leads, degrade cells, and saturate desiccant, causing accelerated internal degradation. [^spie1564b]",
+      "source_locations": [
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "air enters the component with water vapor, bubble is expanding at the sealant crack.",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

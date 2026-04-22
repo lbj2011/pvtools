@@ -1,0 +1,49 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-structural-integrity-loss",
+  "title": "Structural Integrity Loss in Bonded Joints",
+  "introduction": "Structural integrity loss in bonded joints is the mechanical performance consequence of interfacial crack propagation in adhesive joints used to bond flexible photovoltaic module components. As interfacial cracks grow along the adhesive-adherend boundary from defect sites, the effective load-bearing area of the joint decreases. This reduction in bonded area directly lowers the tensile-shear strength of the joint — the primary structural performance metric for bonded assemblies. Larger defects and central defect locations produce larger adhesive-fractured regions and correspondingly greater strength reductions, potentially compromising the mechanical integrity of the flexible PV module under operational loads.",
+  "reasoning": "The 337-Elsevier adhesive bonded joint study quantifies the reduction in tensile-shear strength caused by defect-initiated interfacial cracking as a function of defect size and location, establishing structural integrity loss as the performance consequence.",
+  "key_findings": [
+    {
+      "claim": "Interfacial cracking around bonding defects reduces joint tensile-shear strength, with larger defects causing greater strength loss",
+      "detail": "As the diameter of the bonding-area defect increases, the tensile-shear strength of the joint decreases further, falling to approximately 0.312 MPa for large defects. [^elsevier337a] The defect-induced adhesive-fractured region is the primary cause of strength loss, making the joint's tensile-shear strength lower when defects are centrally located. [^elsevier337b]",
+      "source_locations": [
+        {
+          "key": "elsevier337a",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "the tensile-shear strength further decreased to ~0.312 MPa when enlarging the diameter of the defect",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337b",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 8,
+          "section": "Conclusions",
+          "quote": "which thus resulted in a deteriorated joint's tensile-shear strength",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-adhesive-interfacial-crack",
+      "display_name": "Adhesive Interfacial Crack in Bonded Joints",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

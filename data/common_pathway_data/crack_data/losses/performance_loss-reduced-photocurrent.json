@@ -1,0 +1,49 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-reduced-photocurrent",
+  "title": "Reduced Photocurrent from Cracked Photoanode",
+  "introduction": "Reduced photocurrent from a cracked photoanode is the electrical performance loss in dye-sensitized solar cells (DSSCs) that results when crack networks disrupt the TiO2 electron transport layer. The TiO2 photoanode provides the porous semiconductor network through which photo-generated electrons travel from the dye sensitizer to the external circuit. When EPD-fabricated TiO2 layers contain cracks induced by pore stress concentration, the electron transport pathways are broken or lengthened, reducing the collection efficiency of photo-generated charges. The measurable outcome is a decrease in short-circuit current (Isc) and a reduction in overall conversion efficiency.",
+  "reasoning": "The 697-Elsevier DSSC study directly reports decreased Isc and conversion efficiency as the performance consequence of cracking in EPD-fabricated TiO2 layers, establishing this as a distinct performance loss node.",
+  "key_findings": [
+    {
+      "claim": "Cracks in EPD-fabricated TiO2 layers cause a decrease in short-circuit current and overall DSSC conversion efficiency",
+      "detail": "A decrease in short-circuit current (Isc) and efficiency is directly attributed to the TiO2 layer thickness and the cracks appearing in the TiO2 layer fabricated by the EPD technique. [^elsevier697a] These cracks result in decreasing overall conversion efficiency of the DSSC, as disrupted electron transport pathways reduce photo-generated charge collection. [^elsevier697b]",
+      "source_locations": [
+        {
+          "key": "elsevier697a",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "Abstract",
+          "quote": "A decrease in short circuit current (Isc) and efficiency due to the TiO2 layer thickness and the cracks appearing in the layer fabricated with EPD technique.",
+          "authors": null,
+          "year": 2016,
+          "line": 15,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier697b",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "3.2. Crystalline and morphological analysis",
+          "quote": "These cracks would result in decreasing of overall conversion efficiency of DSSC.",
+          "authors": null,
+          "year": 2016,
+          "line": 16,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-cracked-tio2-coating",
+      "display_name": "Cracked TiO2 Photoanode Coating",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

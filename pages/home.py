@@ -1,4 +1,3 @@
-
 import dash_bootstrap_components as dbc
 from dash import Dash, dcc, html, Input, Output, callback
 
@@ -21,36 +20,41 @@ def get_layout():
 def make_tool_card(title, image, description, link, badge=None):
 
     header = html.Span([
-        html.B(title),
-        dbc.Badge(badge, color="success", className="ms-2") if badge else None
+        title,
+        dbc.Badge(badge, color="success", className="ms-2",
+                  style={"fontSize": "10px", "verticalAlign": "middle"}) if badge else None
     ])
 
     return dbc.Card(
-
         [
-            dbc.CardImg(
-                src=app.get_asset_url(image),
-                top=True,
-                className="tool-card-img"
+            # image with zoom-on-hover wrapper
+            html.Div(
+                dbc.CardImg(
+                    src=app.get_asset_url(image),
+                    top=True,
+                    className="tool-card-img"
+                ),
+                className="tool-card-img-wrap"
             ),
 
             dbc.CardBody(
                 [
                     html.H5(header, className="tool-card-title"),
-
                     html.P(description, className="tool-card-desc"),
-
                     dbc.Button(
-                        "Launch Tool",
+                        "Launch →",
                         href=link,
-                        style=green_button_style,
+                        style={
+                            'backgroundColor': '#92D050',
+                            'borderColor': '#92D050',
+                            'color': 'white',
+                        },
                         className="tool-card-btn"
                     )
                 ],
                 className="tool-card-body"
             )
         ],
-
         className="tool-card shadow-sm h-100"
     )
 
@@ -115,18 +119,10 @@ dbc.Row(
     dbc.Row([
 
         dbc.Col(make_tool_card(
-            "PV Image Analysis Using LLMs",
-            "pv_image_logo.png",
-            "Fault detection using PV visible, EL, and IR images with LLMs.",
-            "pv-image",
-            badge="New!"
-        ), xs=12, sm=6, lg=4),
-
-        dbc.Col(make_tool_card(
-            "Global PV Field Performance",
-            "field_front.jpg",
-            "Interactive tool for global PV degradation performance.",
-            "field-degradation",
+            "PV Module Degradation Pathway",
+            "pv_pathway_cover.png",
+            "Explore degradation pathways of PV modules from literature",
+            "pv-pathway",
             badge="New!"
         ), xs=12, sm=6, lg=4),
 
@@ -138,6 +134,21 @@ dbc.Row(
             badge="New!"
         ), xs=12, sm=6, lg=4),
 
+        dbc.Col(make_tool_card(
+            "Global PV Field Performance",
+            "field_front.jpg",
+            "Interactive tool for global PV degradation performance.",
+            "field-degradation",
+        ), xs=12, sm=6, lg=4),
+
+        dbc.Col(make_tool_card(
+            "PV Image Analysis Using LLMs",
+            "pv_image_logo.png",
+            "Fault detection using PV visible, EL, and IR images with LLMs.",
+            "pv-image",
+        ), xs=12, sm=6, lg=4),
+
+    
         dbc.Col(make_tool_card(
             "IV Curve Correction Tool",
             "ivcorrection.png",

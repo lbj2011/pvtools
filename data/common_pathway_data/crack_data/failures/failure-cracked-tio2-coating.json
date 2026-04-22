@@ -1,0 +1,71 @@
+{
+  "node_type": "failure",
+  "id": "failure-cracked-tio2-coating",
+  "title": "Cracked TiO2 Photoanode Coating",
+  "introduction": "Cracked TiO2 photoanode coating is the structural failure of the TiO2 layer in dye-sensitized solar cells (DSSCs) when crack networks form through the deposited film. In layers fabricated by electrophoretic deposition (EPD), bubble-induced pores act as stress concentration sites during drying and sintering, driving crack propagation that produces a fractured, discontinuous photoanode. The cracks disrupt the transport pathways for photo-generated electrons through the TiO2 network to the external circuit, directly reducing short-circuit current and overall conversion efficiency. Crack width and film separation from the substrate are observed to be greater in EPD films than in doctor-blade control films.",
+  "reasoning": "The 697-Elsevier DSSC study directly reports cracked TiO2 layers as the observable failure outcome of EPD bubble-induced pore stress concentration, with reduced Isc and conversion efficiency as the measured performance consequences.",
+  "key_findings": [
+    {
+      "claim": "Cracks appearing in EPD-fabricated TiO2 layers reduce short-circuit current and overall conversion efficiency",
+      "detail": "A decrease in short-circuit current (Isc) and efficiency is directly attributed to the TiO2 layer thickness and the cracks appearing in the layer fabricated with the EPD technique. [^elsevier697a] These cracks would result in decreasing of overall conversion efficiency of the DSSC. [^elsevier697b]",
+      "source_locations": [
+        {
+          "key": "elsevier697a",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "Abstract",
+          "quote": "A decrease in short circuit current (Isc) and efficiency due to the TiO2 layer thickness and the cracks appearing in the layer fabricated with EPD technique.",
+          "authors": null,
+          "year": 2016,
+          "line": 15,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier697b",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "3.2. Crystalline and morphological analysis",
+          "quote": "These cracks would result in decreasing of overall conversion efficiency of DSSC.",
+          "authors": null,
+          "year": 2016,
+          "line": 16,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-pore-stress-concentration",
+      "display_name": "Pore-Induced Stress Concentration Driving Crack Propagation",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-reduced-photocurrent",
+      "display_name": "Reduced Photocurrent from Cracked Photoanode",
+      "node_type": "performance_loss",
+      "child_reasoning": "Cracks in the TiO2 photoanode disrupt electron transport pathways through the film, reducing the short-circuit current (Isc) and overall DSSC conversion efficiency. [^elsevier697a]",
+      "source_locations": [
+        {
+          "key": "elsevier697a",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "Abstract",
+          "quote": "A decrease in short circuit current (Isc) and efficiency due to the TiO2 layer thickness and the cracks appearing in the layer fabricated with EPD technique.",
+          "authors": null,
+          "year": 2016,
+          "line": 15,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

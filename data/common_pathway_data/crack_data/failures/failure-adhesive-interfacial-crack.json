@@ -1,0 +1,103 @@
+{
+  "node_type": "failure",
+  "id": "failure-adhesive-interfacial-crack",
+  "title": "Adhesive Interfacial Crack in Bonded Joints",
+  "introduction": "Adhesive interfacial cracking is the structural failure of the adhesive-adherend bond in bonded joints used to attach flexible photovoltaic module components. When mechanical loading is applied to joints that contain voids or bonding-area defects, stress concentrates at the defect boundaries, causing crack initiation along the adhesive-adherend interface. The resulting interfacial crack propagates along the bond line, producing a mixed failure mode that combines adhesive debonding along the interface and cohesive fracture within the adhesive layer. This failure directly reduces the mechanical load-bearing capacity of the joint, measured as tensile-shear strength.",
+  "reasoning": "The 337-Elsevier adhesive bonded joint study directly observes interfacial crack initiation around defects and quantifies the resulting reduction in tensile-shear strength as the structural performance consequence of this failure mode.",
+  "key_findings": [
+    {
+      "claim": "Cracks initiate along the adhesive-adherend interface around bonding defects under mechanical load",
+      "detail": "When the adhesive joint contains bonding-area defects, cracks are prone to initiate along the interface between the adhesive and the upper adherend in the region surrounding the defect. [^elsevier337a] A mixed failure mode combining adhesive failure and cohesive failure within the adhesive layer is the observed fracture pattern around these defect-initiated cracks. [^elsevier337b]",
+      "source_locations": [
+        {
+          "key": "elsevier337a",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.2. Effect of defects on joints' mechanical properties",
+          "quote": "Cracks were prone to initiate along the interface between the adhesive and upper adherend around the defect",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337b",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.2. Effect of defects on joints' mechanical properties",
+          "quote": "A mixed failure mode containing both the adhesive failure and cohesive failure in the adhesive layer thus occurred",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Larger bonding defects produce larger adhesive-fractured regions and lower tensile-shear strength",
+      "detail": "As the diameter of the bonding defect increases, the tensile-shear strength of the joint decreases further. [^elsevier337c] A centrally located defect brings a larger adhesive-fractured region, making the joint's tensile-shear strength lower, while adhesive failure more readily occurs around the defects. [^elsevier337d]",
+      "source_locations": [
+        {
+          "key": "elsevier337c",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "the tensile-shear strength further decreased to ~0.312 MPa when enlarging the diameter of the defect",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337d",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "An adhesive failure was more likely to occur around the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-adhesive-defect-crack",
+      "display_name": "Crack Initiation at Adhesive Layer Defects",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-structural-integrity-loss",
+      "display_name": "Structural Integrity Loss in Bonded Joints",
+      "node_type": "performance_loss",
+      "child_reasoning": "Interfacial crack propagation through the adhesive bond zone reduces the effective bonding area and tensile-shear strength of the joint, directly impairing the structural integrity of the flexible PV module assembly. [^elsevier337c]",
+      "source_locations": [
+        {
+          "key": "elsevier337c",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "the tensile-shear strength further decreased to ~0.312 MPa when enlarging the diameter of the defect",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "node_type": "failure",
+  "id": "failure-thin-film-delamination",
+  "title": "Thin-Film Layer Delamination",
+  "introduction": "Thin-film layer delamination is the structural failure in which a deposited thin-film stack physically separates from its substrate along a buried interface. In photovoltaic modules this occurs when cumulative thermal cycling drives interfacial strain energy release rates above the fracture toughness of the weakest interface — typically the CdS/TCO or encapsulant-film boundary in thin-film devices. The separated film loses intimate contact with the substrate, disrupting light absorption geometry, current collection pathways, and the protective lamination that prevents moisture ingress, all of which reduce module performance.",
+  "reasoning": "The 011-ACS thermomechanical lift-off study demonstrates physical film separation via strain-energy-driven delamination; 1217-MDPI confirms encapsulant and backsheet delamination as a recognized PV module failure that causes substantial ISC loss.",
+  "key_findings": [
+    {
+      "claim": "Delamination front propagation physically separates the thin-film stack from the substrate along the weakest buried interface",
+      "detail": "When the strain energy release rate at an interface exceeds its fracture toughness, the delamination front advances, separating the film from the substrate. [^acs011c] In CdTe devices, this lift-off is essentially complete across the device area, with only minor edge effects remaining — demonstrating that crack-driven delamination can produce full separation of the thin-film layer. [^acs011d]",
+      "source_locations": [
+        {
+          "key": "acs011c",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 2,
+          "section": "Theoretical Framework",
+          "quote": "For delamination to occur at a given interface, the energy released during delamination must be larger than the interface fracture toughness",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "acs011d",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 4,
+          "section": "Results and Discussion",
+          "quote": "lift-off is essentially perfect with the exception of minor edge effects",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Delamination in PV modules substantially reduces light absorption and causes a significant drop in short-circuit current",
+      "detail": "Encapsulant or backsheet delamination within a PV module causes a substantial decrease in the amount of light absorbed by the solar cell, thereby leading to a significant drop in short-circuit current. [^mdpi1217a] Delamination is listed as one of the recognized failure and degradation modes in PV backsheets, alongside cracks, discolouration, bubbles, and burn marks. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 8,
+          "section": "2.2. Encapsulant",
+          "quote": "delamination can cause a substantial decrease in the amount of light absorbed, thereby leading to a significant drop in ISC",
+          "authors": null,
+          "year": 2024,
+          "line": 8,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 12,
+          "section": "2.4. Backsheet",
+          "quote": "Failures and degradation in the backsheet can appear as cracks, discolouration, delamination, bubbles, and burn marks",
+          "authors": null,
+          "year": 2024,
+          "line": 12,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-delamination-front-propagation",
+      "display_name": "Delamination Front Propagation",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-power-output-reduction",
+      "display_name": "Reduced Power Output",
+      "node_type": "performance_loss",
+      "child_reasoning": "Thin-film delamination reduces light absorption geometry and disrupts current collection pathways, causing a significant drop in ISC and overall power output. [^mdpi1217a]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 8,
+          "section": "2.2. Encapsulant",
+          "quote": "delamination can cause a substantial decrease in the amount of light absorbed, thereby leading to a significant drop in ISC",
+          "authors": null,
+          "year": 2024,
+          "line": 8,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

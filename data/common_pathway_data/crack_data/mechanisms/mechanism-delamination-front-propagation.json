@@ -1,0 +1,77 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-delamination-front-propagation",
+  "title": "Delamination Front Propagation",
+  "introduction": "When thermally accumulated strain energy at a film interface exceeds the fracture toughness of that interface, a delamination crack initiates and a delamination front advances across the bonded area. This energy-balance governed process separates thin-film device layers from their substrate, exposing buried interfaces and disrupting the electrical continuity and protective function of the multi-layer stack. In CdTe solar cells, the delamination front propagates along the weak CdS/TCO buried interface when the strain energy release rate threshold is met under thermal quench conditions.",
+  "reasoning": "The 011-ACS study explicitly frames delamination as crack growth governed by an energy balance (SERR vs. fracture toughness) and measures delamination front growth rate, establishing this as a distinct mechanism downstream of thermal strain buildup.",
+  "key_findings": [
+    {
+      "claim": "Delamination initiates when the strain energy release rate at the interface exceeds the interface fracture toughness",
+      "detail": "For delamination to occur at any given interface, the energy released during crack advance must be larger than the fracture toughness of that interface. [^acs011c] This energy balance criterion governs whether stored thermal mismatch strain energy is sufficient to propagate the delamination crack front across the bonded film area.",
+      "source_locations": [
+        {
+          "key": "acs011c",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 2,
+          "section": "Theoretical Framework",
+          "quote": "For delamination to occur at a given interface, the energy released during delamination must be larger than the interface fracture toughness",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Delamination front growth rate increases sharply once the strain energy threshold is crossed",
+      "detail": "Once the strain energy release rate exceeds the interface fracture toughness, the growth rate of the delamination front accelerates at a far higher rate than during the energy buildup phase. [^acs011d] This non-linear response means small additional increases in quench depth or cycling frequency can produce dramatically faster delamination under field conditions.",
+      "source_locations": [
+        {
+          "key": "acs011d",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 4,
+          "section": "Results and Discussion",
+          "quote": "the growth rate of the delamination front increase at a far higher rate",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-thermal-strain-buildup",
+      "display_name": "Thermal Strain Buildup at Film Interfaces",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Thin-Film Layer Delamination",
+      "node_type": "failure",
+      "child_reasoning": "As the delamination crack front propagates across the film interface, the thin-film stack separates from the substrate, constituting the structural failure of thin-film layer delamination. [^acs011d]",
+      "source_locations": [
+        {
+          "key": "acs011d",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 4,
+          "section": "Results and Discussion",
+          "quote": "the growth rate of the delamination front increase at a far higher rate",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,171 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-thermal-cycling",
+  "title": "Thermal Cycling",
+  "introduction": "Thermal cycling is a primary environmental stressor driving crack-related degradation in photovoltaic modules. Daily and seasonal temperature variations impose cyclic mechanical loads on bonded dissimilar materials throughout the module stack. When temperature changes, each material expands or contracts according to its coefficient of thermal expansion (CTE), and because bonded materials have different CTEs, cyclic thermo-mechanical stress accumulates at every interface. Over thousands of cycles, this fatigue loading drives crack nucleation in solder interconnects, thin-film interface delamination, and progressive cracking of edge seals.",
+  "reasoning": "Multiple sources document thermal cycling as the root environmental stressor causing solder joint fatigue cracking, thin-film delamination, and edge seal cracking in PV modules.",
+  "key_findings": [
+    {
+      "claim": "Cooling below EVA glass transition temperature amplifies CTE mismatch strain energy approximately 100-fold at bonded film interfaces",
+      "detail": "Below the glass-transition temperature (Tg), the elastic modulus of EVA increases dramatically — approximately 100-fold — causing the rate at which thermal mismatch strain energy builds at the laminate interface to accelerate significantly. [^acs011a] Decreasing the quench temperature increases the quench depth relative to the glass-transition temperature, further amplifying the stored strain energy and the driving force for crack initiation. [^acs011b]",
+      "source_locations": [
+        {
+          "key": "acs011a",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "Below Tg, there is a dramatic increase in the elastic modulus of EVA (~100×), which causes the rate at which strain energy builds up to increase much more quickly",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "acs011b",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "decreasing Tdelam, we increase the quench depth relative to the glass-transition temperature",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Real field temperature cycles impose CTE mismatch thermo-mechanical stress on PV solder interconnections, driving fatigue and creep damage",
+      "detail": "Field thermal cycling based on real outdoor temperature monitoring creates daily temperature swings that apply cyclic loads to solder interconnects. [^mdpi1261a] The variation in CTE among silicon, glass, copper, and solder generates thermo-mechanical stresses during each cycle, inducing both fatigue and creep damage in the solder joint over time. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261a",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 4,
+          "section": "2.2 Thermal Loads and Boundary Conditions",
+          "quote": "thermal loads and boundary conditions from field thermal cycling",
+          "authors": null,
+          "year": 2021,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 6,
+          "section": "2.3 Solar Cell Materials and Properties",
+          "quote": "variation in the CTE of constituent materials bonded together to form the module induces thermo-mechanical stresses",
+          "authors": null,
+          "year": 2021,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Temperature cycling generates repeated expansion-contraction mismatch at module edges, initiating seal cracking over time",
+      "detail": "Temperature cycles cause thermal expansion and contraction of module components, and because the thermal expansion coefficient of the cover plate and sealant differ, repeated cycling stresses the adhesive bond between them. [^spie1564a] After many cycles of heat expansion and shrinkage, the sealing rubber and cover plate experience adhesive failure. [^spie1564b]",
+      "source_locations": [
+        {
+          "key": "spie1564a",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 1,
+          "section": "1. Introduction",
+          "quote": "The cycles of temperature could result in thermal expansion and contraction",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "the thermal expansion coefficient of the component cover and sealant is different, After many heat expansion and shrinkage, Sealing rubber and component cover plate adhesive failure",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-thermal-strain-buildup",
+      "display_name": "Thermal Strain Buildup at Film Interfaces",
+      "node_type": "mechanism",
+      "child_reasoning": "Thermal quenching below the EVA glass-transition temperature stiffens the encapsulant ~100-fold, amplifying CTE mismatch strain energy at thin-film interfaces and driving delamination crack initiation.",
+      "source_locations": [
+        {
+          "key": "acs011a",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "Below Tg, there is a dramatic increase in the elastic modulus of EVA (~100×), which causes the rate at which strain energy builds up to increase much more quickly",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-cte-mismatch-fatigue",
+      "display_name": "CTE Mismatch Fatigue and Creep in Solder Joints",
+      "node_type": "mechanism",
+      "child_reasoning": "Daily temperature cycles impose CTE mismatch-driven thermo-mechanical stress on solder joints, generating cyclic fatigue loading and sustained creep deformation that nucleate and grow cracks in the solder. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "a mismatch in the thermal expansion coefficients (CTE) of silicon, glass, copper and solder",
+          "authors": null,
+          "year": 2021,
+          "line": 2,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-seal-thermal-mismatch",
+      "display_name": "Seal Cracking from Thermal Expansion Mismatch",
+      "node_type": "mechanism",
+      "child_reasoning": "Temperature cycling generates repeated expansion and contraction of module edge components with mismatched CTEs, applying cyclic stress to the seal material that initiates cracking over many cycles. [^spie1564b]",
+      "source_locations": [
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "the thermal expansion coefficient of the component cover and sealant is different, After many heat expansion and shrinkage, Sealing rubber and component cover plate adhesive failure",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

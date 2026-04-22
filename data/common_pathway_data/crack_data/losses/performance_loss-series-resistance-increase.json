@@ -1,0 +1,49 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-series-resistance-increase",
+  "title": "Series Resistance Increase from Solder Degradation",
+  "introduction": "Series resistance increase is the electrical performance loss that occurs as fatigue cracks grow through PV module solder joints. Even before a crack spans the full joint cross-section and produces an open circuit, progressive crack growth reduces the effective cross-sectional area carrying current, increasing the electrical resistance of the interconnect. This increased series resistance causes power loss proportional to I²Rs with every increment of current flow, reducing fill factor and maximum power output. The series resistance increase is a measurable indicator of progressive solder joint degradation under field thermal cycling.",
+  "reasoning": "The 1261-MDPI study explicitly identifies increasing series resistance as the electrical performance consequence of solder crack growth, linking it to the I²Rs power loss mechanism that reduces module output.",
+  "key_findings": [
+    {
+      "claim": "Open circuits and crack growth in solder joints increase the electrical series resistance, causing I²Rs power loss",
+      "detail": "An open circuit in the solder joint increases the electrical resistance across the interconnect. [^mdpi1261a] Power loss from solder degradation is linked to increasing series resistance (Rs) through the relation I²Rs. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261a",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit increases the electrical resistance across the solder joint.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "power loss is linked to increasing series resistance (Rs) in the form I2Rs",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-solder-joint-crack",
+      "display_name": "Solder Joint Fatigue and Creep Cracking",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

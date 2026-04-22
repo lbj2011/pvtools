@@ -1,0 +1,124 @@
+{
+  "node_type": "failure",
+  "id": "failure-solder-joint-crack",
+  "title": "Solder Joint Fatigue and Creep Cracking",
+  "introduction": "Solder joint fatigue and creep cracking is the structural failure of the soldered electrical interconnections between silicon cells in a PV module. Under cyclic thermo-mechanical stress from CTE mismatch during daily and seasonal temperature cycling, microcracks nucleate in the solder and grow incrementally with each cycle — a fatigue process. Simultaneously, elevated temperature phases drive time-dependent creep deformation in the solder alloy that further accumulates damage. As cracks grow they increase electrical resistance across the joint; if a crack propagates across the full joint cross-section, the interconnect opens and the electrical circuit is broken.",
+  "reasoning": "The 1261-MDPI study links CTE-mismatch thermo-mechanical stress under field thermal cycling directly to microcrack development, creep damage accumulation, and eventual open-circuit failure in PV solder interconnects.",
+  "key_findings": [
+    {
+      "claim": "Fatigue microcracks develop in solder interconnections as a result of thermo-mechanical stress from cyclic temperature loading",
+      "detail": "The development of microcracks is one of the results of solder joint deterioration under cyclic thermo-mechanical loading from CTE mismatch. [^mdpi1261a] The initiation and development of fatigue cracks in the solder interconnection is directly caused by the variation in CTE of bonded module materials during cycling. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261a",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "The development of microcracks is one of the results of solder joint deterioration.",
+          "authors": null,
+          "year": 2021,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 6,
+          "section": "2.3 Solar Cell Materials and Properties",
+          "quote": "initiation and development of fatigue cracks in the solder interconnection",
+          "authors": null,
+          "year": 2021,
+          "line": 2,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "A solder crack spanning the entire joint cross-section produces an open circuit and increases electrical resistance",
+      "detail": "If a fatigue crack spreads across the entire solder joint region, the result is an open circuit. [^mdpi1261c] An open circuit increases the electrical resistance across the solder joint, which is linked to power loss through the relation I²Rs. [^mdpi1261d]",
+      "source_locations": [
+        {
+          "key": "mdpi1261c",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit will result if a crack spreads across the entire joint region.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261d",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "power loss is linked to increasing series resistance (Rs) in the form I2Rs",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-cte-mismatch-fatigue",
+      "display_name": "CTE Mismatch Fatigue and Creep in Solder Joints",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-series-resistance-increase",
+      "display_name": "Series Resistance Increase from Solder Degradation",
+      "node_type": "performance_loss",
+      "child_reasoning": "Crack growth in the solder joint increases the electrical resistance across the interconnect, producing a measurable increase in module series resistance and I²Rs power loss. [^mdpi1261d]",
+      "source_locations": [
+        {
+          "key": "mdpi1261d",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "power loss is linked to increasing series resistance (Rs) in the form I2Rs",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "performance_loss-open-circuit-failure",
+      "display_name": "Open-Circuit Failure from Solder Joint Fracture",
+      "node_type": "performance_loss",
+      "child_reasoning": "When a fatigue crack propagates across the full cross-section of the solder joint, the interconnect fails completely and an open circuit results, disconnecting the cell from current collection. [^mdpi1261c]",
+      "source_locations": [
+        {
+          "key": "mdpi1261c",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit will result if a crack spreads across the entire joint region.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

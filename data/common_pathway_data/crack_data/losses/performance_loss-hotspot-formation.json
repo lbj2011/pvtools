@@ -1,0 +1,81 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-hotspot-formation",
+  "title": "Hotspot Formation from Cell Microcracks",
+  "introduction": "Hotspot formation is the electrical and thermal performance loss that occurs when silicon cell microcracks isolate a region of cell area from the current collection path. In a series-connected module string, the inactive region becomes reverse-biased under normal operating current and dissipates power as heat rather than generating it. When microcracks prevent more than approximately 8% of the cell area from functioning, the resulting hotspot temperature rise causes permanent damage to the affected cell area and can damage adjacent materials including the encapsulant, backsheet, and bypass diodes. Severe or prolonged hotspots can initiate module-level failure.",
+  "reasoning": "The 1217-MDPI PV failure review explicitly links silicon cell microcracks isolating more than ~8% of cell area to hotspot formation, and documents the permanent damage caused by hotspots as the direct performance consequence.",
+  "key_findings": [
+    {
+      "claim": "Microcracks that prevent more than ~8% of cell area from functioning cause hotspot formation",
+      "detail": "When microcracks in a silicon cell prevent more than approximately 8% of the cell from functioning, the isolated area becomes reverse-biased under string current and the resulting power dissipation forms a hotspot. [^mdpi1217a] Hotspot failures are not only driven by broken glass but also by shading and mismatch failures, indicating that cell microcracks are one of multiple pathways to hotspot formation. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "When the cracks prevent more than 8% of the cell from functioning, it may lead to a hotspot",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Hotspot failures are not only driven by broken glass failures but also driven by shading and mismatch failures",
+          "authors": null,
+          "year": 2024,
+          "line": 7,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Hotspots cause permanent damage to solar cells and other module parts, with severe cases initiating fire",
+      "detail": "When hotspots occur, they cause permanent damage to the solar cells or other module parts. [^mdpi1217c] Modules affected by elevated levels of hotspots cannot reverse the degradation and often require replacement, and in the worst cases hotspots can initiate fire. [^mdpi1217d]",
+      "source_locations": [
+        {
+          "key": "mdpi1217c",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "When hotspots occur, they cause permanent damage to the solar cells or other module parts",
+          "authors": null,
+          "year": 2024,
+          "line": 7,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217d",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 14,
+          "section": "2.5. Junction Box and Bypass Diodes",
+          "quote": "a PV module affected by an elevated level of hotspots cannot reverse the degradation and often requires replacement",
+          "authors": null,
+          "year": 2024,
+          "line": 14,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-silicon-cell-microcrack",
+      "display_name": "Silicon Cell Microcracking",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

@@ -41,26 +41,95 @@ def create_stylesheet(attr_key="category", perf_value="performance_impact"):
                 'height': '50px',
                 'shape': 'round-rectangle',
                 'border-width': 1,
+                'border-color': 'rgba(255,255,255,0.4)',
+                'shadow-blur': 10,
+                'shadow-color': 'rgba(0,0,0,0.3)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 3,
+                'transition-property': 'width, height, border-width, border-color, shadow-blur, shadow-opacity, shadow-offset-y, background-color',
+                'transition-duration': '0.2s',
+                'transition-timing-function': 'ease-out',
+            }
+        },
+        # suppress default cyan tap flash
+        {
+            'selector': 'node:active',
+            'style': {'overlay-opacity': 0}
+        },
+        # ── HOVER: glow + grow ───────────────────────────────────────
+        {
+            'selector': 'node.mouseover',
+            'style': {
+                'width': '165px',
+                'height': '58px',
+                'border-width': 3,
                 'border-color': 'white',
-                'shadow-blur': 15,
-                'shadow-color': 'black',
-                'shadow-opacity': 0.3,
-                'shadow-offset-x': 2,
-                'shadow-offset-y': 2,
+                'shadow-blur': 30,
+                'shadow-color': 'rgba(255,255,255,0.6)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 0,
+                'font-size': '15px',
+            }
+        },
+        # ── SELECTED: strong accent ring ────────────────────────────
+        {
+            'selector': 'node:selected',
+            'style': {
+                'width': '165px',
+                'height': '58px',
+                'border-width': 4,
+                'border-color': 'white',
+                'shadow-blur': 40,
+                'shadow-color': 'rgba(255,255,255,0.8)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 0,
+                'overlay-opacity': 0,
             }
         },
         {'selector': sel("stressor"),  'style': {'background-color': allc[0]}},
         {'selector': sel("mechanism"), 'style': {'background-color': allc[1]}},
         {'selector': sel("failure"),   'style': {'background-color': allc[2]}},
         {'selector': sel(perf_value),  'style': {'background-color': allc[3]}},
+        # ── category-tinted glow on hover ───────────────────────────
+        {
+            'selector': f'[{attr_key} = "stressor"].mouseover',
+            'style': {'shadow-color': allc[0]}
+        },
+        {
+            'selector': f'[{attr_key} = "mechanism"].mouseover',
+            'style': {'shadow-color': allc[1]}
+        },
+        {
+            'selector': f'[{attr_key} = "failure"].mouseover',
+            'style': {'shadow-color': allc[2]}
+        },
+        {
+            'selector': f'[{attr_key} = "{perf_value}"].mouseover',
+            'style': {'shadow-color': allc[3]}
+        },
         {
             'selector': 'edge',
             'style': {
                 'curve-style': 'bezier',
                 'target-arrow-shape': 'triangle',
                 'width': 2,
+                'line-color': '#cbd5e1',
+                'target-arrow-color': '#cbd5e1',
+                'transition-property': 'width, line-color, target-arrow-color',
+                'transition-duration': '0.2s',
             }
-        }
+        },
+        {
+            'selector': 'edge:selected',
+            'style': {
+                'width': 3.5,
+                'line-color': '#94a3b8',
+                'target-arrow-color': '#94a3b8',
+            }
+        },
     ]
 
 
@@ -86,26 +155,80 @@ def create_stylesheet_common():
                 'height': '60px',
                 'shape': 'round-rectangle',
                 'border-width': 1,
+                'border-color': 'rgba(255,255,255,0.4)',
+                'shadow-blur': 10,
+                'shadow-color': 'rgba(0,0,0,0.3)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 3,
+                'transition-property': 'width, height, border-width, border-color, shadow-blur, shadow-color, shadow-offset-y',
+                'transition-duration': '0.2s',
+                'transition-timing-function': 'ease-out',
+            }
+        },
+        {
+            'selector': 'node:active',
+            'style': {'overlay-opacity': 0}
+        },
+        {
+            'selector': 'node.mouseover',
+            'style': {
+                'width': '196px',
+                'height': '68px',
+                'border-width': 3,
                 'border-color': 'white',
-                'shadow-blur': 15,
-                'shadow-color': 'black',
-                'shadow-opacity': 0.3,
-                'shadow-offset-x': 2,
-                'shadow-offset-y': 2,
+                'shadow-blur': 30,
+                'shadow-color': 'rgba(255,255,255,0.6)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 0,
+                'font-size': '17px',
+            }
+        },
+        {
+            'selector': 'node:selected',
+            'style': {
+                'width': '196px',
+                'height': '68px',
+                'border-width': 4,
+                'border-color': 'white',
+                'shadow-blur': 40,
+                'shadow-color': 'rgba(255,255,255,0.8)',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 0,
+                'overlay-opacity': 0,
             }
         },
         {'selector': sel("stressor"),        'style': {'background-color': allc[0]}},
         {'selector': sel("mechanism"),       'style': {'background-color': allc[1]}},
         {'selector': sel("failure"),         'style': {'background-color': allc[2]}},
         {'selector': sel("performance_loss"),'style': {'background-color': allc[3]}},
+        # category-tinted glow on hover
+        {'selector': '[type = "stressor"].mouseover',        'style': {'shadow-color': allc[0]}},
+        {'selector': '[type = "mechanism"].mouseover',       'style': {'shadow-color': allc[1]}},
+        {'selector': '[type = "failure"].mouseover',         'style': {'shadow-color': allc[2]}},
+        {'selector': '[type = "performance_loss"].mouseover','style': {'shadow-color': allc[3]}},
         {
             'selector': 'edge',
             'style': {
                 'curve-style': 'bezier',
                 'target-arrow-shape': 'triangle',
                 'width': 2,
+                'line-color': '#cbd5e1',
+                'target-arrow-color': '#cbd5e1',
+                'transition-property': 'width, line-color, target-arrow-color',
+                'transition-duration': '0.2s',
             }
-        }
+        },
+        {
+            'selector': 'edge:selected',
+            'style': {
+                'width': 3.5,
+                'line-color': '#94a3b8',
+                'target-arrow-color': '#94a3b8',
+            }
+        },
     ]
 
 
@@ -178,7 +301,10 @@ def create_map_section():
         dcc.Graph(
             id="map",
             style={"height": "700px", "width": "100%"},
-            config={"displayModeBar": False, "scrollZoom": True}
+            config={
+                "displayModeBar": False,
+                "scrollZoom": True,
+            }
         ),
         dbc.Container(
             html.Div([
@@ -555,10 +681,12 @@ def create_layout(file_list):
                 # placeholder buttons registered before any map click
                 html.Button(id="open-pathway-modal-btn", n_clicks=0,
                             style={"display": "none"}),
+                html.Hr(),
                 html.Div(
                     html.H1("PV Module Degradation Pathway Explorer (Demo)"),
                     style={'width': '100%', 'padding': '0 10px', 'textAlign': 'center'}
                 ),
+                html.Hr(),
                 create_filter_section(),
             ])
         ]),

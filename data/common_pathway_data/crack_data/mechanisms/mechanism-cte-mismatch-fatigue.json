@@ -1,0 +1,135 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-cte-mismatch-fatigue",
+  "title": "CTE Mismatch Fatigue and Creep in Solder Joints",
+  "introduction": "Photovoltaic module solder interconnects bond materials with substantially different coefficients of thermal expansion: silicon cells, glass, copper ribbons, and solder alloys all expand and contract at different rates during thermal cycling. Each temperature excursion imposes a thermo-mechanical stress cycle on the solder joint. Over thousands of daily field cycles, these repeated stresses produce two forms of damage — cyclic fatigue crack nucleation and growth, and time-dependent creep deformation that accumulates in the solder alloy whenever temperatures are elevated. Both damage modes progressively degrade the solder joint and can ultimately cause electrical open-circuit failure.",
+  "reasoning": "The 1261-MDPI study documents CTE mismatch among silicon, glass, copper, and solder as the thermo-mechanical stress source driving both fatigue cracks and creep damage in PV solder joints under real field thermal cycling.",
+  "key_findings": [
+    {
+      "claim": "CTE mismatch among silicon, glass, copper, and solder generates thermo-mechanical stress during each thermal cycle",
+      "detail": "The constituent materials bonded in a PV module solder joint — silicon, glass, copper, silver, solder, and intermetallic compounds — have significantly different thermal expansion coefficients. [^mdpi1261a] When temperature changes, the CTE mismatch between these bonded materials generates thermo-mechanical stress that is applied to the solder joint on every temperature cycle. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261a",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "a mismatch in the thermal expansion coefficients (CTE) of silicon, glass, copper and solder",
+          "authors": null,
+          "year": 2021,
+          "line": 2,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 6,
+          "section": "2.3 Solar Cell Materials and Properties",
+          "quote": "variation in the CTE of constituent materials bonded together to form the module induces thermo-mechanical stresses",
+          "authors": null,
+          "year": 2021,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Cyclic thermo-mechanical stress develops microcracks in solder joints that can spread to cause open-circuit failure",
+      "detail": "The repeated cyclic loading from CTE mismatch produces microcracks in the solder interconnection as one of the results of solder joint deterioration. [^mdpi1261c] If a fatigue crack spreads across the entire solder joint region, the result is an open circuit. [^mdpi1261d]",
+      "source_locations": [
+        {
+          "key": "mdpi1261c",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "The development of microcracks is one of the results of solder joint deterioration.",
+          "authors": null,
+          "year": 2021,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261d",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit will result if a crack spreads across the entire joint region.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Solder creep deformation accumulates during elevated-temperature phases of cycling and is a key life-prediction parameter",
+      "detail": "When solder temperature rises during the thermal cycle, the material creeps under the applied thermo-mechanical stress. [^mdpi1261e] This creep deformation accumulates with each cycle; the accumulated creep strain remains one of the key life-prediction parameters for assessing solder joint reliability under field thermal cycling. [^mdpi1261f]",
+      "source_locations": [
+        {
+          "key": "mdpi1261e",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "When the temperature of the solder rises, it creeps.",
+          "authors": null,
+          "year": 2021,
+          "line": 5,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261f",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 14,
+          "section": "3.3 Evaluation of Accumulated Creep Strain in Solder Interconnections",
+          "quote": "the accumulated creep strain (\u03b5acc) remains one of the key life prediction parameters",
+          "authors": null,
+          "year": 2021,
+          "line": 2,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-thermal-cycling",
+      "display_name": "Thermal Cycling",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-solder-joint-crack",
+      "display_name": "Solder Joint Fatigue and Creep Cracking",
+      "node_type": "failure",
+      "child_reasoning": "CTE mismatch-driven cyclic stress and accumulated creep damage degrade the solder joint until fatigue microcracks nucleate and grow, ultimately producing structural cracking of the solder interconnect. [^mdpi1261c]",
+      "source_locations": [
+        {
+          "key": "mdpi1261c",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "The development of microcracks is one of the results of solder joint deterioration.",
+          "authors": null,
+          "year": 2021,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "node_type": "failure",
+  "id": "failure-al-barrier-microcrack",
+  "title": "Micro-Cracked Aluminum Barrier Layer",
+  "introduction": "Micro-cracked aluminum barrier layer is the structural failure of the thin aluminum metallization embedded in PV backsheets, which is intended to block permeation of acetic acid and water vapor. When acetic acid vapor contacts the aluminum layer, corrosion produces pinholes and micro-cracks that penetrate the aluminum thickness. These defects destroy the barrier function of the aluminum layer, creating low-resistance pathways through which acetic acid can permeate at enhanced rates compared to an intact aluminum barrier. The failure is confirmed by scanning electron microscopy with EDX and FTIR-ATR spectroscopy, which detect the aluminum acetate corrosion products and the structural damage.",
+  "reasoning": "The 657-Elsevier study directly documents micro-crack formation in aluminum barrier layers exposed to acetic acid, using REM-EDX and FTIR-ATR to confirm the corrosion mechanism and identify enhanced acid permeation as the consequence.",
+  "key_findings": [
+    {
+      "claim": "Corrosion by acetic acid creates pinholes and micro-cracks in aluminum barrier layers, confirmed by REM-EDX and FTIR-ATR spectroscopy",
+      "detail": "Corrosion of the aluminum barrier layer by acetic acid has been confirmed using REM-EDX and FTIR-ATR spectroscopy. The corrosion creates pinholes or micro-cracks in the aluminum layer. [^elsevier657a] Increased surface porosity and the formation of small holes are also observed as early-stage manifestations of the corrosive degradation. [^elsevier657b]",
+      "source_locations": [
+        {
+          "key": "elsevier657a",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "Corrosion of the aluminium layer has been shown with REM-EDX and FTIR-ATR spectroscopy, creating pinholes or micro-cracks",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier657b",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 3,
+          "section": "3. Results",
+          "quote": "increase in surface porosity and the formation of small holes was observed",
+          "authors": null,
+          "year": 2017,
+          "line": 47,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Pinholes and micro-cracks in the aluminum layer enhance acetic acid transport through the backsheet",
+      "detail": "The pinholes and micro-cracks created by acid corrosion of the aluminum layer enhance acetic acid transport through the aluminum barrier layer. [^elsevier657c] The corrosion products — including aluminum acetate, small crystals, and holes — collectively render the aluminum layer ineffective as a barrier against acetic acid permeation through the backsheet construction.",
+      "source_locations": [
+        {
+          "key": "elsevier657c",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "creating pinholes or micro-cracks which enhance acetic acid transport through the aluminium layer",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-acid-corrosion-microcrack",
+      "display_name": "Acid Corrosion Creating Micro-Cracks in Aluminum Barriers",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-enhanced-acid-permeation",
+      "display_name": "Enhanced Acid Permeation Through Micro-Cracked Barriers",
+      "node_type": "performance_loss",
+      "child_reasoning": "Pinholes and micro-cracks in the corroded aluminum barrier layer eliminate its blocking function, allowing acetic acid to permeate through the backsheet at enhanced rates and attack internal module components. [^elsevier657c]",
+      "source_locations": [
+        {
+          "key": "elsevier657c",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "creating pinholes or micro-cracks which enhance acetic acid transport through the aluminium layer",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-brittle-fracture-under-load",
+  "title": "Brittle Fracture of Glass and Silicon Under Mechanical Load",
+  "introduction": "Both the protective glass cover and crystalline silicon solar cells are brittle materials with low fracture toughness. When mechanical loads — from transport impact, concentrated point loading during installation, or distributed wind and snow pressure in the field — exceed the fracture strength of these materials, cracks initiate and propagate. Glass fractures are typically visible and immediately open pathways for moisture ingress. Silicon cell microcracks are often invisible to the naked eye but structurally weaken the cell and can spread over time under subsequent loading, eventually isolating active cell area from current collection.",
+  "reasoning": "The 1217-MDPI PV failure review documents transport-induced glass shattering and manufacturing/mechanical-stress-induced silicon microcracks as the direct outcomes of mechanical loading on brittle module materials.",
+  "key_findings": [
+    {
+      "claim": "Mechanical loading from poor transport or manufacturing causes glass fracture, opening pathways for moisture ingress",
+      "detail": "Glass shattering in PV modules can result from poor transportation or incorrect manufacturing processes. [^mdpi1217a] When the protective glass shatters or breaks, it allows water vapor to enter the solar cells, creating short circuits and enabling further internal degradation. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Glass shattering can be the result of poor PV module transportation or incorrect manufacturing processes",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Shattering or breakage of the module's glass allows water vapor to enter the solar cells",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Silicon cell microcracks from mechanical stress are invisible to the naked eye and may spread to cause hotspots",
+      "detail": "Microcracks in silicon cells originate from mechanical stress during manufacturing, transport, or field operation. They cannot be detected by the naked eye and may spread over time under subsequent loading. [^mdpi1217c] When cracks prevent more than approximately 8% of the cell from functioning, the isolated region can overheat and form a hotspot. [^mdpi1217d]",
+      "source_locations": [
+        {
+          "key": "mdpi1217c",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "microcracks of the cell cannot be detected by the naked eye. Consequently, they may spread",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217d",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "When the cracks prevent more than 8% of the cell from functioning, it may lead to a hotspot",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-mechanical-loading",
+      "display_name": "Mechanical Loading",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-glass-breakage",
+      "display_name": "Protective Glass Breakage",
+      "node_type": "failure",
+      "child_reasoning": "Applied mechanical loads exceeding the fracture strength of the brittle glass cover cause shattering or cracking of the protective glass layer. [^mdpi1217a]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Glass shattering can be the result of poor PV module transportation or incorrect manufacturing processes",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "failure-silicon-cell-microcrack",
+      "display_name": "Silicon Cell Microcracking",
+      "node_type": "failure",
+      "child_reasoning": "Mechanical stress from transport, manufacturing, or field loading initiates cracks in brittle silicon cells that are invisible to the naked eye and may spread over time under continued loading. [^mdpi1217c]",
+      "source_locations": [
+        {
+          "key": "mdpi1217c",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "microcracks of the cell cannot be detected by the naked eye. Consequently, they may spread",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

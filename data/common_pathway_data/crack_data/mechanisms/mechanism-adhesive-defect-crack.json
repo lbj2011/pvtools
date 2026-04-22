@@ -1,0 +1,103 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-adhesive-defect-crack",
+  "title": "Crack Initiation at Adhesive Layer Defects",
+  "introduction": "In flexible photovoltaic module bonded joints, the adhesive layer may contain voids or defect-like regions introduced during manufacturing — particularly when excessive adhesive thickness leads to trapped air at the interface, or when bonding-area defects are present. Under mechanical loading, stress concentrates at these defect sites more readily than in a defect-free joint. This stress concentration reduces the effective fracture stress at the defect boundary, making crack initiation preferential at defect-adjacent interfaces and shifting the failure mode from cohesive fracture within the adhesive to adhesive failure along the interface.",
+  "reasoning": "The 337-Elsevier adhesive joint study shows that both voids from excessive thickness and introduced bonding defects create stress concentration sites that initiate interfacial cracks under mechanical loading, reducing joint tensile-shear strength.",
+  "key_findings": [
+    {
+      "claim": "Defects in the adhesive layer create stress concentration sites under mechanical loading, promoting crack initiation",
+      "detail": "In adhesive joints where the adhesive layer contains voids or defect-like regions, stress concentration occurs more easily at defect sites during loading. [^elsevier337a] Additionally, residual stress from curing shrinkage increases with adhesive thickness, further contributing to stress concentration at defect boundaries. [^elsevier337b]",
+      "source_locations": [
+        {
+          "key": "elsevier337a",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.1. Effect of adhesive thickness on joint's mechanical properties",
+          "quote": "Stress concentration was therefore easier to occur due to the existence of the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337b",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.1. Effect of adhesive thickness on joint's mechanical properties",
+          "quote": "residual stress, which was generated due to the curing shrinkage of the adhesive during the curing process, increased with the increment of the adhesive thickness",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Adhesive failure and interfacial crack initiation occur preferentially around bonding defects under mechanical load",
+      "detail": "When the adhesive joint contains bonding-area defects, adhesive failure occurs more readily around those defects during loading. [^elsevier337c] Cracks initiate along the interface between the adhesive and the adherend in the region surrounding the defect, producing a mixed failure mode combining adhesive and cohesive fracture. [^elsevier337d]",
+      "source_locations": [
+        {
+          "key": "elsevier337c",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "An adhesive failure was more likely to occur around the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337d",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.2. Effect of defects on joints' mechanical properties",
+          "quote": "Cracks were prone to initiate along the interface between the adhesive and upper adherend around the defect",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-mechanical-loading",
+      "display_name": "Mechanical Loading",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-adhesive-interfacial-crack",
+      "display_name": "Adhesive Interfacial Crack in Bonded Joints",
+      "node_type": "failure",
+      "child_reasoning": "Stress concentration at defect sites under mechanical loading initiates cracks along the adhesive-adherend interface, producing adhesive interfacial fracture and reducing the tensile-shear strength of the bonded joint. [^elsevier337c]",
+      "source_locations": [
+        {
+          "key": "elsevier337c",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "An adhesive failure was more likely to occur around the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

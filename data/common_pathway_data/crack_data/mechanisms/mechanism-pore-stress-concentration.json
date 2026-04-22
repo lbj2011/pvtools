@@ -1,0 +1,71 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-pore-stress-concentration",
+  "title": "Pore-Induced Stress Concentration Driving Crack Propagation",
+  "introduction": "During electrophoretic deposition (EPD) of TiO2 photoanode coatings for dye-sensitized solar cells, bubble formation near the deposition electrode creates pores in the deposited layer. These pores remain embedded in the TiO2 coating after deposition and act as stress concentration sites during post-deposition drying and thermal treatment. Stress concentrations around the pore tips drive crack propagation through the TiO2 coating, producing crack networks that compromise the continuity and photocurrent collection of the photoanode layer.",
+  "reasoning": "The 697-Elsevier EPD study explicitly identifies pore-induced stress concentration as the mechanism by which bubble-formed porosity drives crack propagation in TiO2 coatings, linking it directly to cracking failure and efficiency loss.",
+  "key_findings": [
+    {
+      "claim": "Pores formed by EPD bubble formation create stress concentration sites that induce crack propagation in the TiO2 coating",
+      "detail": "During electrophoretic deposition, bubble formation near the deposition electrode is directly visible and creates pores in the TiO2 layer. [^elsevier697a] These pores remain in the deposited coating and create stress concentration sites; the stress concentrations at the pores induce crack propagation through the coating. [^elsevier697b]",
+      "source_locations": [
+        {
+          "key": "elsevier697a",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "3.2. Crystalline and morphological analysis",
+          "quote": "The formation of bubbles in the suspension was visible during EPD near the deposition electrode.",
+          "authors": null,
+          "year": 2016,
+          "line": 18,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier697b",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "3.2. Crystalline and morphological analysis",
+          "quote": "the stress concentrations at the pores can induce crack propagation",
+          "authors": null,
+          "year": 2016,
+          "line": 19,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-processing-induced-defects",
+      "display_name": "Processing-Induced Defects",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-cracked-tio2-coating",
+      "display_name": "Cracked TiO2 Photoanode Coating",
+      "node_type": "failure",
+      "child_reasoning": "Stress concentration at EPD-formed pores drives crack propagation through the TiO2 layer, producing the cracked TiO2 photoanode coating failure that reduces photocurrent and conversion efficiency. [^elsevier697b]",
+      "source_locations": [
+        {
+          "key": "elsevier697b",
+          "source_path": "source/697-Elsevier-548-3614-2-s2.0-84959432045-2016-J-Comparative_study_between_dye_synthesized_solar_cells_prepared_by_electrophoretic_and_doctor_blade_t.json",
+          "page": 4,
+          "section": "3.2. Crystalline and morphological analysis",
+          "quote": "the stress concentrations at the pores can induce crack propagation",
+          "authors": null,
+          "year": 2016,
+          "line": 19,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

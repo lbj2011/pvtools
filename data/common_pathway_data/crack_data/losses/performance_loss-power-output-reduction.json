@@ -1,0 +1,73 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-power-output-reduction",
+  "title": "Reduced Power Output",
+  "introduction": "Reduced power output is the ultimate electrical performance consequence of multiple crack-related failure pathways in PV modules. Thin-film layer delamination reduces light absorption and causes a significant drop in short-circuit current; silicon cell microcracks isolate cell area from current collection, reducing the active power-generating area. Both failure modes translate directly into reduced maximum power output (Pmax) at the module level. This metric represents the most economically significant consequence of crack-related degradation in photovoltaic systems, as it directly determines energy yield over the module's operational lifetime.",
+  "reasoning": "Multiple source pathways — thin-film delamination reducing ISC and silicon cell microcracks isolating cell area — each independently cause reduced power output, warranting a shared performance loss node supported by 1217-MDPI evidence.",
+  "key_findings": [
+    {
+      "claim": "Thin-film delamination substantially reduces light absorption and causes a significant drop in short-circuit current and power output",
+      "detail": "Delamination within a PV module causes a substantial decrease in the amount of light absorbed by the solar cell, thereby leading to a significant drop in short-circuit current (ISC). [^mdpi1217a] This reduction in ISC translates directly into reduced maximum power output at the module level.",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 8,
+          "section": "2.2. Encapsulant",
+          "quote": "delamination can cause a substantial decrease in the amount of light absorbed, thereby leading to a significant drop in ISC",
+          "authors": null,
+          "year": 2024,
+          "line": 8,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Crack-related degradation modes cause higher degradation rates and significant reduction in power output",
+      "detail": "Crack-driven degradation mechanisms contribute to higher overall degradation rates in PV modules, causing a significant reduction in power output. [^mdpi1217b] The increase in yellowness index from encapsulant degradation, which often accompanies crack-related failures, also reduces the major electrical parameter of maximum power output. [^mdpi1217c]",
+      "source_locations": [
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 29,
+          "section": "6. Conclusions",
+          "quote": "higher degradation rates, causing a significant reduction in power output",
+          "authors": null,
+          "year": 2024,
+          "line": 29,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217c",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 9,
+          "section": "2.2. Encapsulant",
+          "quote": "increase in the yellowness index reduces the major electrical parameter maximum power output",
+          "authors": null,
+          "year": 2024,
+          "line": 9,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-thin-film-delamination",
+      "display_name": "Thin-Film Layer Delamination",
+      "node_type": "failure"
+    },
+    {
+      "id": "failure-silicon-cell-microcrack",
+      "display_name": "Silicon Cell Microcracking",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

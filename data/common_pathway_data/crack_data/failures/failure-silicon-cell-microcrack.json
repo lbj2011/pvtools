@@ -1,0 +1,98 @@
+{
+  "node_type": "failure",
+  "id": "failure-silicon-cell-microcrack",
+  "title": "Silicon Cell Microcracking",
+  "introduction": "Silicon cell microcracking is the formation of fine fractures within brittle crystalline silicon solar cells due to mechanical stress during manufacturing, transport, installation, or field loading. Unlike glass breakage, these microcracks are invisible to the naked eye and cannot be detected by visual inspection, making them a hidden structural failure. They may spread over time under subsequent mechanical and thermal cycling. When cracks isolate sufficient cell area from current collection, the disconnected region continues to absorb light but cannot contribute to power generation, creating a reverse-biased zone that overheats and forms a hotspot.",
+  "reasoning": "The 1217-MDPI PV failure review documents silicon cell microcracks as an invisible failure mode from manufacturing/transport/field mechanical stress that spreads over time and can cause hotspot formation when more than ~8% of cell area is isolated.",
+  "key_findings": [
+    {
+      "claim": "Silicon cell microcracks are invisible to the naked eye and may spread over time under continued loading",
+      "detail": "Microcracks in silicon cells originate from mechanical stress during manufacturing, transport, or field operation. They cannot be detected by the naked eye and may spread under continued mechanical and thermal loading over time. [^mdpi1217a]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "microcracks of the cell cannot be detected by the naked eye. Consequently, they may spread",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "When cracks isolate more than ~8% of the cell area from functioning, hotspot formation results",
+      "detail": "When microcracks prevent more than approximately 8% of the cell from functioning — isolating that area from current collection — the inactive region becomes reverse-biased under normal module current flow, causing it to dissipate power as heat and form a hotspot. [^mdpi1217b] Hotspots cause permanent damage to cells and can initiate module-level failure.",
+      "source_locations": [
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "When the cracks prevent more than 8% of the cell from functioning, it may lead to a hotspot",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "mechanism-brittle-fracture-under-load",
+      "display_name": "Brittle Fracture of Glass and Silicon Under Mechanical Load",
+      "node_type": "mechanism"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "performance_loss-hotspot-formation",
+      "display_name": "Hotspot Formation from Cell Microcracks",
+      "node_type": "performance_loss",
+      "child_reasoning": "Microcracks isolating more than ~8% of cell area create reverse-biased inactive zones that dissipate power as heat, forming localized hotspots that cause permanent cell and module damage. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "When the cracks prevent more than 8% of the cell from functioning, it may lead to a hotspot",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "performance_loss-power-output-reduction",
+      "display_name": "Reduced Power Output",
+      "node_type": "performance_loss",
+      "child_reasoning": "Cell microcracks isolate active cell area from current collection pathways, reducing the power-contributing region of the cell and causing measurable module power output reduction. [^mdpi1217a]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "microcracks of the cell cannot be detected by the naked eye. Consequently, they may spread",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

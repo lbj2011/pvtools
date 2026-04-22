@@ -158,15 +158,17 @@ def simplify_label(node):
 
 def to_cytoscape_positioned(nodes, G):
     elements = []
-    y_offsets = {k: 0 for k in LEVEL_X.keys()}
+    y_offsets = {}   # initialised lazily so unknown node types don't crash
 
     spacing_y = 80
 
     for node_id, node in nodes.items():
         node_type = node["node_type"]
         x = LEVEL_X.get(node_type, 1200)
-        y = y_offsets[node_type]
 
+        if node_type not in y_offsets:
+            y_offsets[node_type] = 0
+        y = y_offsets[node_type]
         y_offsets[node_type] += spacing_y
 
         elements.append({

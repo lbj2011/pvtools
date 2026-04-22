@@ -35,8 +35,8 @@ KNOWN_MECHANISMS = {"pid", "crack", "corrosion", "hot spot", "delamination", "mo
 def _load_common_elements(fault):
     """Return Cytoscape elements for a given fault, or None if not available."""
     DATA_PATHS = {
-        "PID": "data/common_pathway_data/pid_data",
-        # "Crack":        "data/common_pathway_data/crack_data",      # not ready
+        "PID":   "data/common_pathway_data/pid_data",
+        "Crack": "data/common_pathway_data/crack_data",
         # "Hot spot":     "data/common_pathway_data/hotspot_data",    # not ready
         # "Delamination": "data/common_pathway_data/delamination_data", # not ready
     }
@@ -54,7 +54,8 @@ _COMMON_ELEMENTS_CACHE = {f: _load_common_elements(f) for f in FAULT_BUTTONS}
 _COMMON_NODES_CACHE: dict = {}
 for _f in FAULT_BUTTONS:
     _path = {
-        "PID": "data/common_pathway_data/pid_data",
+        "PID":   "data/common_pathway_data/pid_data",
+        "Crack": "data/common_pathway_data/crack_data",
     }.get(_f)
     if _path:
         _COMMON_NODES_CACHE[_f] = load_nodes(_path)
@@ -86,6 +87,23 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
 
     # EID → DOI lookup for source chip links
     _EID_DOI = dict(zip(DF["eid"].astype(str), DF["doi"].astype(str)))
+
+    # EID → "LastName et al." short author label
+    def _first_author_label(author_str):
+        if not author_str or str(author_str) == "nan":
+            return ""
+        first = str(author_str).split(";")[0].strip()   # "LastName, FirstName"
+        last = first.split(",")[0].strip()               # "LastName"
+        return last
+
+    _EID_AUTHOR = {
+        str(eid): _first_author_label(auth)
+        for eid, auth in zip(DF["eid"], DF["author_names"])
+    }
+    _EID_YEAR = {
+        str(eid): str(int(yr)) if str(yr) != "nan" else ""
+        for eid, yr in zip(DF["eid"], DF["year"])
+    }
 
     # =========================================================================
     # MAIN CALLBACK — per-paper pathway graph
@@ -539,6 +557,64 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         return fig
 
     # =========================================================================
+    # NODE HOVER CLASS TOGGLE — adds 'mouseover' class for CSS hover effect
+    # Works for both the modal graph and the common pathway graph
+    # =========================================================================
+    @app.callback(
+        Output("graph", "elements", allow_duplicate=True),
+        Input("graph", "mouseoverNodeData"),
+        Input("graph", "mouseoutNodeData"),
+        State("graph", "elements"),
+        prevent_initial_call=True,
+    )
+    def toggle_node_hover_class(over_data, out_data, elements):
+        if not elements:
+            return dash.no_update
+        ctx = dash.callback_context
+        triggered = ctx.triggered_id
+
+        result = []
+        for el in elements:
+            el = dict(el)
+            if "source" in el.get("data", {}):
+                result.append(el)
+                continue
+            classes = set((el.get("classes") or "").split())
+            classes.discard("mouseover")
+            if triggered == "graph" and over_data and el["data"]["id"] == over_data.get("id"):
+                classes.add("mouseover")
+            el["classes"] = " ".join(classes)
+            result.append(el)
+        return result
+
+    @app.callback(
+        Output("common-pathway-graph", "elements", allow_duplicate=True),
+        Input("common-pathway-graph", "mouseoverNodeData"),
+        Input("common-pathway-graph", "mouseoutNodeData"),
+        State("common-pathway-graph", "elements"),
+        prevent_initial_call=True,
+    )
+    def toggle_common_node_hover_class(over_data, out_data, elements):
+        if not elements:
+            return dash.no_update
+        ctx = dash.callback_context
+        triggered = ctx.triggered_id
+
+        result = []
+        for el in elements:
+            el = dict(el)
+            if "source" in el.get("data", {}):
+                result.append(el)
+                continue
+            classes = set((el.get("classes") or "").split())
+            classes.discard("mouseover")
+            if triggered == "common-pathway-graph" and over_data and el["data"]["id"] == over_data.get("id"):
+                classes.add("mouseover")
+            el["classes"] = " ".join(classes)
+            result.append(el)
+        return result
+
+    # =========================================================================
     # GRAPH NODE DETAIL PANEL
     # =========================================================================
     @app.callback(
@@ -872,60 +948,96 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         findings = node.get("key_findings", [])
         finding_blocks = []
 
-        def parse_sources(text):
-            """
-            Extract [[path|label]] citations from text.
-            Returns (clean_text, list_of_source_dicts).
-            Each source dict: {eid, label, page}
-            """
+        def clean_detail_text(text):
+            """Strip all citation markers and markdown from display text."""
+            # Strip [[path|label]] inline refs (PID format)
+            text = re.sub(r'\[\[.*?\]\]', '', text)
+            # Strip [^key] footnote markers (crack format)
+            text = re.sub(r'\[\^[^\]]+\]', '', text)
+            # Strip **bold**
+            text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+            # Strip $math$
+            text = re.sub(r'\$.*?\$', '', text)
+            # Strip trailing --- separators
+            text = re.sub(r'\n---\s*$', '', text)
+            return text.strip()
+
+        def parse_inline_sources(text):
+            """Extract sources from [[path#pageN|label]] inline refs (PID format)."""
             sources = []
             pattern = r'\[\[([^\]|]+?)(?:#page=(\d+))?\|([^\]]+?)\]\]'
             for match in re.finditer(pattern, text):
-                raw_path = match.group(1)   # e.g. papers/MDPI-36-1297-2-s2.0-86000085439-2023-J-Long Title.pdf
-                page     = match.group(2)   # e.g. 5
-                label    = match.group(3)   # e.g. Badran & Dhimish (2023), p.5
+                raw_path = match.group(1)
+                page     = match.group(2) or ""
+                label    = re.sub(r',\s*p\.\d+$', '', match.group(3)).strip()
 
-                # Extract EID: 2-s2.0-XXXXXXX
                 eid_match = re.search(r'(2-s2\.0-\d+)', raw_path)
                 eid = eid_match.group(1) if eid_match else ""
 
-                # Extract year from path
                 year_match = re.search(r'-(\d{4})-', raw_path)
                 year = year_match.group(1) if year_match else ""
 
-                # Build short label: keep part after year in filename, strip .pdf
-                # e.g. "2023-J-Potential Induced Degradation..." → "Potential Induced Degradation..."
                 fname = raw_path.split("/")[-1].replace(".pdf", "")
                 after_year = re.sub(r'^.*?\d{4}-[A-Z]-', '', fname).strip()
-                # Truncate to ~5 words
                 words = after_year.split()
                 short_title = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
 
-                sources.append({
-                    "eid":   eid,
-                    "label": label,          # e.g. "Badran & Dhimish (2023), p.5"
-                    "short": short_title,    # e.g. "Potential Induced Degradation in…"
-                    "page":  page or "",
-                    "year":  year,
-                })
+                sources.append({"eid": eid, "label": label, "short": short_title, "year": year})
+            return sources
 
-            # Strip all [[...]] from display text
-            clean = re.sub(r'\[\[.*?\]\]', '', text)
-            # Strip markdown bold, math, trailing dashes
-            clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
-            clean = re.sub(r'\$.*?\$', '', clean)
-            clean = re.sub(r'\n---\s*$', '', clean).strip()
-            return clean, sources
+        def parse_structured_sources(source_locations):
+            """Extract sources from source_locations array (crack format)."""
+            seen = set()
+            sources = []
+            for loc in (source_locations or []):
+                src_path = loc.get("source_path", "")
+                if not src_path or src_path == "_placeholder":
+                    continue
+
+                eid_match = re.search(r'(2-s2\.0-\d+)', src_path)
+                eid = eid_match.group(1) if eid_match else ""
+
+                if eid in seen:
+                    continue
+                seen.add(eid)
+
+                # Prefer year from DF, fall back to filename
+                year = _EID_YEAR.get(eid, "")
+                if not year:
+                    year_match = re.search(r'-(\d{4})-', src_path)
+                    year = year_match.group(1) if year_match else ""
+
+                # Build "LastName et al. (year)" — prefer DF author, fall back to loc.authors
+                last_name = _EID_AUTHOR.get(eid, "")
+                if not last_name:
+                    raw_authors = loc.get("authors") or ""
+                    last_name = raw_authors.split(",")[0].strip() if raw_authors else ""
+                if last_name:
+                    # Add "et al." if multiple authors in DF
+                    author_str = str(DF[DF["eid"] == eid]["author_names"].values[0]) if eid in _EID_AUTHOR else ""
+                    et_al = " et al." if ";" in author_str else ""
+                    label = f"{last_name}{et_al} ({year})" if year else f"{last_name}{et_al}"
+                else:
+                    # Last resort: first word of filename title
+                    fname = src_path.split("/")[-1].replace(".json", "").replace(".pdf", "")
+                    after_year = re.sub(r'^.*?\d{4}-[A-Z]-', '', fname).replace("_", " ").strip()
+                    first_word = after_year.split()[0] if after_year else "Unknown"
+                    label = f"{first_word} et al. ({year})" if year else first_word
+
+                # Tooltip: full title from filename
+                fname = src_path.split("/")[-1].replace(".json", "").replace(".pdf", "")
+                after_year = re.sub(r'^.*?\d{4}-[A-Z]-', '', fname).replace("_", " ").strip()
+                words = after_year.split()
+                short_title = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
+
+                sources.append({"eid": eid, "label": label, "short": short_title, "year": year})
+            return sources
 
         def source_chip(src):
             doi = _EID_DOI.get(src["eid"], "")
             href = f"https://doi.org/{doi}" if doi else None
-            inner = html.Span(
-                src["label"],
-                style={"fontWeight": "500"},
-            )
             return html.A(
-                inner,
+                html.Span(src["label"], style={"fontWeight": "500"}),
                 href=href,
                 target="_blank",
                 title=src["short"],
@@ -954,15 +1066,18 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
             if not claim and not detail:
                 continue
 
-            detail_clean, sources = parse_sources(detail)
+            detail_clean = clean_detail_text(detail)
+
+            # Try inline [[...]] refs first (PID format), fall back to source_locations (crack format)
+            inline_sources = parse_inline_sources(detail)
+            if inline_sources:
+                sources = inline_sources
+            else:
+                sources = parse_structured_sources(f.get("source_locations", []))
 
             source_row = html.Div(
                 [source_chip(s) for s in sources],
-                style={
-                    "display": "flex",
-                    "flexWrap": "wrap",
-                    "marginTop": "6px",
-                }
+                style={"display": "flex", "flexWrap": "wrap", "marginTop": "6px"}
             ) if sources else None
 
             finding_blocks.append(html.Div([

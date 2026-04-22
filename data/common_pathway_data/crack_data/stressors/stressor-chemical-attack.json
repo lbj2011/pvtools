@@ -1,0 +1,97 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-chemical-attack",
+  "title": "Chemical Attack on Barrier Layers",
+  "introduction": "Chemical agents present in the PV module environment — particularly acetic acid released by thermally or photochemically degrading EVA encapsulant — attack metallic barrier layers within the module structure. This chemical stressor does not impose direct mechanical loads but instead weakens structural integrity through corrosion, creating micro-cracks that compromise the barrier function of aluminum-containing layers in backsheet constructions. Acetic acid is the initial product of EVA degradation and is linked to several PV module failure mechanisms through its corrosive action on metals.",
+  "reasoning": "The 657-Elsevier study documents acetic acid from EVA degradation corroding aluminum barrier layers in PV backsheets, creating micro-cracks that enhance acid transport — a distinct crack-initiating chemical stressor.",
+  "key_findings": [
+    {
+      "claim": "Acetic acid formed during EVA degradation is linked to multiple PV module failure mechanisms including corrosion of aluminum-containing barriers",
+      "detail": "Acetic acid is formed during degradation of EVA, the most frequently used PV encapsulant, and is linked to several module failure mechanisms. [^elsevier657a] The initial step of EVA degradation is the formation of this acetic acid, which then accumulates in the module interior where it attacks metal components. [^elsevier657b]",
+      "source_locations": [
+        {
+          "key": "elsevier657a",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 1,
+          "section": "Abstract",
+          "quote": "Acetic acid, which is formed during degradation of the most frequently used photovoltaic (PV) encapsulant ethylene vinyl acetate (EVA), is linked to several PV module failure mechanisms",
+          "authors": null,
+          "year": 2017,
+          "line": 11,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier657b",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 1,
+          "section": "1. Introduction",
+          "quote": "The initial step of EVA degradation is the formation of acetic acid",
+          "authors": null,
+          "year": 2017,
+          "line": 28,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Acetic acid corrosion of aluminum barrier layers creates pinholes and micro-cracks confirmed by REM-EDX and FTIR-ATR spectroscopy",
+      "detail": "Corrosion of the aluminum barrier layer in PV backsheets by acetic acid has been verified by REM-EDX and FTIR-ATR spectroscopy. The corrosion creates pinholes and micro-cracks in the aluminum layer. [^elsevier657c] The corrosion process also produces aluminum acetate and small crystal formations, along with increased surface porosity and small holes. [^elsevier657d]",
+      "source_locations": [
+        {
+          "key": "elsevier657c",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "Corrosion of the aluminium layer has been shown with REM-EDX and FTIR-ATR spectroscopy, creating pinholes or micro-cracks",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier657d",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 3,
+          "section": "3. Results",
+          "quote": "The formation of small crystals ... and the formation of small holes was observed",
+          "authors": null,
+          "year": 2017,
+          "line": 47,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-acid-corrosion-microcrack",
+      "display_name": "Acid Corrosion Creating Micro-Cracks in Aluminum Barriers",
+      "node_type": "mechanism",
+      "child_reasoning": "Acetic acid vapor reacts with aluminum metallization in backsheet layers, corroding the aluminum and forming crystals and holes that evolve into micro-cracks, disrupting the barrier function. [^elsevier657c]",
+      "source_locations": [
+        {
+          "key": "elsevier657c",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "Corrosion of the aluminium layer has been shown with REM-EDX and FTIR-ATR spectroscopy, creating pinholes or micro-cracks",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "node_type": "stressor",
+  "id": "stressor-mechanical-loading",
+  "title": "Mechanical Loading",
+  "introduction": "Mechanical forces imposed on PV modules during transport, installation, and field operation act as a stressor that initiates crack-related degradation. Brittle materials such as the protective glass cover and silicon cells are particularly susceptible to fracture when subjected to impact, concentrated point loading, or distributed snow and wind pressure. Handling and transport errors expose modules to uncontrolled dynamic loads that nucleate invisible microcracks in silicon cells and visible fractures in the glass cover. Additionally, mechanical loading applied to bonded joints containing manufacturing defects concentrates stress at defect boundaries, nucleating interfacial cracks in adhesive layers.",
+  "reasoning": "The MDPI PV failure review documents transport and handling as direct causes of glass breakage and silicon cell microcracking; the adhesive joint study shows mechanical loading on defect-containing joints drives interfacial crack initiation.",
+  "key_findings": [
+    {
+      "claim": "Poor transport and incorrect manufacturing processes cause glass shattering, allowing moisture to enter the module",
+      "detail": "Glass shattering in PV modules can result from poor transportation or incorrect manufacturing processes. [^mdpi1217a] When the protective glass shatters or breaks, it allows water vapor to enter the solar cells, creating electrical hazards and enabling further internal degradation. [^mdpi1217b]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Glass shattering can be the result of poor PV module transportation or incorrect manufacturing processes",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217b",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Shattering or breakage of the module's glass allows water vapor to enter the solar cells",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Mechanical stress from manufacturing, transport, or field loading causes microcracks in brittle silicon cells that spread over time",
+      "detail": "Microcracks in silicon cells originate during manufacturing, transport, or from mechanical stress in the field. They cannot be detected by the naked eye and may spread over time. [^mdpi1217c] When cracks block more than approximately 8% of the cell area from functioning, the isolated region can overheat and form a hotspot. [^mdpi1217d]",
+      "source_locations": [
+        {
+          "key": "mdpi1217c",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "microcracks of the cell cannot be detected by the naked eye. Consequently, they may spread",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1217d",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 10,
+          "section": "2.3. Solar Cells",
+          "quote": "When the cracks prevent more than 8% of the cell from functioning, it may lead to a hotspot",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Defects in adhesive layers of bonded joints create stress concentration sites that facilitate crack initiation under load",
+      "detail": "In bonded joints of flexible PV modules, when the adhesive layer contains voids or defects (from excessive thickness or improper curing), stress concentration occurs more easily at the defect sites under loading. [^elsevier337a] The combined effect of defect formation and residual curing shrinkage stress makes crack initiation preferential at defect-adjacent interfaces. [^elsevier337b]",
+      "source_locations": [
+        {
+          "key": "elsevier337a",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.1. Effect of adhesive thickness on joint's mechanical properties",
+          "quote": "Stress concentration was therefore easier to occur due to the existence of the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier337b",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 6,
+          "section": "4.1. Effect of adhesive thickness on joint's mechanical properties",
+          "quote": "residual stress, which was generated due to the curing shrinkage of the adhesive during the curing process, increased with the increment of the adhesive thickness",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [],
+  "child_nodes": [
+    {
+      "id": "mechanism-brittle-fracture-under-load",
+      "display_name": "Brittle Fracture of Glass and Silicon Under Mechanical Load",
+      "node_type": "mechanism",
+      "child_reasoning": "Applied mechanical forces from transport, handling, or weather events create concentrated stresses that exceed the fracture toughness of brittle glass and silicon, initiating cracks. [^mdpi1217a]",
+      "source_locations": [
+        {
+          "key": "mdpi1217a",
+          "source_path": "source/1217-MDPI-25-940-2-s2.0-86000039938-2024-J-A_Review_of_Photovoltaic_Module_Failure_and_Degradation_Mechanisms_Causes_and_Detection_Techniques.json",
+          "page": 7,
+          "section": "2.1. Protective Glass",
+          "quote": "Glass shattering can be the result of poor PV module transportation or incorrect manufacturing processes",
+          "authors": null,
+          "year": 2024,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "id": "mechanism-adhesive-defect-crack",
+      "display_name": "Crack Initiation at Adhesive Layer Defects",
+      "node_type": "mechanism",
+      "child_reasoning": "Mechanical loading applied to adhesive joints with defects concentrates stress at defect boundaries, lowering the effective fracture stress and nucleating interfacial cracks at those sites. [^elsevier337a]",
+      "source_locations": [
+        {
+          "key": "elsevier337a",
+          "source_path": "source/337-Elsevier-223-1243-2-s2.0-85169611930-2023-J-Influence_of_adhesive_thickness_and_defect_on_mechanical_property_of_adhesive_bonded_joint_of_flexib.json",
+          "page": 5,
+          "section": "3.3. Mechanical behaviors of joints with different defects",
+          "quote": "An adhesive failure was more likely to occur around the defects",
+          "authors": null,
+          "year": 2023,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

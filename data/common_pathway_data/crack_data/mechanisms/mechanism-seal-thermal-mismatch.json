@@ -1,0 +1,77 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-seal-thermal-mismatch",
+  "title": "Seal Cracking from Thermal Expansion Mismatch",
+  "introduction": "The edge seal of a photovoltaic module bonds a cover plate to the module body using a sealant material. Because the thermal expansion coefficients of these two components differ, every temperature cycle causes them to expand and contract by different amounts. This repeated dimensional mismatch applies cyclic stress to the adhesive bond at the cover-sealant interface. After sufficient cycles of heating and cooling, the accumulated fatigue damage causes adhesive failure between the sealing rubber and the cover plate, initiating cracks in the edge seal that compromise the module's moisture barrier.",
+  "reasoning": "The 1564-SPIE accelerated durability study directly attributes edge seal adhesive failure to mismatched thermal expansion coefficients between the cover plate and sealant under repeated temperature cycling.",
+  "key_findings": [
+    {
+      "claim": "Mismatched thermal expansion coefficients between cover plate and sealant cause adhesive failure after repeated heat-expansion/shrinkage cycles",
+      "detail": "The thermal expansion coefficient of the module cover plate and the sealant material differ. Over many cycles of heat expansion and shrinkage, this mismatch generates cyclic stress at the cover-sealant bond, ultimately causing adhesive failure between the sealing rubber and the cover plate. [^spie1564a]",
+      "source_locations": [
+        {
+          "key": "spie1564a",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "the thermal expansion coefficient of the component cover and sealant is different, After many heat expansion and shrinkage, Sealing rubber and component cover plate adhesive failure",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Accelerated endurance testing confirms that seal cracks allow air and water vapor to enter the module",
+      "detail": "After accelerated endurance testing, seals that experienced cover-sealant adhesive failure showed cracks in the adhesion at the component cover. [^spie1564b] Air and water vapor enter the module through the sealant crack, creating visible bubbles that confirm the loss of the module's moisture barrier function.",
+      "source_locations": [
+        {
+          "key": "spie1564b",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "Compared with other components did not appear bubbles, We found that the seal of the failure component had cracks in the adhesion of the component cover",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-thermal-cycling",
+      "display_name": "Thermal Cycling",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "failure-edge-seal-crack",
+      "display_name": "Edge Seal Cracking",
+      "node_type": "failure",
+      "child_reasoning": "Repeated thermal expansion mismatch at the cover-sealant interface accumulates cyclic adhesive stress until the bond fails and a crack forms in the edge seal, constituting structural edge seal failure. [^spie1564a]",
+      "source_locations": [
+        {
+          "key": "spie1564a",
+          "source_path": "source/1564-SPIE-142-3147-2-s2.0-85053453989-2018-C-Research_on_accelerated_durability_test_of_photovoltaic_hollow_modules.json",
+          "page": 3,
+          "section": "3.1 Accelerated endurance test results and analysis",
+          "quote": "the thermal expansion coefficient of the component cover and sealant is different, After many heat expansion and shrinkage, Sealing rubber and component cover plate adhesive failure",
+          "authors": null,
+          "year": 2018,
+          "line": 3,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

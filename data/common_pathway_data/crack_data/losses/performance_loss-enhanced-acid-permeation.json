@@ -1,0 +1,81 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-enhanced-acid-permeation",
+  "title": "Enhanced Acid Permeation Through Micro-Cracked Barriers",
+  "introduction": "Enhanced acid permeation through micro-cracked barriers is the chemical performance loss that results when acetic acid corrosion destroys the barrier function of aluminum layers in PV backsheets. Intact aluminum metallization in backsheet constructions is intended to block the transmission of acetic acid produced by degrading EVA encapsulant. When corrosion creates pinholes and micro-cracks in the aluminum layer, these defects become low-resistance pathways for acetic acid to permeate through the backsheet at enhanced rates. The escaped acetic acid then attacks interconnectors, cell metallization, and other internal module components, driving further corrosion and performance decline in a self-reinforcing degradation cascade.",
+  "reasoning": "The 657-Elsevier study documents that pinholes and micro-cracks in aluminum layers explicitly enhance acetic acid transport through the backsheet, establishing this as the measurable performance consequence of aluminum barrier microcracking.",
+  "key_findings": [
+    {
+      "claim": "Pinholes and micro-cracks in corroded aluminum layers enhance acetic acid transport through the backsheet",
+      "detail": "Corrosion of the aluminum barrier layer creates pinholes or micro-cracks that enhance acetic acid transport through the aluminum layer. [^elsevier657a] Incorporated aluminum layers that have been corroded were found to not provide effective barrier performance, with acetic acid transmission rates (AATRs) of PET-based backsheets with corroded aluminum layers being similar to those without aluminum, demonstrating the loss of barrier function. [^elsevier657b]",
+      "source_locations": [
+        {
+          "key": "elsevier657a",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 4,
+          "section": "4. Conclusions",
+          "quote": "creating pinholes or micro-cracks which enhance acetic acid transport through the aluminium layer",
+          "authors": null,
+          "year": 2017,
+          "line": 40,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier657b",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 1,
+          "section": "Abstract",
+          "quote": "Incorporated Al-layers were found to not affect the AATRs of PET based backsheets.",
+          "authors": null,
+          "year": 2017,
+          "line": 13,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Acetic acid permeating through backsheets corrodes interconnectors and cell metallization, increasing series resistance",
+      "detail": "Acetic acid that permeates through the backsheet has corrosive effects on interconnectors and cell metallization inside the module. [^elsevier657c] This metallization corrosion leads to increased series resistance and therefore losses in module performance, linking enhanced acid permeation directly to electrical degradation. [^elsevier657d]",
+      "source_locations": [
+        {
+          "key": "elsevier657c",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 1,
+          "section": "1. Introduction",
+          "quote": "The acetic acid has corrosive effects on interconnectors and cell metallization",
+          "authors": null,
+          "year": 2017,
+          "line": 34,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "elsevier657d",
+          "source_path": "source/657-Elsevier-511-3282-2-s2.0-85018257748-2017-J-Acetic_acid_permeation_through_photovoltaic_backsheets-_Influence_of_the_composition_on_the_permeati.json",
+          "page": 1,
+          "section": "1. Introduction",
+          "quote": "The metallization corrosion leads to an increased series resistance and therefore losses in module performance",
+          "authors": null,
+          "year": 2017,
+          "line": 35,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-al-barrier-microcrack",
+      "display_name": "Micro-Cracked Aluminum Barrier Layer",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

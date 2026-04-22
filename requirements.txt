@@ -53,3 +53,4 @@ python-dotenv>=1.2.2
 scikit-learn>=1.7.2
 statsmodels>=0.14.6
 dash_model_viewer >=0.0.1
+networkx >= 3.4.2

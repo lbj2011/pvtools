@@ -1,0 +1,49 @@
+{
+  "node_type": "performance_loss",
+  "id": "performance_loss-open-circuit-failure",
+  "title": "Open-Circuit Failure from Solder Joint Fracture",
+  "introduction": "Open-circuit failure from solder joint fracture is the ultimate electrical performance loss that results when a fatigue crack propagates across the full cross-section of a solder interconnect. When the crack spans the entire joint, the electrical path between series-connected cells is severed, creating an open circuit. In a module string, this open circuit disconnects one or more cells from the current path, preventing current flow through the affected sub-string and causing a step-change loss in module power output. Open-circuit solder failure is the terminal stage of progressive solder joint fatigue cracking driven by CTE mismatch under field thermal cycling.",
+  "reasoning": "The 1261-MDPI study explicitly states that a crack spreading across the entire solder joint region produces an open circuit, establishing this as the terminal electrical performance loss from solder fatigue cracking.",
+  "key_findings": [
+    {
+      "claim": "A fatigue crack spanning the full solder joint cross-section produces an open circuit, severing the cell interconnect",
+      "detail": "If a fatigue crack spreads across the entire solder joint region, the result is an open circuit. [^mdpi1261a] This open circuit severs the electrical connection between adjacent cells in the module string. The increased electrical resistance from even partial cracking already raises series resistance, with the open circuit representing the extreme endpoint of this progressive degradation. [^mdpi1261b]",
+      "source_locations": [
+        {
+          "key": "mdpi1261a",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit will result if a crack spreads across the entire joint region.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        },
+        {
+          "key": "mdpi1261b",
+          "source_path": "source/1261-MDPI-64-2067-2-s2.0-85105308237-2021-J-Study_on_creep_damage_in_sn60_pb40_and_sn3.8_ag0.7_cu_lead-free_solders_in_c-si_solar_pv_cell_inte.json",
+          "page": 2,
+          "section": "Introduction",
+          "quote": "An open circuit increases the electrical resistance across the solder joint.",
+          "authors": null,
+          "year": 2021,
+          "line": 4,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "failure-solder-joint-crack",
+      "display_name": "Solder Joint Fatigue and Creep Cracking",
+      "node_type": "failure"
+    }
+  ],
+  "child_nodes": []
+}

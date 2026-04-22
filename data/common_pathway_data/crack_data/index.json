@@ -1,0 +1,66 @@
+{
+  "node_type": "index",
+  "wiki_name": "PV Module Crack Degradation Wiki",
+  "description": "This wiki maps crack-related degradation pathways in photovoltaic modules, from the environmental and mechanical stressors that initiate cracking, through the physical mechanisms by which cracks form and propagate, to the structural failures caused by cracking and the resulting electrical and thermal performance losses. The hierarchy follows a four-level chain: stressor → mechanism → failure → performance_loss. Source material is drawn from 50 academic papers and reports on PV module degradation, stored as structured JSON records in the source folder. Of the 50 sources, eight contributed crack-relevant content spanning thin-film delamination, solder joint fatigue, edge seal cracking, glass and silicon cell fracture, adhesive joint cracking, TiO2 coating cracks, and aluminum barrier micro-cracking.",
+  "hierarchy_label": "stressor → mechanism → failure → performance_loss",
+  "source_folder": "source",
+  "disclaimer": "Most source files in this dataset focus on perovskite, CIGS, or organic solar cell chemistry rather than mechanical crack degradation. Only 8 of 50 sources contributed crack-relevant content. The wiki reflects what is documented in the available sources and does not claim comprehensive coverage of all crack degradation mechanisms in PV modules.",
+  "sections": [
+    {
+      "node_type_key": "stressor",
+      "display_name": "Stressors",
+      "description": "Environmental or mechanical stressors that initiate crack-related degradation in photovoltaic modules.",
+      "nodes": [
+        {"id": "stressor-thermal-cycling", "display_name": "Thermal Cycling"},
+        {"id": "stressor-mechanical-loading", "display_name": "Mechanical Loading"},
+        {"id": "stressor-processing-induced-defects", "display_name": "Processing-Induced Defects"},
+        {"id": "stressor-chemical-attack", "display_name": "Chemical Attack on Barrier Layers"}
+      ]
+    },
+    {
+      "node_type_key": "mechanism",
+      "display_name": "Mechanisms",
+      "description": "Physical or chemical processes through which cracks form or propagate within photovoltaic module materials.",
+      "nodes": [
+        {"id": "mechanism-thermal-strain-buildup", "display_name": "Thermal Strain Buildup at Film Interfaces"},
+        {"id": "mechanism-delamination-front-propagation", "display_name": "Delamination Front Propagation"},
+        {"id": "mechanism-cte-mismatch-fatigue", "display_name": "CTE Mismatch Fatigue and Creep in Solder Joints"},
+        {"id": "mechanism-seal-thermal-mismatch", "display_name": "Seal Cracking from Thermal Expansion Mismatch"},
+        {"id": "mechanism-brittle-fracture-under-load", "display_name": "Brittle Fracture of Glass and Silicon Under Mechanical Load"},
+        {"id": "mechanism-adhesive-defect-crack", "display_name": "Crack Initiation at Adhesive Layer Defects"},
+        {"id": "mechanism-pore-stress-concentration", "display_name": "Pore-Induced Stress Concentration Driving Crack Propagation"},
+        {"id": "mechanism-acid-corrosion-microcrack", "display_name": "Acid Corrosion Creating Micro-Cracks in Aluminum Barriers"}
+      ]
+    },
+    {
+      "node_type_key": "failure",
+      "display_name": "Failures",
+      "description": "Structural or material failures resulting from crack-related degradation in photovoltaic modules.",
+      "nodes": [
+        {"id": "failure-thin-film-delamination", "display_name": "Thin-Film Layer Delamination"},
+        {"id": "failure-solder-joint-crack", "display_name": "Solder Joint Fatigue and Creep Cracking"},
+        {"id": "failure-edge-seal-crack", "display_name": "Edge Seal Cracking"},
+        {"id": "failure-glass-breakage", "display_name": "Protective Glass Breakage"},
+        {"id": "failure-silicon-cell-microcrack", "display_name": "Silicon Cell Microcracking"},
+        {"id": "failure-adhesive-interfacial-crack", "display_name": "Adhesive Interfacial Crack in Bonded Joints"},
+        {"id": "failure-cracked-tio2-coating", "display_name": "Cracked TiO2 Photoanode Coating"},
+        {"id": "failure-al-barrier-microcrack", "display_name": "Micro-Cracked Aluminum Barrier Layer"}
+      ]
+    },
+    {
+      "node_type_key": "performance_loss",
+      "display_name": "Performance Losses",
+      "description": "Measurable electrical or thermal performance reductions caused by crack-related failures in photovoltaic modules.",
+      "nodes": [
+        {"id": "performance_loss-hotspot-formation", "display_name": "Hotspot Formation from Cell Microcracks"},
+        {"id": "performance_loss-power-output-reduction", "display_name": "Reduced Power Output"},
+        {"id": "performance_loss-moisture-ingress-damage", "display_name": "Moisture Ingress and Accelerated Internal Degradation"},
+        {"id": "performance_loss-series-resistance-increase", "display_name": "Series Resistance Increase from Solder Degradation"},
+        {"id": "performance_loss-open-circuit-failure", "display_name": "Open-Circuit Failure from Solder Joint Fracture"},
+        {"id": "performance_loss-reduced-photocurrent", "display_name": "Reduced Photocurrent from Cracked Photoanode"},
+        {"id": "performance_loss-enhanced-acid-permeation", "display_name": "Enhanced Acid Permeation Through Micro-Cracked Barriers"},
+        {"id": "performance_loss-structural-integrity-loss", "display_name": "Structural Integrity Loss in Bonded Joints"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "node_type": "mechanism",
+  "id": "mechanism-thermal-strain-buildup",
+  "title": "Thermal Strain Buildup at Film Interfaces",
+  "introduction": "When a PV module cools below the glass-transition temperature (Tg) of the EVA encapsulant, the elastic modulus of EVA rises approximately 100-fold. This dramatic stiffening transforms the encapsulant from a compliant buffer into a rigid constraint, causing thermal mismatch strain energy to accumulate at thin-film interfaces at a far higher rate than when the temperature remains above Tg. The depth of cooling below Tg — the quench depth — determines how much strain energy is stored, setting the thermodynamic driving force for delamination crack initiation at encapsulant-film interfaces.",
+  "reasoning": "The 011-ACS CdTe thermomechanical lift-off study documents the ~100× EVA modulus increase below Tg as the direct amplifier of CTE mismatch strain energy at film interfaces, warranting a dedicated mechanism node.",
+  "key_findings": [
+    {
+      "claim": "EVA elastic modulus increases ~100-fold below its glass-transition temperature, accelerating interfacial strain energy accumulation",
+      "detail": "Below the glass-transition temperature (Tg) of EVA, the material's elastic modulus increases dramatically — approximately 100-fold. [^acs011a] This stiffening causes the rate at which thermal mismatch strain energy accumulates at bonded film interfaces to increase far more quickly than at temperatures above Tg, where EVA remains viscoelastic and can partially relieve stress.",
+      "source_locations": [
+        {
+          "key": "acs011a",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "Below Tg, there is a dramatic increase in the elastic modulus of EVA (~100\u00d7), which causes the rate at which strain energy builds up to increase much more quickly",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    },
+    {
+      "claim": "Greater cooling depth below Tg increases stored interfacial strain energy and the driving force for delamination",
+      "detail": "The quench depth — the magnitude of cooling below the EVA glass-transition temperature — directly controls the amount of strain energy stored at film interfaces. [^acs011b] Deeper quench temperatures produce greater strain energy release rates, increasing the driving force for delamination crack initiation.",
+      "source_locations": [
+        {
+          "key": "acs011b",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "decreasing Tdelam, we increase the quench depth relative to the glass-transition temperature",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ],
+  "parent_nodes": [
+    {
+      "id": "stressor-thermal-cycling",
+      "display_name": "Thermal Cycling",
+      "node_type": "stressor"
+    }
+  ],
+  "child_nodes": [
+    {
+      "id": "mechanism-delamination-front-propagation",
+      "display_name": "Delamination Front Propagation",
+      "node_type": "mechanism",
+      "child_reasoning": "Accumulated sub-Tg interfacial strain energy raises the strain energy release rate above the interface fracture toughness, triggering propagation of a delamination crack front across the film-encapsulant interface. [^acs011a]",
+      "source_locations": [
+        {
+          "key": "acs011a",
+          "source_path": "source/011-ACS-107-2884-2-s2.0-85058640381-2018-J-Thermomechanical_Lift-Off_and_Recontacting_of_CdTe_Solar_Cells.json",
+          "page": 3,
+          "section": "Results and Discussion",
+          "quote": "Below Tg, there is a dramatic increase in the elastic modulus of EVA (~100\u00d7), which causes the rate at which strain energy builds up to increase much more quickly",
+          "authors": null,
+          "year": 2018,
+          "line": 1,
+          "figure_ref": null,
+          "table_ref": null,
+          "bounding_box": null
+        }
+      ]
+    }
+  ]
+}

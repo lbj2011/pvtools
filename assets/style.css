@@ -52,56 +52,82 @@
 }
 
 
-/* CARD IMAGE */
-.tool-card-img {
+/* =========================
+   Tool Cards
+   ========================= */
+
+.tool-card {
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.tool-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+}
+
+/* Image wrapper — clips the zoom effect */
+.tool-card-img-wrap {
+    overflow: hidden;
     height: 180px;
-    object-fit: contain;
-    padding: 15px;
     background-color: #f8f9fa;
 }
 
+.tool-card-img {
+    width: 100%;
+    height: 180px;
+    object-fit: contain;
+    padding: 15px;
+    transition: transform 0.35s ease;
+    display: block;
+}
 
-/* CARD BODY */
+.tool-card:hover .tool-card-img {
+    transform: scale(1.06);
+}
+
+/* Body — keep original compact layout */
 .tool-card-body {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    height: 50%;
 }
 
-
-/* TITLE */
+/* Title */
 .tool-card-title {
     font-weight: 700;
     margin-bottom: 10px;
 }
 
-
-/* DESCRIPTION */
+/* Description */
 .tool-card-desc {
     min-height: 60px;
+    font-size: 14px;
+    color: #7a7a7a;
+    margin-bottom: 0;
 }
 
-
-/* BUTTON */
+/* Button */
 .tool-card-btn {
     margin-top: auto;
+    font-weight: 700;
     width: auto;
     align-self: flex-start;
     padding: 6px 16px;
+    transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }
 
-
-/* CARD STYLE */
-.tool-card {
-    border-radius: 10px;
+.tool-card-btn:hover {
+    background-color: #7ab53e !important;
+    border-color: #7ab53e !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(114,180,50,0.35);
 }
 
-
-/* CARD HOVER EFFECT */
-.tool-card:hover {
-    transform: translateY(-4px);
-    transition: 0.2s ease;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+.tool-card-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
 }
 
 
