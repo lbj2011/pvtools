@@ -19,7 +19,7 @@ import json
 import base64, os, json
 
 # OpenAI API setup
-api = 'REMOVED_KEY'  # Avoid storing API keys in production code
+api = 'sk-ZUWPaMt_MaPEPIe7ndcxfw'  # Avoid storing API keys in production code
 client = openai.OpenAI(
     api_key=api,
     base_url="https://api.cborg.lbl.gov"

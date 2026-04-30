@@ -1,3 +1,17 @@
+/* =========================
+   Degradation Analysis — metric radio labels
+   Prevent Bootstrap link-color bleed on hover/focus
+   ========================= */
+#metric-selected-visible .form-check-label,
+#metric-selected-visible .form-check-label:hover,
+#metric-selected-visible .form-check-label:focus,
+#metric-selected-visible .form-check-label:active,
+#metric-selected-visible .form-check-input:checked ~ .form-check-label,
+#metric-selected-visible .form-check-label * {
+    color: inherit !important;
+    text-decoration: none !important;
+}
+
 /* Page title */
 .page-title {
     font-weight: 800;

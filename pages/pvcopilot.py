@@ -1,4 +1,3 @@
-
 import dash
 from dash import dcc, html, Input, Output, dash_table
 from dash.dependencies import Input, Output, State
@@ -16,7 +15,7 @@ from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd
-from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 
 # --- Define Color Variables ---
@@ -406,18 +405,291 @@ layout = dbc.Container([
                         
                         [
                             html.H6("Choose the filters:"),
+
+                            # Use a hidden Checklist to keep the same id/value interface for the callback
                             dbc.Checklist(
                                 id="filter-options",
                                 options=[
-                                    {"label": "Time zone & DST correction", "value": "timezone"},
-                                    {"label": "Low irradiance/power filter", "value": "low-irra-power"},
-                                    {"label": "Outlier removal", "value": "outlier"},
-                                    {"label": "Clear-sky filter", "value": "clearsky"},
+                                    {"label": "", "value": "timezone"},
+                                    {"label": "", "value": "low-irra-power"},
+                                    {"label": "", "value": "outlier"},
+                                    {"label": "", "value": "clearsky"},
                                 ],
                                 value=['timezone', "low-irra-power", "outlier"],
-                                inline=False
+                                inline=False,
+                                style={"display": "none"}
                             ),
-                            dbc.Button("Filter data", id="filter-btn", color="primary", className="w-100 mt-3")
+
+                            # --- Manual per-filter rows ---
+                            # 1. Timezone
+                            html.Div([
+                                dbc.Checkbox(id="cb-timezone", value=True, className="me-2 d-inline-block"),
+                                html.Span("Time zone & DST correction"),
+                            ], style={"marginBottom": "6px"}),
+
+                            # 2. Low irradiance/power filter + inline customize
+                            html.Div([
+                                dbc.Checkbox(id="cb-low-irra-power", value=True, className="me-2 d-inline-block"),
+                                html.Span("Low irradiance/power filter"),
+                                html.Details([
+                                    html.Summary("Customize parameters", style={
+                                        "cursor": "pointer", "color": "#adb5bd",
+                                        "fontSize": "13px", "fontWeight": "500", "marginTop": "4px",
+                                        "marginLeft": "22px",
+                                    }),
+                                    html.Div([
+
+                                        html.Div([
+                                            html.Label("γ — temperature coefficient of power (/°C)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            dcc.Input(id="param-gamma", type="number", value=-0.004, step=0.001,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "10px"}),
+
+                                        html.Div([
+                                            html.Label("Min. irradiance threshold (W/m²)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            html.Div("Excludes data below this irradiance level, where measurement uncertainty is high and the system may not be in normal operation.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                            dcc.Input(id="param-irr-thresh", type="number", value=300, step=10, min=0,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "10px"}),
+
+                                        html.Div([
+                                            html.Label("Min. power / irradiance ratio", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            html.Div("Rejects points where DC power is abnormally low relative to irradiance (e.g., shading, inverter faults). Condition: P > ratio × G.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                            dcc.Input(id="param-power-ratio", type="number", value=0.02, step=0.005, min=0,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "0px"}),
+
+                                        # Hidden inputs kept for callback compatibility
+                                        dcc.Input(id="param-norm-lower", type="number", value=0.01, style={"display": "none"}),
+                                        dcc.Input(id="param-norm-upper-pct", type="number", value=99, style={"display": "none"}),
+
+                                    ], style={
+                                        "marginTop": "8px", "marginLeft": "22px",
+                                        "padding": "10px 12px",
+                                        "backgroundColor": "#f0f6ff",
+                                        "borderRadius": "8px",
+                                        "border": "1px solid #c8dff8",
+                                        "color": "#1a1a2e",
+                                        "fontSize": "12px",
+                                    })
+                                ]),
+                            ], style={"marginBottom": "6px"}),
+
+                            # 3. Outlier removal + inline customize
+                            html.Div([
+                                dbc.Checkbox(id="cb-outlier", value=True, className="me-2 d-inline-block"),
+                                html.Span("Outlier removal"),
+                                html.Details([
+                                    html.Summary("Customize parameters", style={
+                                        "cursor": "pointer", "color": "#adb5bd",
+                                        "fontSize": "13px", "fontWeight": "500", "marginTop": "4px",
+                                        "marginLeft": "22px",
+                                    }),
+                                    html.Div([
+
+                                        html.Div([
+                                            html.Label("IQR multiplier (k)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            html.Div([
+                                                "Defines the fence width: bounds = [Q1 − k·IQR, Q3 + k·IQR]. ",
+                                                "The standard Tukey fence uses k = 1.5. ",
+                                                "Larger values (e.g., k = 3) yield a more permissive filter; smaller values are stricter."
+                                            ], style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                            dcc.Input(id="param-iqr-multiplier", type="number", value=1.5, step=0.1, min=0.1,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "0px"}),
+
+                                    ], style={
+                                        "marginTop": "8px", "marginLeft": "22px",
+                                        "padding": "10px 12px",
+                                        "backgroundColor": "#f0f6ff",
+                                        "borderRadius": "8px",
+                                        "border": "1px solid #c8dff8",
+                                        "color": "#1a1a2e",
+                                        "fontSize": "12px",
+                                    })
+                                ]),
+                            ], style={"marginBottom": "6px"}),
+
+                            # 4. Clear-sky filter + inline customize
+                            html.Div([
+                                dbc.Checkbox(id="cb-clearsky", value=False, className="me-2 d-inline-block"),
+                                html.Span("Clear-sky filter"),
+                                html.Details([
+                                    html.Summary("Customize parameters", style={
+                                        "cursor": "pointer", "color": "#adb5bd",
+                                        "fontSize": "13px", "fontWeight": "500", "marginTop": "4px",
+                                        "marginLeft": "22px",
+                                    }),
+                                    html.Div([
+
+                                        html.Div([
+                                            html.Label("Smoothness threshold", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            html.Div([
+                                                "Minimum per-day smoothness score (0–1). Based on the L1-norm of the 2nd-order temporal difference of the intraday irradiance profile. ",
+                                                "Higher values are stricter (only very smooth bell-shaped days pass). ",
+                                                "Recommended: 0.3–0.6 for hourly data, 0.7–0.9 for sub-hourly data."
+                                            ], style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                            dcc.Input(id="param-cs-smooth", type="number", value=0.3, step=0.05, min=0.0, max=1.0,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "10px"}),
+
+                                        html.Div([
+                                            html.Label("Energy threshold", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                            html.Div([
+                                                "Minimum seasonally-normalized daily irradiance score (0–1). ",
+                                                "Computed as the ratio of daily irradiance sum to a rolling 90th-percentile baseline (±30-day window). ",
+                                                "A value of 0.5 retains days with at least 50% of the local seasonal maximum irradiance."
+                                            ], style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                            dcc.Input(id="param-cs-energy", type="number", value=0.5, step=0.05, min=0.0, max=1.0,
+                                                      style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                        ], style={"marginBottom": "0px"}),
+
+                                    ], style={
+                                        "marginTop": "8px", "marginLeft": "22px",
+                                        "padding": "10px 12px",
+                                        "backgroundColor": "#f0f6ff",
+                                        "borderRadius": "8px",
+                                        "border": "1px solid #c8dff8",
+                                        "color": "#1a1a2e",
+                                        "fontSize": "12px",
+                                    })
+                                ]),
+                            ], style={"marginBottom": "6px"}),
+
+                            # Sync individual checkboxes → hidden checklist (clientside)
+                            dcc.Store(id="_cb-sync-dummy"),
+
+                            dbc.Button("Filter data", id="filter-btn", color="primary", className="w-100 mt-3"),
+
+                            html.Details([
+                                html.Summary(
+                                    "Filter detail:",
+                                    style={
+                                        "cursor": "pointer",
+                                        "color": "#B5B5B8",
+                                        "fontSize": "14px",
+                                        "fontWeight": "500",
+                                    }
+                                ),
+
+                                html.Div([
+
+                                    # Each filter item is individually collapsible
+                                    html.Details([
+                                        html.Summary(html.B("Basic value filter (always applied)"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                        html.Div(
+                                            "Applied automatically before all other filters. Removes physically implausible sensor readings: "
+                                            "irradiance outside [0, 1500] W/m², "
+                                            "module temperature outside [−40, 100] °C, "
+                                            "and DC power below −1 W. "
+                                            "Catches sensor faults (e.g. irradiance = 34,000 W/m²) that would corrupt normalization and clear-sky scoring.",
+                                            style={"marginTop": "4px", "paddingLeft": "12px"}
+                                        ),
+                                    ], style={"marginBottom": "6px"}),
+
+                                    html.Details([
+                                        html.Summary(html.B("Time zone & DST correction"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                        html.Div(
+                                            "Corrects timestamps for local time zone offsets and Daylight Saving Time (DST) transitions. "
+                                            "Ensures the datetime index is monotonic and properly localized before any temporal analysis.",
+                                            style={"marginTop": "4px", "paddingLeft": "12px"}
+                                        ),
+                                    ], style={"marginBottom": "6px"}),
+
+                                    html.Details([
+                                        html.Summary(html.B("Low irradiance/power filter"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                        html.Div([
+                                            "Removes non-representative operating points using three simultaneous conditions: "
+                                            "① irradiance above a minimum threshold; "
+                                            "② power exceeding a minimum fraction of irradiance; "
+                                            "③ temperature-corrected normalized power"
+                                            " (norm = P / [G · (1 + γ(T − 25))] × 1000)",
+                                            html.Sup("[1]"),
+                                            " within a valid range. Points failing any condition are excluded."
+                                        ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                    ], style={"marginBottom": "6px"}),
+
+                                    html.Details([
+                                        html.Summary(html.B("Outlier removal"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                        html.Div([
+                                            "Detects statistical outliers on the temperature-corrected normalized power signal using the IQR method",
+                                            html.Sup("[2]"),
+                                            ". Points outside [Q1 − k·IQR, Q3 + k·IQR] (default k = 1.5, Tukey's fence) are flagged and excluded from downstream degradation analysis."
+                                        ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                    ], style={"marginBottom": "6px"}),
+
+                                    html.Details([
+                                        html.Summary(html.B("Clear-sky filter"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                        html.Div([
+                                            "Applied to the raw irradiance signal before power normalization, preserving the full intraday bell-shaped profile needed for smoothness scoring. "
+                                            "Follows the approach of Meyers et al.",
+                                            html.Sup("[3]"),
+                                            " The algorithm is resolution-aware: ",
+                                            html.Br(),
+                                            html.B("Sub-daily data (≥4 readings/day): "),
+                                            "① a smoothness score derived from the L1-norm of the 2nd-order temporal difference of the intraday irradiance signal "
+                                            "(smooth bell-shaped profiles score high); "
+                                            "② a seasonally-normalized daily energy score (ratio of daily irradiance sum to a rolling 90th-percentile baseline, ±30-day window). "
+                                            "A day is classified as clear only if both scores exceed their respective thresholds (AND rule). ",
+                                            html.Br(),
+                                            html.B("Coarse/downsampled data (<4 readings/day): "),
+                                            "smoothness cannot be reliably estimated from sparse samples, so the filter falls back to energy-only mode — "
+                                            "retaining days whose seasonally-normalized irradiance exceeds the energy threshold."
+                                        ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                    ], style={"marginBottom": "6px"}),
+
+                                    # References (collapsible)
+                                    html.Hr(style={"borderColor": "#c8dff8", "margin": "6px 0"}),
+                                    html.Details([
+                                        html.Summary("References", style={
+                                            "cursor": "pointer",
+                                            "fontSize": "11px", "fontWeight": "700",
+                                            "color": "#1A64BE",
+                                        }),
+                                        html.Ol([
+                                            html.Li([
+                                                "IEC 60891:2021 — Photovoltaic devices: Procedures for temperature and irradiance corrections to measured I-V characteristics. ",
+                                                html.A("webstore.iec.ch",
+                                                       href="https://webstore.iec.ch/en/publication/61766",
+                                                       target="_blank",
+                                                       style={"color": "#0d6efd"}),
+                                                "."
+                                            ], style={"marginBottom": "4px"}),
+                                            html.Li([
+                                                "Kim, G. G., Hyun, J. H., Choi, J. H., Bhang, B. G., & Ahn, H. K. (2023). Quality analysis of photovoltaic system using descriptive statistics of power performance index. ",
+                                                html.Em("IEEE Access"),
+                                                ", 11, 28427–28438. ",
+                                                html.A("10.1109/ACCESS.2023.3257373",
+                                                       href="https://doi.org/10.1109/ACCESS.2023.3257373",
+                                                       target="_blank",
+                                                       style={"color": "#0d6efd"}),
+                                                "."
+                                            ], style={"marginBottom": "4px"}),
+                                            html.Li([
+                                                "B. E. Meyers, E. Apostolaki-Iosifidou, and L. Schelhas, \"Solar Data Tools: Automatic Solar Data Processing Pipeline,\" ",
+                                                html.Em("2020 47th IEEE Photovoltaic Specialists Conference (PVSC)"),
+                                                ", Calgary, AB, Canada, 2020, pp. 0655–0656, doi: ",
+                                                html.A("10.1109/PVSC45281.2020.9300847",
+                                                       href="https://doi.org/10.1109/PVSC45281.2020.9300847",
+                                                       target="_blank",
+                                                       style={"color": "#0d6efd"}),
+                                                "."
+                                            ]),
+                                        ], style={"paddingLeft": "16px", "marginTop": "6px", "marginBottom": "0", "fontSize": "11px", "color": "#4a6fa5", "lineHeight": "1.5"})
+                                    ])
+
+                                ], style={
+                                    "marginTop": "10px",
+                                    "padding": "12px 14px",
+                                    "border": "1px solid #e0e0e0",
+                                    "borderRadius": "10px",
+                                    "backgroundColor": "#e8f3ff",
+                                    "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
+                                    "color": "#1A64BE",
+                                    "fontSize": "13px",
+                                    "lineHeight": "1.6",
+                                }),
+                            ], style={"marginTop": "10px"})
                         ],
                     xs=12, lg=4),
 
@@ -487,102 +759,207 @@ layout = dbc.Container([
 
                     dbc.Col([
                         html.H6("Choose the metric:"),
-                        # degradation metric 
-                        dbc.RadioItems(
-                            id="metric-selected",
-                            options=[
-                                {"label": "YoY (Year-over-Year)", "value": "YOY"},
-                                {"label": "LR (Linear regression)", "value": "LR"},
-                                {"label": "HW (Holt-Winters)", "value": "HW"},
-                                {"label": "ARIMA (Auto Regressive Integrated Moving Average)", "value": "ARIMA"},
-                                {"label": "CSD (Classical Seasonal Decomposition)", "value": "CSD"},
-                                
-                            ],
+
+                        # dcc.RadioItems with full HTML labels — gives true single-selection
+                        # and lets "Customize parameters" sit directly under each metric label.
+                        dcc.RadioItems(
+                            id="metric-selected-visible",
                             value="YOY",
-                            inline=False
+                            options=[
+                                {
+                                    "label": html.Div([
+                                        html.B("YoY (Year-over-Year)", className="mathjax-ignore"),
+                                        html.Details([
+                                            html.Summary("Customize parameters", style={"cursor": "pointer", "color": "#adb5bd", "fontSize": "13px", "fontWeight": "500", "marginTop": "4px", "marginLeft": "4px"}),
+                                            html.Div([
+                                                html.Div("Rolling trend window (days)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                html.Div("Window for the rolling-mean trend line on the plot.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7,
+                                                          style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "marginBottom": "8px", "color": "#000"}),
+                                                html.Div("IQR multiplier k", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                html.Div("Ratios outside [Q1 − k·IQR, Q3 + k·IQR] are excluded before computing the median rate.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5,
+                                                          style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                            ], style={"padding": "8px 10px", "backgroundColor": "#f0f6ff", "borderRadius": "6px", "border": "1px solid #c8dff8", "marginTop": "4px", "marginLeft": "4px"}),
+                                        ]),
+                                    ]),
+                                    "value": "YOY",
+                                },
+                                {
+                                    "label": html.Div([
+                                        html.B("LR (Linear regression)", className="mathjax-ignore"),
+                                        html.Div("No tunable parameters.", style={"fontSize": "11px", "color": "#adb5bd", "marginLeft": "4px", "fontStyle": "italic", "marginTop": "2px"}),
+                                        dcc.Input(id="param-yoy-iqr-dummy", style={"display": "none"}),
+                                    ]),
+                                    "value": "LR",
+                                },
+                                {
+                                    "label": html.Div([
+                                        html.B("HW (Holt-Winters)", className="mathjax-ignore"),
+                                        html.Details([
+                                            html.Summary("Customize parameters", style={"cursor": "pointer", "color": "#adb5bd", "fontSize": "13px", "fontWeight": "500", "marginTop": "4px", "marginLeft": "4px"}),
+                                            html.Div([
+                                                html.Div("Seasonal period (months)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                html.Div("Number of periods per seasonal cycle. Use 12 for monthly-aggregated data.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                dcc.Input(id="param-hw-period", type="number", value=12, step=1, min=2,
+                                                          style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                            ], style={"padding": "8px 10px", "backgroundColor": "#f0f6ff", "borderRadius": "6px", "border": "1px solid #c8dff8", "marginTop": "4px", "marginLeft": "4px"}),
+                                        ]),
+                                    ]),
+                                    "value": "HW",
+                                },
+                                {
+                                    "label": html.Div([
+                                        html.B("ARIMA (Auto Regressive Integrated Moving Average)", className="mathjax-ignore"),
+                                        html.Details([
+                                            html.Summary("Customize parameters", style={"cursor": "pointer", "color": "#adb5bd", "fontSize": "13px", "fontWeight": "500", "marginTop": "4px", "marginLeft": "4px"}),
+                                            html.Div([
+                                                html.Div(style={"display": "flex", "gap": "8px", "marginBottom": "8px"}, children=[
+                                                    html.Div([
+                                                        html.Div("p (AR order)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                        html.Div("Autoregressive lag.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                        dcc.Input(id="param-arima-p", type="number", value=1, step=1, min=0,
+                                                                  style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                                    ], style={"flex": "1"}),
+                                                    html.Div([
+                                                        html.Div("d (diff)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                        html.Div("Differencing order.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                        dcc.Input(id="param-arima-d", type="number", value=1, step=1, min=0,
+                                                                  style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                                    ], style={"flex": "1"}),
+                                                    html.Div([
+                                                        html.Div("q (MA)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                        html.Div("Moving-average order.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                        dcc.Input(id="param-arima-q", type="number", value=0, step=1, min=0,
+                                                                  style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                                    ], style={"flex": "1"}),
+                                                ]),
+                                                html.Div("Seasonal period s (months)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                html.Div("Cycle length in SARIMA(p,d,q)(0,1,1,s).", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                dcc.Input(id="param-arima-s", type="number", value=12, step=1, min=2,
+                                                          style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                            ], style={"padding": "8px 10px", "backgroundColor": "#f0f6ff", "borderRadius": "6px", "border": "1px solid #c8dff8", "marginTop": "4px", "marginLeft": "4px"}),
+                                        ]),
+                                    ]),
+                                    "value": "ARIMA",
+                                },
+                                {
+                                    "label": html.Div([
+                                        html.B("CSD (Classical Seasonal Decomposition)", className="mathjax-ignore"),
+                                        html.Details([
+                                            html.Summary("Customize parameters", style={"cursor": "pointer", "color": "#adb5bd", "fontSize": "13px", "fontWeight": "500", "marginTop": "4px", "marginLeft": "4px"}),
+                                            html.Div([
+                                                html.Div("Seasonal period (months)", style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}),
+                                                html.Div("Length of seasonal cycle. Use 12 for monthly-aggregated daily data.", style={"fontSize": "11px", "color": "#555", "marginBottom": "4px"}),
+                                                dcc.Input(id="param-csd-period", type="number", value=12, step=1, min=2,
+                                                          style={"width": "100%", "fontSize": "12px", "padding": "4px 6px", "borderRadius": "4px", "border": "1px solid #ced4da", "color": "#000"}),
+                                            ], style={"padding": "8px 10px", "backgroundColor": "#f0f6ff", "borderRadius": "6px", "border": "1px solid #c8dff8", "marginTop": "4px", "marginLeft": "4px"}),
+                                        ]),
+                                    ]),
+                                    "value": "CSD",
+                                },
+                            ],
+                            labelStyle={"display": "block", "marginBottom": "6px", "cursor": "pointer", "color": "inherit"},
+                            labelClassName="metric-radio-label",
+                            inputStyle={"marginRight": "8px", "marginTop": "3px", "accentColor": "#0d6efd"},
+                            style={"marginBottom": "8px"},
                         ),
 
-                        # LLM Temperature
-                        # html.Label("LLM Temperature: 1.0", id="temp-label", className="fw-bold"),
-                        # dcc.Slider(
-                        #     id='temp-slider',
-                        #     min=0,
-                        #     max=1,
-                        #     step=0.1,
-                        #     # SETTING THE START VALUE TO 1.0
-                        #     value=1.0, 
-                        #     # ONLY show marks for 0, 0.5, and 1
-                        #     marks={
-                        #         0: {'label': '0'},
-                        #         0.5: {'label': '0.5'},
-                        #         1: {'label': '1'},
-                        #     },
-                        #     className="mb-4"
-                        # ),
+                                                # Clientside: sync RadioButtons → hidden RadioItems
+                        dcc.Store(id="_rb-sync-dummy"),
 
                         dbc.Button(
                             "RUN ANALYSIS",
                             id="run-btn", color="primary", className="w-100 mt-3"
                         ),
 
-                            html.Details([
-                                html.Summary(
-                                    "Degradation metric detail:",
-                                    style={
-                                        "cursor": "pointer",
-                                        "color": "#B5B5B8",
-                                        "fontSize": "14px",
-                                        "fontWeight": "500",
-                                    }
-                                ),
+                        # ── Metric detail: description + equation + ref ────────
+                        html.Details([
+                            html.Summary(
+                                "Metric detail:",
+                                style={"cursor": "pointer", "color": "#B5B5B8", "fontSize": "14px", "fontWeight": "500"}
+                            ),
+                            html.Div([
 
-                                html.Div([
+                                html.Details([
+                                    html.Summary(html.B("YoY (Year-over-Year)"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                    html.Div([
+                                        "Compares daily irradiance-weighted power to the same calendar day one year prior. "
+                                        "The degradation rate is the median of all year-over-year ratios after IQR-based outlier removal.",
+                                        html.Div(r"$$R_i = \frac{P(t)}{P(t-1\,\text{yr})} - 1, \quad R_d = \text{median}(R_i) \times \frac{100\%}{\text{yr}}$$",
+                                                 style={"color": "#555", "margin": "6px 0", "overflowX": "auto"}),
+                                        html.Div([html.Sup("[1] "), "Jordan, D. et al., IEEE J. Photovoltaics 8(2), 525–531, 2018. ",
+                                            html.A("10.1109/JPHOTOV.2017.2779779", href="https://doi.org/10.1109/JPHOTOV.2017.2779779",
+                                                   target="_blank", style={"color": "#0d6efd", "fontSize": "11px"})],
+                                            style={"fontSize": "11px", "color": "#4a6fa5", "marginTop": "6px"}),
+                                    ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                ], style={"marginBottom": "6px"}),
 
-                                    html.Ul([
-                                        html.Li([
-                                            html.B("YoY (Year-over-Year)"),
-                                            " – Compares a metric to the same period in the previous year to measure growth and reduce seasonality effects."
-                                        ]),
+                                html.Details([
+                                    html.Summary(html.B("LR (Linear Regression)"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                    html.Div([
+                                        "Fits an ordinary least-squares line to the daily power time series. "
+                                        "The degradation rate is the slope normalised by mean power.",
+                                        html.Div(r"$$P(t) = \beta_0 + \beta_1 t, \quad R_d = \frac{\beta_1}{\bar{P}} \times \frac{100\%}{\text{yr}}$$",
+                                                 style={"color": "#555", "margin": "6px 0", "overflowX": "auto"}),
+                                        html.Div("No tunable parameters.", style={"fontSize": "11px", "color": "#888", "fontStyle": "italic"}),
+                                    ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                ], style={"marginBottom": "6px"}),
 
-                                        html.Li([
-                                            html.B("LR (Linear Regression)"),
-                                            " – Fits a straight line to model relationships between variables; useful for trend estimation and simple forecasting."
-                                        ]),
+                                html.Details([
+                                    html.Summary(html.B("HW (Holt-Winters)"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                    html.Div([
+                                        "Additive Holt-Winters exponential smoothing decomposes the signal into level, trend, and seasonal components. "
+                                        "A linear regression on the fitted values yields the degradation rate.",
+                                        html.Div(r"$$\hat{y}(t) = L(t) + T(t) + S(t), \quad R_d = \frac{\text{slope}(\hat{y})}{\bar{\hat{y}}} \times \frac{100\%}{\text{yr}}$$",
+                                                 style={"color": "#555", "margin": "6px 0", "overflowX": "auto"}),
+                                        html.Div([html.Sup("[2] "), "Phinikarides, A. et al., Renew. Sustain. Energy Rev. 40, 143–152, 2014. ",
+                                            html.A("10.1016/j.rser.2014.07.155", href="https://doi.org/10.1016/j.rser.2014.07.155",
+                                                   target="_blank", style={"color": "#0d6efd", "fontSize": "11px"})],
+                                            style={"fontSize": "11px", "color": "#4a6fa5", "marginTop": "6px"}),
+                                    ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                ], style={"marginBottom": "6px"}),
 
-                                        html.Li([
-                                            html.B("HW (Holt-Winters)"),
-                                            " – Uses exponential smoothing to model level, trend, and seasonality; well-suited for seasonal time series."
-                                        ]),
+                                html.Details([
+                                    html.Summary(html.B("ARIMA"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                    html.Div([
+                                        "Fits a SARIMA(p,d,q)(0,1,1,s) model. A linear regression on the fitted values extracts the degradation rate.",
+                                        html.Div(r"$$\text{SARIMA}(p,d,q)(0,1,1,s), \quad R_d = \frac{\text{slope}(\hat{y})}{\bar{\hat{y}}} \times \frac{100\%}{\text{yr}}$$",
+                                                 style={"color": "#555", "margin": "6px 0", "overflowX": "auto"}),
+                                        html.Div([html.Sup("[2] "), "Phinikarides, A. et al., Renew. Sustain. Energy Rev. 40, 143–152, 2014. ",
+                                            html.A("10.1016/j.rser.2014.07.155", href="https://doi.org/10.1016/j.rser.2014.07.155",
+                                                   target="_blank", style={"color": "#0d6efd", "fontSize": "11px"})],
+                                            style={"fontSize": "11px", "color": "#4a6fa5", "marginTop": "6px"}),
+                                    ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                ], style={"marginBottom": "6px"}),
 
-                                        html.Li([
-                                            html.B("ARIMA (Auto Regressive Integrated Moving Average)"),
-                                            " – Combines autoregression, differencing, and moving averages to model and forecast time series data."
-                                        ]),
+                                html.Details([
+                                    html.Summary(html.B("CSD (Classical Seasonal Decomposition)"), style={"cursor": "pointer", "marginBottom": "2px"}),
+                                    html.Div([
+                                        "Decomposes the daily power series additively into trend, seasonal, and residual. "
+                                        "A linear regression on the extracted trend gives the degradation rate.",
+                                        html.Div(r"$$P(t) = T(t) + S(t) + R(t), \quad R_d = \frac{\text{slope}(T)}{\bar{T}} \times \frac{100\%}{\text{yr}}$$",
+                                                 style={"color": "#555", "margin": "6px 0", "overflowX": "auto"}),
+                                        html.Div([html.Sup("[2] "), "Phinikarides, A. et al., Renew. Sustain. Energy Rev. 40, 143–152, 2014. ",
+                                            html.A("10.1016/j.rser.2014.07.155", href="https://doi.org/10.1016/j.rser.2014.07.155",
+                                                   target="_blank", style={"color": "#0d6efd", "fontSize": "11px"})],
+                                            style={"fontSize": "11px", "color": "#4a6fa5", "marginTop": "6px"}),
+                                    ], style={"marginTop": "4px", "paddingLeft": "12px"}),
+                                ], style={"marginBottom": "0px"}),
 
-                                        html.Li([
-                                            html.B("CSD (Classical Seasonal Decomposition)"),
-                                            " – Decomposes a time series into trend, seasonal, and residual components to analyze underlying patterns."
-                                        ])
-                                    ],style={
-                                            "marginBottom": "0",
-                                            "paddingLeft": "16px"
-                                            })
-                                ],style={
-                                    "marginTop": "10px",
+                            ], style={
+                                "marginTop": "10px",
+                                "padding": "12px 14px",
+                                "border": "1px solid #e0e0e0",
+                                "borderRadius": "10px",
+                                "backgroundColor": "#e8f3ff",
+                                "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
+                                "color": "#1A64BE",
+                                "fontSize": "13px",
+                                "lineHeight": "1.6",
+                            }),
+                        ], style={"marginTop": "10px"}),
 
-                                    # 👇 CARD STYLE ONLY FOR EXPANDED AREA
-                                    "padding": "12px 14px",
-                                    "border": "1px solid #e0e0e0",
-                                    "borderRadius": "10px",
-                                    "backgroundColor": "#e8f3ff",
-                                    "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
-
-                                    "color": "#1A64BE",
-                                    "fontSize": "13px",
-                                    "lineHeight": "1.6",
-                                }),
-                            ],style={"marginTop": "10px"}
-                            )
                         ],
                         lg=4, md=12, sm=12, xs=12
                     ),
@@ -620,6 +997,29 @@ layout = dbc.Container([
         # 'paddingRight': '12%'   
 })
 ])
+
+
+
+app.clientside_callback(
+    """
+    function(tz, lip, out, cs) {
+        var vals = [];
+        if (tz)  vals.push("timezone");
+        if (lip) vals.push("low-irra-power");
+        if (out) vals.push("outlier");
+        if (cs)  vals.push("clearsky");
+        return vals;
+    }
+    """,
+    Output("filter-options", "value"),
+    Input("cb-timezone", "value"),
+    Input("cb-low-irra-power", "value"),
+    Input("cb-outlier", "value"),
+    Input("cb-clearsky", "value"),
+)
+
+# (RadioButton sync removed — using dbc.RadioItems directly)
+
 
 
 # ==================================================
@@ -669,12 +1069,22 @@ def update_upload_status(filename):
 
     State("filter-options", "value"),
     State("mapped-vars-store", "data"),
-    State("dataframe-store", "data"), 
+    State("dataframe-store", "data"),
+    State("param-gamma", "value"),
+    State("param-irr-thresh", "value"),
+    State("param-power-ratio", "value"),
+    State("param-norm-lower", "value"),
+    State("param-norm-upper-pct", "value"),
+    State("param-iqr-multiplier", "value"),
+    State("param-cs-smooth", "value"),
+    State("param-cs-energy", "value"),
 
     prevent_initial_call=True
 )
 def run_filter(filter_clicks, upload_clicks,
-        example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json):
+        example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
+        gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
+        cs_smooth, cs_energy):
 
     trigger = ctx.triggered_id
 
@@ -700,10 +1110,39 @@ def run_filter(filter_clicks, upload_clicks,
     # =========================
     # Core processing
     # =========================
-    df_filtered = normalize(df, mapped_variables_dict)
+    gamma = gamma if gamma is not None else -0.004
+    irr_thresh = irr_thresh if irr_thresh is not None else 300
+    power_ratio = power_ratio if power_ratio is not None else 0.02
+    norm_lower = norm_lower if norm_lower is not None else 0.01
+    norm_upper_pct = norm_upper_pct if norm_upper_pct is not None else 99
 
-    # start with all data as valid
-    current_mask = pd.Series(True, index=df_filtered.index)
+    # =========================
+    # Step 0: Basic value filter (always applied, not optional)
+    # Removes physically implausible sensor readings before anything else.
+    # =========================
+    print("[basic_value_filter] applying range sanity checks...")
+    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
+    df = df.loc[bv_normal].copy()
+    print(f"[basic_value_filter] kept {len(df):,} / {len(bv_normal) + len(bv_outlier):,} pts")
+
+    # =========================
+    # Clear-sky filter: run on RAW df BEFORE normalization
+    # so the full intraday irradiance shape is preserved for
+    # smoothness scoring (bell-curve detection).
+    # =========================
+    clearsky_mask = pd.Series(True, index=df.index)
+    if "clearsky" in selected_filters:
+        cs_smooth = cs_smooth if cs_smooth is not None else 0.3
+        cs_energy = cs_energy if cs_energy is not None else 0.5
+        normal_idx, outlier_idx = clear_sky_filter(df, irra_key,
+                                                    smoothness_threshold=cs_smooth,
+                                                    energy_threshold=cs_energy)
+        clearsky_mask = df.index.isin(normal_idx)
+
+    df_filtered = normalize(df, mapped_variables_dict, gamma=gamma)
+
+    # start with all data as valid, apply clear-sky mask immediately
+    current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
 
     filter_stats = []
 
@@ -718,8 +1157,16 @@ def run_filter(filter_clicks, upload_clicks,
         except Exception:
             filter_stats.append("⚠️ Timezone correction failed")
 
+    if "clearsky" in selected_filters:
+        removed = (~clearsky_mask).sum()
+        filter_stats.append(f"Clear-sky filter removed {removed} points")
+
     if "low-irra-power" in selected_filters:
-        normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+        normal_idx, outlier_idx = low_irra_power_filter(
+            df_filtered, mapped_variables_dict,
+            irr_thresh=irr_thresh, power_ratio=power_ratio,
+            norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
+        )
 
         mask = df_filtered.index.isin(normal_idx)
         removed = (~mask & current_mask).sum()
@@ -728,22 +1175,14 @@ def run_filter(filter_clicks, upload_clicks,
         filter_stats.append(f"Low irra-power filter removed {removed} points")
 
     if "outlier" in selected_filters:
-        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm")
+        iqr_multiplier = iqr_multiplier if iqr_multiplier is not None else 1.5
+        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=iqr_multiplier)
 
         mask = df_filtered.index.isin(normal_idx)
         removed = (~mask & current_mask).sum()
 
         current_mask &= mask
         filter_stats.append(f"IQR outlier filter removed {removed} points")
-
-    if "clearsky" in selected_filters:
-        normal_idx, outlier_idx = clear_sky(df_filtered, "norm")
-
-        mask = df_filtered.index.isin(normal_idx)
-        removed = (~mask & current_mask).sum()
-
-        current_mask &= mask
-        filter_stats.append(f"Clear-sky filter removed {removed} points")
 
     # =========================
     # Final indices
@@ -916,7 +1355,15 @@ def run_filter(filter_clicks, upload_clicks,
 
     State("dataframe-filtered", "data"),
     State("mapped-vars-store", "data"),
-    State("metric-selected", "value"),
+    State("metric-selected-visible", "value"),
+    State("param-yoy-window", "value"),
+    State("param-yoy-iqr", "value"),
+    State("param-hw-period", "value"),
+    State("param-arima-p", "value"),
+    State("param-arima-d", "value"),
+    State("param-arima-q", "value"),
+    State("param-arima-s", "value"),
+    State("param-csd-period", "value"),
 
     prevent_initial_call=True
 )
@@ -926,7 +1373,10 @@ def analyze_uploaded_data_callback(
         df_filtered_json,
         mapped_variables_dict,
         selected_metric,
-
+        yoy_window, yoy_iqr,
+        hw_period,
+        arima_p, arima_d, arima_q, arima_s,
+        csd_period,
 ):
     
     trigger = ctx.triggered_id
@@ -951,19 +1401,27 @@ def analyze_uploaded_data_callback(
     daily_data = aggregate_daily(df_filtered, irra_key)
 
     if selected_metric == "YOY":
-        rd, fig = compute_yoy(daily_data)
+        rd, fig = compute_yoy(daily_data,
+                              rolling_window=yoy_window if yoy_window else 30,
+                              iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
 
     elif selected_metric == "LR":
         rd, fig = compute_lr(daily_data)
 
     elif selected_metric == "HW":
-        rd, fig = compute_hw(daily_data)
+        rd, fig = compute_hw(daily_data,
+                             period=hw_period if hw_period else 12)
 
     elif selected_metric == "ARIMA":
-        rd, fig = compute_arima(daily_data)
+        rd, fig = compute_arima(daily_data,
+                                p=arima_p if arima_p is not None else 1,
+                                d=arima_d if arima_d is not None else 1,
+                                q=arima_q if arima_q is not None else 0,
+                                seasonal_period=arima_s if arima_s else 12)
 
     elif selected_metric == "CSD":
-        rd, fig = compute_csd(daily_data)
+        rd, fig = compute_csd(daily_data,
+                              period=csd_period if csd_period else 12)
 
     else:
         raise ValueError(f"Unknown metric: {selected_metric}")
@@ -1269,7 +1727,7 @@ def toggle_panel(open_clicks, close_clicks):
     State("stored-data-file-name", "data"),
     State("mapped-vars-store", "data"),
     State("filter-options", "value"),
-    State("metric-selected", "value"),
+    State("metric-selected-visible", "value"),
     prevent_initial_call=True
 )
 def generate_code(n,filename, mapped_variables_dict, selected_filters, selected_metric):

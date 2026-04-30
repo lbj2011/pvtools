@@ -432,21 +432,23 @@ def normalize(df, mapped_variables_dict, gamma=-0.004):
 # ================================
 # Low irradiance & power filter
 # ================================
-def low_irra_power_filter(df, mapped_variables_dict):
+def low_irra_power_filter(df, mapped_variables_dict,
+                          irr_thresh=300, power_ratio=0.02,
+                          norm_lower=0.01, norm_upper_pct=99):
     mask = pd.Series(True, index=df.index)
 
     irr_key = mapped_variables_dict["Irradiance"]
     power_key = mapped_variables_dict["DC Power"]
 
     # irradiance filter
-    mask &= df[irr_key] > 300
+    mask &= df[irr_key] > irr_thresh
 
     # power filter
-    mask &= df[power_key] > 0.02 * df[irr_key]
+    mask &= df[power_key] > power_ratio * df[irr_key]
 
     # norm range filter
-    upper = df['norm'].quantile(0.99)
-    mask &= df['norm'].between(0.01, upper)
+    upper = df['norm'].quantile(norm_upper_pct / 100)
+    mask &= df['norm'].between(norm_lower, upper)
 
     # ✅ indices
     normal_indices = df.index[mask]
@@ -472,7 +474,7 @@ def aggregate_daily(df_f, irradiance_col):
 # ================================
 # YoY
 # ================================
-def compute_yoy(series, eps=1e-6):
+def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
     series = series.dropna()
     yoy = []
 
@@ -499,8 +501,8 @@ def compute_yoy(series, eps=1e-6):
         q3 = np.percentile(yoy, 75)
         iqr = q3 - q1
 
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
+        lower = q1 - iqr_multiplier * iqr
+        upper = q3 + iqr_multiplier * iqr
 
         yoy = yoy[(yoy >= lower) & (yoy <= upper)]
 
@@ -510,7 +512,7 @@ def compute_yoy(series, eps=1e-6):
     # plot - YOY
     # ===============
 
-    trend = series.rolling(30, center=True).mean()
+    trend = series.rolling(rolling_window, center=True).mean()
 
     fig = go.Figure()
 
@@ -532,7 +534,7 @@ def compute_yoy(series, eps=1e-6):
             y=trend,
             mode="lines",
             line=dict(color="#0070C0", width=2),
-            name="Trend (30-day rolling)"
+            name=f"Trend ({rolling_window}-day rolling)"
         )
     )
 
@@ -688,7 +690,10 @@ def compute_hw(series, period=12):
 # ARIMA
 # ================================
 
-def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12)):
+def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=0, seasonal_period=12):
+    # Allow flat params to override tuple args
+    order = (p, d, q)
+    seasonal_order = (0, 1, 1, seasonal_period)
     series = series.dropna()
 
     if len(series) < 24:

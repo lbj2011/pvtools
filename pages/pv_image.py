@@ -58,15 +58,17 @@ def render_example_thumbnails(selected_id=None):
             src=f'/assets/{filename}',
             id=example_id,
             n_clicks=0,
-            style = {
-                'width': '70px',
-                'height': '70px',
+            className='pv-thumb pv-thumb-selected' if example_id == selected_id else 'pv-thumb',
+            style={
+                'width': '48px',
+                'height': '48px',
                 'objectFit': 'cover',
-                'margin': '5px',
+                'margin': '3px',
                 'cursor': 'pointer',
-                'borderRadius': '8px',
-                'boxShadow': '0 2px 4px rgba(0,0,0,0.2)',
-                'border': '6px solid #B8FB6B' if example_id == selected_id else '3px solid transparent'
+                'borderRadius': '6px',
+                'boxShadow': '0 2px 4px rgba(0,0,0,0.15)',
+                'border': '2px solid #0070C0' if example_id == selected_id else '2px solid transparent',
+                'transition': 'all 0.18s ease',
             }
         )
         for example_id, filename in image_map.items()
@@ -107,11 +109,16 @@ table_body = html.Tbody([
 ])
 
 question = """
-First, judge if this image is a PV cell/module/array visible or electroluminescence (EL) or infrared (IR)  images.
+First, judge if this image is a PV cell/module/array visible or electroluminescence (EL) or infrared (IR) image.
 
-If it is a visible image of a PV module or array. Assess its condition and return the probabilities for each category as a dictionary with the following format:
+You MUST always include an "explanation" field in the JSON response. Keep the explanation SHORT: maximum 2 sentences and approximately 40 words total. Be concise and concrete:
+1. State the key visual feature(s) you observed (1 sentence).
+2. State the recommended action or caveat, if any (1 sentence, optional).
+Do not repeat the category name multiple times. Do not write more than 2 sentences.
+
+If it is a visible image of a PV module or array, assess its condition and return:
 {
-  "pv_image": true or false,
+  "pv_image": true,
   "pv_image_type": "visible",
   "probabilities": {
     "clean": <probability>,
@@ -119,59 +126,48 @@ If it is a visible image of a PV module or array. Assess its condition and retur
     "bird_droppings": <probability>,
     "dust_or_soiling": <probability>,
     "hail_crack": <probability>
-  }
-} 
-"pv_image": a boolean indicating whether the input is a PV image
-"pv_image_type": a string indicating the type of PV image ("visible", "EL", "IR", or "other")
-Probabilities should sum to 1. 
-Only return the JSON dictionary.
-
-If it is an electroluminescence (EL) image of a photovoltaic (PV) cell, assess the condition of the cell and return the probabilities for each of the following categories in a JSON dictionary format:
-
-{
-  "pv_image": true or false,
-  "pv_image_type": "EL",
-  "probabilities": {
-  "healthy": <probability>,
-  "crack": <probability>
-   }
+  },
+  "explanation": "<your explanation here>"
 }
 
-"pv_image": a boolean indicating whether the input is a PV image
-"pv_image_type": a string indicating the type of PV image ("visible", "EL", "IR", or "other")
+If it is an electroluminescence (EL) image of a PV cell, return:
+{
+  "pv_image": true,
+  "pv_image_type": "EL",
+  "probabilities": {
+    "healthy": <probability>,
+    "crack": <probability>
+  },
+  "explanation": "<your explanation here>"
+}
 
-Category definitions:
+Category definitions for EL:
 - "healthy": The cell appears structurally intact with no visible cracks or dark areas (excluding natural dark zones at the four corners or grid lines).
 - "crack": The cell contains one or more visible cracks or black/dark regions, excluding the four corners and the grid lines. These may include hairline fractures, shattered zones, or abnormal dark areas indicating damage.
 
-Probabilities should be numeric values between 0 and 1 and must sum to 1. Do not include any explanation or additional text. Only return the JSON dictionary.
-
-If it is an infrared (IR) image of a photovoltaic (PV) module or array. Assess the thermal condition based on visible brightness patterns and return the probabilities for each of the following categories in a JSON dictionary format:
-
- {
-  "pv_image": true or false,
+If it is an infrared (IR) image of a PV module or array, return:
+{
+  "pv_image": true,
   "pv_image_type": "IR",
- "probabilities": {
-  "healthy": <probability>,
-  "hotspot": <probability>
+  "probabilities": {
+    "healthy": <probability>,
+    "hotspot": <probability>
+  },
+  "explanation": "<your explanation here>"
 }
-}
-"pv_image": a boolean indicating whether the input is a PV image
-"pv_image_type": a string indicating the type of PV image ("visible", "EL", "IR", or "other")
 
-Category definitions:
+Category definitions for IR:
 - "healthy": The module shows no visible hotspots or brighter regions. Thermal distribution appears uniform.
 - "hotspot": There is at least one visible brighter region (localized or multiple), indicating thermal anomaly.
 
-Probabilities should be numeric values between 0 and 1 and must sum to 1. Do not include any explanation or additional text. Only return the JSON dictionary.
-
-if it is not a PV image, still return a JSON file:
+If it is NOT a PV image, return:
 {
-  "pv_image": false
-  }
-"pv_image": a boolean indicating whether the input is a PV image
-Do not include any explanation or additional text. Only return the JSON dictionary.
+  "pv_image": false,
+  "explanation": "<short explanation describing what the image actually shows and why it is not a PV image>"
+}
 
+Probabilities must be numeric values between 0 and 1 and must sum to 1.
+Return ONLY the JSON dictionary. Do not include markdown code fences, prose, or any text outside the JSON.
 """
 
 # app = dash.Dash(__name__)
@@ -237,59 +233,146 @@ layout = dbc.Container([
 
             dbc.CardBody([
                 dbc.Row([
+                    # ============================ STEP 1 ============================
                     dbc.Col([
+                        html.Div([
+                            html.Span('1', className='pv-step-badge'),
+                            html.Span('Provide an image', className='pv-step-title'),
+                        ], className='pv-step-header'),
+
                         dcc.Upload(
                             id='upload-image',
                             children=html.Div([
-                                'Drop or ',
-                                html.A('Select an Image')
-                            ]),
+                                html.Div('⬆', style={
+                                    'fontSize': '1.5em',
+                                    'color': '#0070C0',
+                                    'lineHeight': '1',
+                                    'marginBottom': '4px',
+                                }),
+                                html.Div([
+                                    html.Span('Drop an image here, or '),
+                                    html.A('browse files', style={
+                                        'color': '#0070C0',
+                                        'fontWeight': '600',
+                                        'textDecoration': 'underline',
+                                    }),
+                                ], style={'fontSize': '0.9em', 'color': '#333'}),
+                            ], style={'textAlign': 'center'}),
+                            className='pv-upload-box',
                             style={
-                                'width': '70%', 'height': '60px', 'lineHeight': '60px',
-                                'borderWidth': '2px', 'borderStyle': 'dashed',
-                                'borderRadius': '10px', 'textAlign': 'center', 'marginBottom': '10px', 'cursor': 'pointer'
+                                'width': '100%',
+                                'padding': '16px 10px',
+                                'borderWidth': '2px',
+                                'borderStyle': 'dashed',
+                                'borderColor': '#B8D4EA',
+                                'borderRadius': '12px',
+                                'backgroundColor': '#F8FBFD',
+                                'textAlign': 'center',
+                                'marginBottom': '6px',
+                                'cursor': 'pointer',
+                                'transition': 'all 0.2s ease',
                             },
                             accept='image/*',
                             multiple=False
                         ),
                         html.Div(
-                            'Upload PV visible, EL, or IR images (JPEG, PNG format)',
-                            style={'fontSize': '0.9em', 'color': 'gray', 'marginBottom': '15px'}
+                            'Accepts visible, EL, or IR images (JPEG / PNG)',
+                            style={'fontSize': '0.78em', 'color': '#7A7A7A', 'marginBottom': '14px'}
                         ),
 
-                        html.Div('Or select an example image below to analyze:', style={'marginBottom': '10px'}),
+                        html.Div('Or pick an example:', style={
+                            'fontSize': '0.85em',
+                            'fontWeight': '600',
+                            'color': '#444',
+                            'marginBottom': '6px',
+                        }),
 
                         html.Div(
-                            children=render_example_thumbnails(),  # ✅ use the helper to stay consistent
+                            children=render_example_thumbnails(),
                             id='example-image-container',
-                            style={'display': 'flex', 'flexWrap': 'wrap', 'marginBottom': '15px'}
+                            style={
+                                'display': 'flex',
+                                'flexWrap': 'wrap',
+                                'marginBottom': '10px',
+                                'padding': '6px',
+                                'backgroundColor': '#FAFBFC',
+                                'borderRadius': '10px',
+                                'border': '1px solid #ECEFF3',
+                            }
                         ),
 
-                        html.Div(id='upload-status'),
-                        dcc.Store(id='image-display-flag', data=False),  # Track if image has been shown
-                        dcc.Store(id='image-content-store'),  # stores uploaded or clicked image content
+                        html.Div(id='upload-status', style={'marginTop': '6px'}),
+                        dcc.Store(id='image-display-flag', data=False),
+                        dcc.Store(id='image-content-store'),
                         html.Div(id='output-image-upload')
-                    ], xs=12, md=6),
+                    ], xs=12, md=6, lg=4, className='mb-3 pv-col-step1'),
 
+                    # ============================ STEP 2 ============================
                     dbc.Col([
-                        html.P([]),
-                        html.Button('Click to run the analysis', id='analyze-button', n_clicks=0,
-                                    style={
-                                        'marginBottom': '10px',
-                                        'padding': '10px 20px',
-                                        'backgroundColor': '#0070C0',
-                                        'color': 'white',
-                                        'fontWeight': 'bold',         # This makes the text bold
-                                        'borderRadius': '10px',       # This gives soft, rounded edges
-                                        'border': 'none'              # Optional: removes any default border
-                                    }),
+                        html.Div([
+                            html.Span('2', className='pv-step-badge'),
+                            html.Span('Choose a model', className='pv-step-title'),
+                        ], className='pv-step-header'),
+
                         html.Div(
-                            '(It takes about 3-8 seconds)',
-                            style={'fontSize': '0.9em', 'color': 'gray', 'marginBottom': '15px'}
+                            'Pick which LLM should analyze the image:',
+                            style={'fontSize': '0.85em', 'color': '#555', 'marginBottom': '10px'}
                         ),
-                        dcc.Loading(id='loading-progress', type='default', children=html.Div(id='image-analysis-result'))
-                    ], xs=12, md=6)
-                ])
+
+                        dcc.RadioItems(
+                            id='model-selector',
+                            options=[
+                                {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
+                                {'label': 'Gemini Flash', 'value': 'gemini-flash'},
+                                {'label': 'Claude Opus', 'value': 'claude-opus'},
+                            ],
+                            value='openai/gpt-5.1',
+                            className='pv-model-radio',
+                            inputStyle={'marginRight': '10px'},
+                            labelStyle={
+                                'display': 'flex',
+                                'alignItems': 'center',
+                                'marginBottom': '10px',
+                                'cursor': 'pointer',
+                                'fontSize': '0.95em',
+                                'color': '#333',
+                            },
+                        ),
+                    ], xs=12, md=6, lg=4, className='mb-3 pv-col-step2'),
+
+                    # ============================ STEP 3 ============================
+                    dbc.Col([
+                        html.Div([
+                            html.Span('3', className='pv-step-badge'),
+                            html.Span('Run & view results', className='pv-step-title'),
+                        ], className='pv-step-header'),
+
+                        html.Button(
+                            'Click to run the analysis',
+                            id='analyze-button',
+                            n_clicks=0,
+                            className='pv-run-button',
+                            style={
+                                'marginBottom': '6px',
+                                'padding': '10px 22px',
+                                'backgroundColor': '#0070C0',
+                                'color': 'white',
+                                'fontWeight': 'bold',
+                                'borderRadius': '10px',
+                                'border': 'none',
+                                'cursor': 'pointer',
+                                'boxShadow': '0 2px 6px rgba(0,112,192,0.25)',
+                                'transition': 'all 0.18s ease',
+                            }
+                        ),
+                        html.Div(
+                            '(It takes about 3–8 seconds)',
+                            style={'fontSize': '0.82em', 'color': 'gray', 'marginBottom': '14px'}
+                        ),
+                        dcc.Loading(id='loading-progress', type='default',
+                                    children=html.Div(id='image-analysis-result'))
+                    ], xs=12, md=12, lg=4, className='mb-3 pv-col-step3'),
+                ], className='g-4')
 
             ])
         ], className="my-4"),
@@ -343,9 +426,339 @@ layout = dbc.Container([
 
 
 
-def analyze_image(base64_image):
+# -----------------------------------------------------------------------------
+# Visual styling helpers for the analysis result
+# -----------------------------------------------------------------------------
+
+# Single accent color used for ALL diagnostic categories, charts, and panels
+ACCENT_COLOR = '#0070C0'        # primary brand blue
+MUTED_BAR_COLOR = '#BFD7EA'     # light blue for non-winning bars
+TEXT_COLOR = '#222222'
+SUBTLE_TEXT_COLOR = '#555555'
+
+# Per-image-type label (no icons; same accent color used everywhere)
+IMAGE_TYPE_LABEL = {
+    'visible': 'Visible',
+    'EL':      'Electroluminescence',
+    'IR':      'Infrared',
+    'other':   'Other',
+}
+
+# Friendly, human-readable label for each diagnostic category
+CATEGORY_LABELS = {
+    'clean':           'Clean',
+    'snow':            'Snow coverage',
+    'bird_droppings':  'Bird droppings',
+    'dust_or_soiling': 'Dust / soiling',
+    'hail_crack':      'Hail damage',
+    'healthy':         'Healthy',
+    'crack':           'Cell crack',
+    'hotspot':         'Hotspot',
+}
+
+# Short labels used only on the bar-chart x-axis to avoid overlap.
+# Use <br> to wrap to two lines so labels stay readable without angling.
+CATEGORY_SHORT_LABELS = {
+    'clean':           'Clean',
+    'snow':            'Snow',
+    'bird_droppings':  'Bird<br>droppings',
+    'dust_or_soiling': 'Dust /<br>soiling',
+    'hail_crack':      'Hail<br>damage',
+    'healthy':         'Healthy',
+    'crack':           'Crack',
+    'hotspot':         'Hotspot',
+}
+
+
+def _confidence_descriptor(p):
+    """Return a confidence label for a probability value."""
+    if p >= 0.80:
+        return 'High confidence'
+    if p >= 0.55:
+        return 'Moderate confidence'
+    return 'Low confidence'
+
+
+def build_result_panel(result):
+    """Render a polished, card-style analysis panel from the LLM result."""
+    pv_image_type = result.get('pv_image_type', 'other')
+    prob_dict = result.get('probabilities', {}) or {}
+    explanation = (result.get('explanation') or '').strip()
+
+    if not prob_dict:
+        return html.Div([
+            dbc.Alert(
+                explanation or 'The model did not return any diagnostic probabilities.',
+                color='warning'
+            )
+        ])
+
+    predicted_category = max(prob_dict, key=prob_dict.get)
+    top_prob = float(prob_dict[predicted_category])
+    conf_label = _confidence_descriptor(top_prob)
+
+    type_label = IMAGE_TYPE_LABEL.get(pv_image_type, IMAGE_TYPE_LABEL['other'])
+    cat_label = CATEGORY_LABELS.get(
+        predicted_category, predicted_category.replace('_', ' ').title()
+    )
+
+    # Header strip: image type pill + predicted category pill (no icons)
+    header = html.Div([
+        html.Div([
+            html.Span('Image type: ', style={'color': SUBTLE_TEXT_COLOR}),
+            html.Span(type_label, style={'fontWeight': '700', 'color': ACCENT_COLOR}),
+        ], style={
+            'display': 'inline-block',
+            'backgroundColor': '#F4F8FB',
+            'padding': '4px 10px',
+            'borderRadius': '999px',
+            'border': f'1px solid {ACCENT_COLOR}33',
+            'marginRight': '8px',
+            'marginBottom': '6px',
+            'fontSize': '0.85em',
+        }),
+        html.Div([
+            html.Span('Predicted: ', style={'color': SUBTLE_TEXT_COLOR}),
+            html.Span(cat_label, style={'fontWeight': '700', 'color': ACCENT_COLOR}),
+        ], style={
+            'display': 'inline-block',
+            'backgroundColor': f'{ACCENT_COLOR}15',
+            'padding': '4px 10px',
+            'borderRadius': '999px',
+            'border': f'1px solid {ACCENT_COLOR}66',
+            'marginBottom': '6px',
+            'fontSize': '0.85em',
+        }),
+    ], style={'marginBottom': '10px'})
+
+    # Compact result card: predicted category + confidence on one row
+    big_card = html.Div([
+        html.Div([
+            html.Span(cat_label, style={
+                'fontSize': '1.05em',
+                'fontWeight': '700',
+                'color': ACCENT_COLOR,
+                'marginRight': '10px',
+            }),
+            html.Span(f'{top_prob*100:.0f}%', style={
+                'fontSize': '1.35em',
+                'fontWeight': '800',
+                'color': ACCENT_COLOR,
+                'marginRight': '10px',
+            }),
+            html.Span(conf_label, style={
+                'display': 'inline-block',
+                'padding': '2px 8px',
+                'borderRadius': '999px',
+                'backgroundColor': f'{ACCENT_COLOR}1F',
+                'color': ACCENT_COLOR,
+                'fontWeight': '600',
+                'fontSize': '0.78em',
+                'verticalAlign': 'middle',
+            }),
+        ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap'}),
+    ], style={
+        'background': f'{ACCENT_COLOR}0A',
+        'border': f'1px solid {ACCENT_COLOR}40',
+        'borderLeft': f'4px solid {ACCENT_COLOR}',
+        'borderRadius': '10px',
+        'padding': '10px 14px',
+        'marginBottom': '10px',
+    })
+
+    # Bar chart — single accent color for the winner, muted blue for others.
+    # Slimmer height + constrained bar width + bold axis labels.
+    categories = list(prob_dict.keys())
+    probabilities = [float(prob_dict[c]) for c in categories]
+    pretty_categories = [CATEGORY_SHORT_LABELS.get(c, c.replace('_', ' ').title()) for c in categories]
+    bar_colors = [
+        ACCENT_COLOR if c == predicted_category else MUTED_BAR_COLOR
+        for c in categories
+    ]
+
+    # Cap bar width so 2-category charts (EL/IR) don't render comically wide.
+    n_bars = len(categories)
+    if n_bars <= 2:
+        bargap = 0.7
+    elif n_bars == 3:
+        bargap = 0.55
+    else:
+        bargap = 0.45
+
+    fig = go.Figure(go.Bar(
+        x=pretty_categories,
+        y=probabilities,
+        marker=dict(
+            color=bar_colors,
+            line=dict(color='rgba(0,0,0,0.08)', width=1),
+        ),
+        text=[f'{p*100:.0f}%' for p in probabilities],
+        textposition='outside',
+        textfont=dict(size=11, color='#333'),
+        hovertemplate='<b>%{x}</b><br>Probability: %{y:.2f}<extra></extra>',
+        cliponaxis=False,
+    ))
+    # Many short labels use <br> to wrap to two lines, so we always keep them
+    # horizontal. Slightly more bottom room when there are 4+ categories.
+    bottom_margin = 55 if len(categories) >= 4 else 40
+
+    fig.update_layout(
+        height=240,
+        bargap=bargap,
+        margin=dict(l=50, r=20, t=20, b=bottom_margin),
+        autosize=True,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        yaxis=dict(
+            range=[0, 1.08],
+            title=dict(text='Probability', font=dict(size=12, color=TEXT_COLOR)),
+            tickfont=dict(size=11, color=TEXT_COLOR),
+            gridcolor='#EEE',
+            zerolinecolor='#DDD',
+        ),
+        xaxis=dict(
+            title=None,
+            tickangle=0,
+            tickfont=dict(size=11, color=TEXT_COLOR),
+            automargin=True,
+        ),
+        showlegend=False,
+    )
+
+    chart_card = html.Div([
+        html.Div('Probability across all categories', style={
+            'fontWeight': '600', 'color': TEXT_COLOR,
+            'marginBottom': '2px', 'fontSize': '0.85em',
+        }),
+        dcc.Graph(figure=fig, config={'displayModeBar': False}),
+    ], style={
+        'border': '1px solid #E5E9EF',
+        'borderRadius': '10px',
+        'padding': '8px 12px',
+        'marginBottom': '10px',
+        'backgroundColor': 'white',
+    })
+
+    # Explanation panel — same accent color, no icon.
+    if explanation:
+        explanation_card = html.Div([
+            html.Div('LLM explanation', style={
+                'fontWeight': '700', 'color': ACCENT_COLOR,
+                'marginBottom': '6px', 'fontSize': '0.9em',
+            }),
+            html.Div(explanation, style={
+                'color': TEXT_COLOR,
+                'lineHeight': '1.5',
+                'fontSize': '0.9em',
+                'whiteSpace': 'pre-wrap',
+            }),
+        ], style={
+            'borderRadius': '10px',
+            'padding': '10px 14px',
+            'marginBottom': '10px',
+            'backgroundColor': f'{ACCENT_COLOR}0A',
+            'border': f'1px solid {ACCENT_COLOR}33',
+            'borderLeft': f'4px solid {ACCENT_COLOR}',
+        })
+    else:
+        explanation_card = html.Div()
+
+    # Collapsible raw JSON
+    raw_payload = {
+        'pv_image_type': pv_image_type,
+        'predicted_category': predicted_category,
+        'probabilities': {k: round(float(v), 3) for k, v in prob_dict.items()},
+    }
+    raw_section = html.Details([
+        html.Summary('Show raw model output', style={
+            'cursor': 'pointer', 'color': SUBTLE_TEXT_COLOR,
+            'fontSize': '0.85em', 'marginBottom': '4px',
+        }),
+        html.Pre(
+            json.dumps(raw_payload, indent=2),
+            style={
+                'backgroundColor': '#F7F8FA',
+                'border': '1px solid #E5E9EF',
+                'borderRadius': '8px',
+                'padding': '8px 12px',
+                'color': '#444',
+                'fontSize': '0.8em',
+                'marginTop': '4px',
+                'whiteSpace': 'pre-wrap',
+            }
+        ),
+    ])
+
+    return html.Div([header, big_card, chart_card, explanation_card, raw_section])
+
+
+# Yellow accent for warning/error cards
+WARN_COLOR = '#E1A82D'           # amber/yellow border accent
+WARN_BG = '#FFFBEA'              # very light yellow background
+WARN_TITLE_COLOR = '#B7791F'     # darker amber for the title text
+
+
+def build_warning_card(title, summary, detail=None):
+    """Yellow warning card with an optional collapsible <details> block.
+
+    title:   short bold heading shown at the top.
+    summary: short user-friendly message shown by default.
+    detail:  optional long technical text revealed only when expanded.
+    """
+    children = [
+        html.Div(title, style={
+            'fontWeight': '700',
+            'color': WARN_TITLE_COLOR,
+            'marginBottom': '6px',
+            'fontSize': '0.95em',
+        }),
+        html.Div(summary, style={
+            'color': TEXT_COLOR,
+            'lineHeight': '1.5',
+            'fontSize': '0.9em',
+            'whiteSpace': 'pre-wrap',
+        }),
+    ]
+    if detail:
+        children.append(html.Details([
+            html.Summary('Show technical details', style={
+                'cursor': 'pointer',
+                'color': WARN_TITLE_COLOR,
+                'fontSize': '0.85em',
+                'marginTop': '8px',
+                'fontWeight': '600',
+            }),
+            html.Pre(
+                str(detail),
+                style={
+                    'backgroundColor': '#FFF8DD',
+                    'border': f'1px solid {WARN_COLOR}66',
+                    'borderRadius': '8px',
+                    'padding': '8px 12px',
+                    'color': '#5A4500',
+                    'fontSize': '0.78em',
+                    'marginTop': '6px',
+                    'whiteSpace': 'pre-wrap',
+                    'wordBreak': 'break-word',
+                    'maxHeight': '300px',
+                    'overflow': 'auto',
+                }
+            ),
+        ], style={'marginTop': '4px'}))
+
+    return html.Div(children, style={
+        'backgroundColor': WARN_BG,
+        'border': f'1px solid {WARN_COLOR}66',
+        'borderLeft': f'4px solid {WARN_COLOR}',
+        'borderRadius': '10px',
+        'padding': '10px 14px',
+        'marginTop': '10px',
+    })
+
+
+def analyze_image(base64_image, model="openai/gpt-5.1"):
     response = client.chat.completions.create(
-        model="openai/gpt-5.1",
+        model=model,
         messages=[
             {"role": "user", "content": [
                 {"type": "text", "text": question},
@@ -356,8 +769,18 @@ def analyze_image(base64_image):
     )
 
     res_text = response.choices[0].message.content.strip()
-    result = json.loads(res_text)
 
+    # Strip markdown code fences if the model wrapped the JSON
+    if res_text.startswith("```"):
+        res_text = res_text.strip("`")
+        # remove a leading "json" language tag if present
+        if res_text.lower().startswith("json"):
+            res_text = res_text[4:].strip()
+    # In case there is leading/trailing prose, slice to the outermost braces
+    if "{" in res_text and "}" in res_text:
+        res_text = res_text[res_text.index("{"): res_text.rindex("}") + 1]
+
+    result = json.loads(res_text)
     return result
 
 
@@ -378,9 +801,10 @@ def analyze_image(base64_image):
      Input('example6', 'n_clicks')],
     [State('upload-image', 'contents'),
     State('image-display-flag', 'data'),
-    State('image-content-store', 'data')]     # ✅ new state
+    State('image-content-store', 'data'),
+    State('model-selector', 'value')]     # ✅ selected model
 )
-def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_image, image_displayed, stored_image):
+def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_image, image_displayed, stored_image, selected_model):
 
     trigger_id = ctx.triggered_id
 
@@ -401,8 +825,8 @@ def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_
             html.Img(
                 src=upload_content,
                 style={
-                    'width': '250px',
-                    'height': '250px',
+                    'width': '180px',
+                    'height': '180px',
                     'objectFit': 'cover',
                     'marginTop': '10px',
                     'borderRadius': '12px'
@@ -430,8 +854,8 @@ def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_
             html.Img(
                 src=encoded_image,
                 style={
-                    'width': '300px',
-                    'height': '300px',
+                    'width': '180px',
+                    'height': '180px',
                     'objectFit': 'cover',
                     'marginTop': '10px',
                     'borderRadius': '12px'
@@ -455,35 +879,36 @@ def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_
         else:
             try:
                 _, base64_image = image_data.split(',')
-                result = analyze_image(base64_image)
+                result = analyze_image(base64_image, model=selected_model or "openai/gpt-5.1")
 
                 if not result.get("pv_image", False):
-                    analysis_output = html.Div([
-                        html.Strong('This is not a PV image. Please upload a new one.',
-                                    style={'color': 'orange', 'fontWeight': 'bold', 'marginTop': '10px'})
-                    ])
+                    not_pv_explanation = (result.get('explanation') or '').strip()
+                    analysis_output = build_warning_card(
+                        title='This does not appear to be a PV image.',
+                        summary=(not_pv_explanation
+                                 or 'Please upload a visible, EL, or IR image of a PV module/cell.'),
+                    )
                 else:
-                    pv_image_type = result.get("pv_image_type", "other")
-                    prob_dict = result.get("probabilities", {})
-                    predicted_category = max(prob_dict, key=prob_dict.get)
-
-                    df = pd.DataFrame({
-                        'Category': list(prob_dict.keys()),
-                        'Probability': list(prob_dict.values())
-                    })
-
-                    fig = px.bar(df, x='Category', y='Probability', range_y=[0, 1])
-                    fig.update_traces(marker_color='#259EEA')
-                    fig.update_layout(height=300, margin=dict(l=30, r=30, t=30, b=30), autosize=True)
-
-                    analysis_output = html.Div([
-                        html.Strong(f'PV Image Type: {pv_image_type}', style={'display': 'block', 'marginBottom': '5px'}),
-                        html.Strong(f'Predicted Category: {predicted_category}', style={'marginBottom': '10px'}),
-                        dcc.Graph(figure=fig),
-                        html.Pre(json.dumps(prob_dict, indent=2), style={'color': 'gray'})
-                    ])
+                    analysis_output = build_result_panel(result)
             except Exception as e:
-                analysis_output = html.Div(f'Error during analysis: {str(e)}', style={'color': 'red'})
+                err_text = str(e)
+                # Try to extract a short, user-friendly summary from the error
+                short_msg = 'The selected model could not analyze this image.'
+                lower = err_text.lower()
+                if 'image/png' in lower and 'image/jpeg' in lower:
+                    short_msg = 'The selected model is strict about image format. Try ChatGPT-5.1, or re-save your file as JPEG.'
+                elif 'no fallback model' in lower or 'model_group' in lower:
+                    short_msg = 'The selected model is not currently available on this endpoint. Try a different model.'
+                elif 'rate limit' in lower or '429' in err_text:
+                    short_msg = 'Rate limit reached. Please wait a moment and try again.'
+                elif 'timeout' in lower:
+                    short_msg = 'The request timed out. Please try again.'
+
+                analysis_output = build_warning_card(
+                    title='Analysis failed.',
+                    summary=short_msg,
+                    detail=err_text,
+                )
 
     return status_msg, image_display, analysis_output, thumbnails, image_displayed, stored_image
 
