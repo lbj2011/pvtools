@@ -27,12 +27,16 @@ cborg_API_KEY = os.getenv("cborg_api_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # --- Configuration (from your prompt) ---
-client = openai.OpenAI(
-    api_key=cborg_API_KEY,
-    base_url="https://api.cborg.lbl.gov"
-)
+# client = openai.OpenAI(
+#     api_key=cborg_API_KEY,
+#     base_url="https://api.cborg.lbl.gov"
+# )
 
-client_gpt = openai.OpenAI(
+# client_gpt = openai.OpenAI(
+#     api_key= OPENAI_API_KEY
+# )
+
+client = openai.OpenAI(
     api_key= OPENAI_API_KEY
 )
 
@@ -158,9 +162,10 @@ def parse_contents(contents=None, filename=None, df=None):
     try:
         # Call LLM
         response = client.chat.completions.create(
-            model="openai/gpt-5.4-nano",
+            # model="openai/gpt-5.4-nano",
+            model = "gpt-5.4-nano",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
+            # max_tokens=500,
         )
 
         res_text = response.choices[0].message.content.strip()
@@ -903,7 +908,8 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
     start_time = time.time()
 
     response = client.chat.completions.create(
-        model="openai/gpt-4.1-mini",
+        # model="openai/gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1000,
     )

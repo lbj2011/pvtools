@@ -23,11 +23,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-cborg_API_KEY = os.getenv("cborg_api_key")
+# === OLD (CBORG) — commented out ===
+# cborg_API_KEY = os.getenv("cborg_api_key")
+# client = openai.OpenAI(
+#     api_key=cborg_API_KEY,
+#     base_url="https://api.cborg.lbl.gov"
+# )
+
+# === NEW (OpenRouter) ===
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 client = openai.OpenAI(
-    api_key=cborg_API_KEY,
-    base_url="https://api.cborg.lbl.gov"
+    api_key=OPENROUTER_API_KEY,
+    base_url="https://openrouter.ai/api/v1"
 )
+
 
 def get_layout():
     return layout
@@ -321,10 +330,19 @@ layout = dbc.Container([
 
                         dcc.RadioItems(
                             id='model-selector',
+                            # === OLD (CBORG model names) ===
+                            # options=[
+                            #     {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
+                            #     {'label': 'Gemini Flash', 'value': 'gemini-flash'},
+                            #     {'label': 'Claude Opus', 'value': 'claude-opus'},
+                            # ],
+                            # value='openai/gpt-5.1',
+
+                            # === NEW (OpenRouter model IDs) ===
                             options=[
                                 {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
-                                {'label': 'Gemini Flash', 'value': 'gemini-flash'},
-                                {'label': 'Claude Opus', 'value': 'claude-opus'},
+                                {'label': 'Gemini 2.5 Flash', 'value': 'google/gemini-2.5-flash'},
+                                {'label': 'Claude Haiku 4.5', 'value': 'anthropic/claude-haiku-4.5'},
                             ],
                             value='openai/gpt-5.1',
                             className='pv-model-radio',
