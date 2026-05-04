@@ -24,8 +24,59 @@ CATEGORY_COLORS = {
     "performance_loss": allc[3],   # alias used by common pathway nodes
 }
 
-KNOWN_COMPONENTS = {"cell", "encapsulant", "glass", "front sheet", "backsheet"}
-KNOWN_MECHANISMS = {"pid", "crack", "corrosion", "hot spot", "delamination", "moisture ingress", "thermal cycling"}
+# Group label (used by dropdown filter)  →  set of raw component names
+# from the parquet's pathway_components column.
+COMPONENT_GROUPS = {
+    "frame":       {"frame"},
+    "glass":       {"glass"},
+    "encapsulant": {"encapsulant"},
+    "cells":       {"cell"},
+    "backsheet":   {"backsheet"},
+    "jbox_diode":  {"junction box", "bypass diode"},
+}
+# Any raw component not appearing in any group above falls into "Other".
+KNOWN_COMPONENTS = {c for members in COMPONENT_GROUPS.values() for c in members}
+
+def _component_to_group(raw):
+    """Map a single raw component name (lowercased) to its filter group."""
+    raw = raw.lower()
+    for group, members in COMPONENT_GROUPS.items():
+        if raw in members:
+            return group
+    return "other"
+
+# Filter group  →  3D model file in /assets/
+_GLB_BY_GROUP = {
+    "frame":       "/assets/pv_module_frame.glb",
+    "glass":       "/assets/pv_module_glass.glb",
+    "encapsulant": "/assets/pv_module_encapsulant.glb",
+    "cells":       "/assets/pv_module_cell.glb",
+    "backsheet":   "/assets/pv_module_backsheet.glb",
+    "jbox_diode":  "/assets/pv_module_jbox_diode.glb",
+    "other":       "/assets/pv_module_other.glb",
+}
+
+def _glb_for_paper(pathway_components):
+    """
+    Pick the .glb to show for a clicked paper.
+      - Exactly one named group (excluding 'other') → that group's model
+      - Zero or 2+ named groups                     → pv_module_other.glb
+    Raw components that map to 'other' (metallization, interconnect, inverter)
+    don't count toward the matched-group total.
+    """
+    parsed = parse_list(pathway_components)
+    matched = {_component_to_group(c) for c in parsed}
+    matched.discard("other")
+    if len(matched) == 1:
+        return _GLB_BY_GROUP[next(iter(matched))]
+    return _GLB_BY_GROUP["other"]
+
+KNOWN_MECHANISMS = {
+    "moisture ingress", "crack", "corrosion", "delamination",
+    "uv degradation", "hot spot", "pid", "solder fatigue",
+    "discoloration", "soiling", "shading", "lid",
+    "bypass diode failure", "glass breakage", "letid",
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMMON PATHWAY DATA
@@ -223,10 +274,10 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                     html.Hr(),
                     html.Div([
                         html.B("Module components:"),
-                        html.P(str(row.get("components", "N/A")),
+                        html.P(str(row.get("pathway_components", "N/A")),
                                style={"marginTop": "0px", "fontSize": "13px"}),
                         html.B("Major degradation:"),
-                        html.P(str(row.get("major_mechanisms_faults", "N/A")),
+                        html.P(str(row.get("pathway_faults", "N/A")),
                                style={"marginTop": "0px", "fontSize": "13px"}),
                     ], style={"marginBottom": "0px"}),
                     html.Div([
@@ -263,7 +314,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
 
                     DashModelViewer(
                         id="pv-model",
-                        src="/assets/Untitled4.glb",
+                        src=_glb_for_paper(row.get("pathway_components")),
                         alt="A 3D model of an exploded PV module",
                         cameraControls=True,
                         cameraOrbit="70deg 70deg 50%",
@@ -437,36 +488,24 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
 
         df = DF.copy()
 
-        if "components" not in df.columns or "major_mechanisms_faults" not in df.columns:
+        if "pathway_components" not in df.columns or "pathway_faults" not in df.columns:
             raise ValueError("Expected columns missing in DF")
 
-        def get_component_group(comps):
-            parsed = parse_list(comps)
-            for c in parsed:
-                c_lower = c.lower()
-                if c_lower in KNOWN_COMPONENTS:
-                    return c_lower
-            return "other"
-
-        df["parsed_components"] = df["components"].apply(parse_list)
+        df["parsed_components"] = df["pathway_components"].apply(parse_list)
         df_exploded = df.explode("parsed_components")
         df_exploded = df_exploded[df_exploded["parsed_components"].notna()]
         df_exploded["parsed_components"] = df_exploded["parsed_components"].astype(str).str.lower()
-        df_exploded["component_group"] = df_exploded["parsed_components"].apply(
-            lambda x: x if x in KNOWN_COMPONENTS else "other"
-        )
+        df_exploded["component_group"] = df_exploded["parsed_components"].apply(_component_to_group)
         df_exploded = df_exploded.reset_index(drop=False)
 
         if component_values:
-            selected = [c.lower() for c in component_values]
+            selected = set(c.lower() for c in component_values)
 
-            def match_components(comps):
-                parsed = parse_list(comps)
-                normal_match = any(sel in parsed for sel in selected if sel != "other")
-                other_match = any(c not in KNOWN_COMPONENTS for c in parsed) if "other" in selected else False
-                return normal_match or other_match
+            def match_groups(group):
+                # group is already one of: frame/glass/encapsulant/cells/backsheet/jbox_diode/other
+                return group in selected
 
-            df_exploded = df_exploded[df_exploded["component_group"].apply(match_components)]
+            df_exploded = df_exploded[df_exploded["component_group"].apply(match_groups)]
 
         if mechanism_values:
             selected = [m.lower() for m in mechanism_values]
@@ -477,7 +516,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 other_match = any(m not in KNOWN_MECHANISMS for m in parsed) if "other" in selected else False
                 return normal_match or other_match
 
-            df = df[df["major_mechanisms_faults"].apply(match_mechanisms)]
+            df = df[df["pathway_faults"].apply(match_mechanisms)]
 
         if component_values == [] or mechanism_values == []:
             return px.scatter_mapbox(lat=[], lon=[]).update_layout(
@@ -491,12 +530,13 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         df = df.drop_duplicates(subset=["latitude", "longitude"])
 
         color_map = {
-            "cell": "#0b62a1",
-            "front sheet": "#37adf1",
+            "frame":       "#7a8c99",
+            "glass":       "#ec8bbc",
             "encapsulant": "#93dff4",
-            "glass": "#ec8bbc",
-            "backsheet": "#9b48b5",
-            "other": "#bec0c0"
+            "cells":       "#0b62a1",
+            "backsheet":   "#9b48b5",
+            "jbox_diode":  "#5bbf7a",
+            "other":       "#bec0c0",
         }
 
         fig = px.scatter_mapbox(
@@ -702,15 +742,14 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         df = DF.copy()
 
         if component_values:
-            selected = [c.lower() for c in component_values]
+            selected = set(c.lower() for c in component_values)
 
             def match_components(comps):
                 parsed = parse_list(comps)
-                normal_match = any(sel in parsed for sel in selected if sel != "other")
-                other_match = any(c not in KNOWN_COMPONENTS for c in parsed) if "other" in selected else False
-                return normal_match or other_match
+                groups = {_component_to_group(c) for c in parsed}
+                return bool(groups & selected)
 
-            df = df[df["components"].apply(match_components)]
+            df = df[df["pathway_components"].apply(match_components)]
 
         if mechanism_values:
             selected = [m.lower() for m in mechanism_values]
@@ -721,7 +760,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 other_match = any(m not in KNOWN_MECHANISMS for m in parsed) if "other" in selected else False
                 return normal_match or other_match
 
-            df = df[df["major_mechanisms_faults"].apply(match_mechanisms)]
+            df = df[df["pathway_faults"].apply(match_mechanisms)]
 
         count = len(df)
 

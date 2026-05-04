@@ -24,6 +24,49 @@ MAJOR_CARD_FONT_COLOR = "black"
 BODY_CARD_BACKGROUND = "white" 
 CODE_BLOCK_BACKGROUND = "#f8f9fa"
 
+
+def _df_from_store(value):
+    """
+    Robustly reconstruct a DataFrame from a dcc.Store payload.
+
+    Stores can hand the value back as a JSON string OR as an already-deserialized
+    dict, depending on Dash/pandas versions. Newer pandas read_json refuses dicts,
+    so we branch.
+
+    Accepts:
+      - dict in pandas split format: {'columns': [...], 'index': [...], 'data': [...]}
+      - dict in to_dict() / records / records_dict shapes (best-effort)
+      - JSON string in 'split' orientation
+      - None / empty -> raises ValueError so callers can short-circuit
+    """
+    if value is None or value == {} or value == "":
+        raise ValueError("No dataframe in store")
+
+    if isinstance(value, dict):
+        # Native split-orient dict
+        if {"columns", "index", "data"} <= value.keys():
+            return pd.DataFrame(**value)
+        # Generic dict — let pandas guess
+        return pd.DataFrame(value)
+
+    if isinstance(value, str):
+        return pd.read_json(StringIO(value), orient="split")
+
+    # Last-resort: hand whatever it is to DataFrame and hope
+    return pd.DataFrame(value)
+
+
+def _no_data_alert(message):
+    """Reusable warning alert shown inside a card's right-side output area
+    when an action is taken before the prerequisite data is loaded."""
+    return dbc.Alert(
+        [html.Strong("⚠️ No data loaded.  "), message],
+        color="warning",
+        className="mb-0",
+        style={"fontSize": "14px"},
+    )
+
+
 def get_layout():
     return layout
 
@@ -415,7 +458,7 @@ layout = dbc.Container([
                                     {"label": "", "value": "outlier"},
                                     {"label": "", "value": "clearsky"},
                                 ],
-                                value=['timezone', "low-irra-power", "outlier"],
+                                value=['timezone', "low-irra-power", "outlier", "clearsky"],
                                 inline=False,
                                 style={"display": "none"}
                             ),
@@ -512,7 +555,7 @@ layout = dbc.Container([
 
                             # 4. Clear-sky filter + inline customize
                             html.Div([
-                                dbc.Checkbox(id="cb-clearsky", value=False, className="me-2 d-inline-block"),
+                                dbc.Checkbox(id="cb-clearsky", value=True, className="me-2 d-inline-block"),
                                 html.Span("Clear-sky filter"),
                                 html.Details([
                                     html.Summary("Customize parameters", style={
@@ -869,7 +912,7 @@ layout = dbc.Container([
                         dcc.Store(id="_rb-sync-dummy"),
 
                         dbc.Button(
-                            "RUN ANALYSIS",
+                            "Calculate degradation",
                             id="run-btn", color="primary", className="w-100 mt-3"
                         ),
 
@@ -1021,7 +1064,6 @@ app.clientside_callback(
 # (RadioButton sync removed — using dbc.RadioItems directly)
 
 
-
 # ==================================================
 # upload data
 # ==================================================
@@ -1088,16 +1130,26 @@ def run_filter(filter_clicks, upload_clicks,
 
     trigger = ctx.triggered_id
 
-    if df_json is None:
+    # No data loaded yet
+    if not df_json:   # None or empty {}
+        # Only show the warning if the user actually clicked the Filter button.
+        # For other triggers (upload reset, example reset), just clear silently.
+        if trigger == "filter-btn":
+            return [
+                _no_data_alert(
+                    "Please click 'Analyze Data' first to load your dataset before filtering."
+                ),
+                None,
+            ]
         return ['', None]
-    
+
     if trigger == "upload-data" or (trigger and trigger.startswith("load-example-btn")):
         return ['', None]
 
     # =========================
     # Load dataframe
     # =========================
-    df = pd.read_json(df_json, orient='split')
+    df = _df_from_store(df_json)
 
     # =========================
     # Get irradiance column
@@ -1388,8 +1440,20 @@ def analyze_uploaded_data_callback(
         "upload-data"
     ]:
         return ['', False, "Analyze Data"]
+
+    # No filtered data yet
+    if not df_filtered_json:   # None or empty {}
+        if trigger == "run-btn":
+            return [
+                _no_data_alert(
+                    "Please click 'Filter data' first before running degradation analysis."
+                ),
+                False,
+                "Analyze Data",
+            ]
+        return ['', False, "Analyze Data"]
     
-    df_filtered = pd.read_json(df_filtered_json, orient='split')
+    df_filtered = _df_from_store(df_filtered_json)
 
     irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
 
@@ -1591,10 +1655,7 @@ def analyze_uploaded_data_callback(
 
         elif data_source == "example" and stored_df_json is not None:
             try:
-                if isinstance(stored_df_json, dict):
-                    df = pd.DataFrame(**stored_df_json)
-                else:
-                    df = pd.read_json(stored_df_json, orient='split')
+                df = _df_from_store(stored_df_json)
 
                 df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
 
@@ -1606,7 +1667,10 @@ def analyze_uploaded_data_callback(
 
         else:
             return (
-                html.Div("Upload a file or load the example dataset, then click 'Analyze Data'."),
+                _no_data_alert(
+                    "Please upload a file or click one of the example buttons, "
+                    "then click 'Analyze Data'."
+                ),
                 {}, None, "", False, "Analyze Data", None, '', filename
             )
 

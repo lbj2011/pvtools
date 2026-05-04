@@ -6,7 +6,7 @@ import json
 
 from app import app
 
-FILE_LIST, DATA, DF = load_dataframe('data/pv_pathway_data_2604.parquet')
+FILE_LIST, DATA, DF = load_dataframe('data/pv_pathway_data_2604_with_pathway_labels.parquet')
 INDEX_MAP = build_index_map(FILE_LIST)
 register_callbacks(app, DATA, INDEX_MAP, DF, FILE_LIST)
 

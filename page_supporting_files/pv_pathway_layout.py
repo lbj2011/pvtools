@@ -640,20 +640,31 @@ def create_filter_section():
             dropdown_block(
                 "Filter by Degradation Components",
                 "component-filter",
-                [{"label": x.title(), "value": x}
-                 for x in ["cell", "encapsulant", "glass", "front sheet", "backsheet"]]
-                + [{"label": "Other", "value": "other"}],
-                ["cell", "encapsulant", "glass", "front sheet", "backsheet", "other"],
+                [
+                    {"label": "Frame",       "value": "frame"},
+                    {"label": "Glass",       "value": "glass"},
+                    {"label": "Encapsulant", "value": "encapsulant"},
+                    {"label": "Cells",       "value": "cells"},
+                    {"label": "Backsheet",   "value": "backsheet"},
+                    {"label": "JBox-Diode",  "value": "jbox_diode"},
+                    {"label": "Other",       "value": "other"},
+                ],
+                ["frame", "glass", "encapsulant", "cells",
+                 "backsheet", "jbox_diode", "other"],
             ),
             dropdown_block(
                 "Filter by Major Degradation Types",
                 "mechanism-filter",
                 [{"label": x, "value": x.lower()}
-                 for x in ["PID", "Crack", "Corrosion", "Hot spot", "Delamination",
-                            "Moisture ingress", "Thermal cycling"]]
+                 for x in ["Moisture ingress", "Crack", "Corrosion", "Delamination",
+                            "UV degradation", "Hot spot", "PID", "Solder fatigue",
+                            "Discoloration", "Soiling", "Shading", "LID",
+                            "Bypass diode failure", "Glass breakage", "LeTID"]]
                 + [{"label": "Other", "value": "other"}],
-                ["pid", "crack", "corrosion", "hot spot", "delamination",
-                 "moisture ingress", "thermal cycling", "other"],
+                ["moisture ingress", "crack", "corrosion", "delamination",
+                 "uv degradation", "hot spot", "pid", "solder fatigue",
+                 "discoloration", "soiling", "shading", "lid",
+                 "bypass diode failure", "glass breakage", "letid", "other"],
             ),
         ], style={"display": "flex", "gap": "20px", "flexWrap": "wrap"})
     ], style={

@@ -17,10 +17,15 @@ import re
 import time
 
 cborg_API_KEY = os.getenv("cborg_api_key")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# client = openai.OpenAI(
+#     api_key=cborg_API_KEY,
+#     base_url="https://api.cborg.lbl.gov"
+# )
 
 client = openai.OpenAI(
-    api_key=cborg_API_KEY,
-    base_url="https://api.cborg.lbl.gov"
+    api_key= OPENAI_API_KEY
 )
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -171,8 +176,7 @@ def get_filter_from_llm(question):
     start_time = time.time()  # start timer
 
     response = client.chat.completions.create(
-        model="openai/gpt-5.4-nano",
-        # model = "gemini-flash",
+        model="gpt-5.4-nano",
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
