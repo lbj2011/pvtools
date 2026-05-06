@@ -161,7 +161,7 @@ def create_stylesheet_common():
                 'shadow-opacity': 1,
                 'shadow-offset-x': 0,
                 'shadow-offset-y': 3,
-                'transition-property': 'width, height, border-width, border-color, shadow-blur, shadow-color, shadow-offset-y',
+                'transition-property': 'width, height, border-width, border-color, shadow-blur, shadow-color, shadow-offset-y, opacity, background-color, background-opacity, border-opacity',
                 'transition-duration': '0.2s',
                 'transition-timing-function': 'ease-out',
             }
@@ -200,6 +200,37 @@ def create_stylesheet_common():
                 'overlay-opacity': 0,
             }
         },
+        # ── CLICKED: persistent ring; per-category border colour
+        # so the highlight is unmistakable on dark and light fills
+        # alike. We include both `.clicked` and `.clicked:selected`
+        # variants — when the user taps a node, Cytoscape auto-marks
+        # it `:selected`, and the bare `node:selected` rule above
+        # would otherwise force its own border-color to white. ──────
+        {
+            'selector': 'node.clicked, node.clicked:selected',
+            'style': {
+                'width': '196px',
+                'height': '68px',
+                'border-width': 5,
+                'shadow-blur': 45,
+                'shadow-color': '#f59e0b',
+                'shadow-opacity': 1,
+                'shadow-offset-x': 0,
+                'shadow-offset-y': 0,
+                'font-size': '17px',
+                'overlay-opacity': 0,
+            }
+        },
+        # per-category border colours — listed for both `.clicked` and
+        # `.clicked:selected` to override `node:selected`'s white border
+        {'selector': '[type = "stressor"].clicked, [type = "stressor"].clicked:selected',
+         'style': {'border-color': "#f386ec"}},
+        {'selector': '[type = "performance_loss"].clicked, [type = "performance_loss"].clicked:selected',
+         'style': {'border-color': "#aad8fe"}},
+        {'selector': '[type = "mechanism"].clicked, [type = "mechanism"].clicked:selected',
+         'style': {'border-color': "#7c1280"}},
+        {'selector': '[type = "failure"].clicked, [type = "failure"].clicked:selected',
+         'style': {'border-color': "#2275f2"}},
         {'selector': sel("stressor"),        'style': {'background-color': allc[0]}},
         {'selector': sel("mechanism"),       'style': {'background-color': allc[1]}},
         {'selector': sel("failure"),         'style': {'background-color': allc[2]}},
@@ -217,7 +248,7 @@ def create_stylesheet_common():
                 'width': 2,
                 'line-color': '#cbd5e1',
                 'target-arrow-color': '#cbd5e1',
-                'transition-property': 'width, line-color, target-arrow-color',
+                'transition-property': 'width, line-color, target-arrow-color, opacity',
                 'transition-duration': '0.2s',
             }
         },
@@ -227,6 +258,28 @@ def create_stylesheet_common():
                 'width': 3.5,
                 'line-color': '#94a3b8',
                 'target-arrow-color': '#94a3b8',
+            }
+        },
+        # ── FADED: nodes/edges outside the clicked node's connected
+        # component. Per-category selectors so specificity beats the
+        # base `node` color rule. ────────────────────────────────────
+        {
+            'selector': 'node.faded',
+            'style': {
+                'background-opacity': 0.2,
+                'border-opacity': 0,
+                'text-opacity': 1,
+                'shadow-opacity': 0,
+            }
+        },
+        {'selector': '[type = "stressor"].faded',         'style': {'color': "#FFFFFF"}},
+        {'selector': '[type = "mechanism"].faded',        'style': {'color': "#FFFFFF"}},
+        {'selector': '[type = "failure"].faded',          'style': {'color': "#FFFFFF"}},
+        {'selector': '[type = "performance_loss"].faded', 'style': {'color': "#FFFFFF"}},
+        {
+            'selector': 'edge.faded',
+            'style': {
+                'opacity': 0.25,
             }
         },
     ]
@@ -355,6 +408,7 @@ def create_graph_section():
                 ),
                 minZoom=0.5,
                 maxZoom=1.5,
+                autoungrabify=True,   # nodes can't be dragged by the user
             ),
             html.Div(
                 id="pathway-buttons",
@@ -410,6 +464,7 @@ def create_common_pathway_section():
                 zoom=0.7,
                 minZoom=0.3,
                 maxZoom=1.5,
+                autoungrabify=True,   # nodes can't be dragged by the user
             ),
 
             # shown by callback when fault data is not yet available
@@ -426,6 +481,45 @@ def create_common_pathway_section():
                     "pointerEvents": "none",
                     "display": "none",
                 }
+            ),
+
+            # ── Unselect button: top-right overlay, shown only while
+            # a node is highlighted. Clicking it clears the selection
+            # and restores every node to its normal colour. ─────────
+            html.Button(
+                [
+                    html.Span("Unselect node", style={
+                        "fontSize": "13px",
+                        "color": "#374151",
+                        "fontWeight": "500",
+                    }),
+                    html.Span("✕", style={
+                        "fontSize": "14px",
+                        "fontWeight": "700",
+                        "color": "#6b7280",
+                        "lineHeight": "1",
+                        "marginLeft": "8px",
+                    }),
+                ],
+                id="common-pathway-unselect-btn",
+                n_clicks=0,
+                style={
+                    "position": "absolute",
+                    "top": "12px",
+                    "right": "12px",
+                    "display": "none",        # toggled by callback
+                    "alignItems": "center",
+                    "gap": "0px",
+                    "padding": "6px 12px",
+                    "background": "rgba(255,255,255,0.92)",
+                    "border": "1px solid #d1d5db",
+                    "borderRadius": "20px",
+                    "cursor": "pointer",
+                    "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
+                    "backdropFilter": "blur(4px)",
+                    "transition": "all 0.15s ease",
+                    "zIndex": 20,
+                },
             ),
 
             create_legend(),
@@ -451,7 +545,7 @@ def create_common_pathway_wiki():
     return html.Div(
         id="common-pathway-wiki",
         children=html.Div(
-            "Hover or click a node to see details",
+            "Click a node to see details",
             style={
                 "color": "#aaa",
                 "fontSize": "13px",
@@ -526,6 +620,7 @@ def create_pathway_modal():
                             ),
                             minZoom=0.3,
                             maxZoom=2.0,
+                            autoungrabify=True,   # nodes can't be dragged by the user
                         ),
                         html.Div(
                             id="pathway-buttons",
@@ -611,9 +706,176 @@ def create_common_pathway_container():
         ),
 
         dbc.Row([
-            dbc.Col(create_common_pathway_section(), xs=12, md=9),
-            dbc.Col(create_common_pathway_wiki(),    xs=12, md=3),
+            dbc.Col(create_common_pathway_section(), xs=12, md=8),
+            dbc.Col(create_common_pathway_wiki(),    xs=12, md=4),
         ], className="g-3 align-items-start")
+    ], style=_CONTAINER_STYLE)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMING SOON SECTION — two preview cards side-by-side describing upcoming
+# features. Same outer container style as the fault section so the page
+# rhythm stays consistent.
+# ─────────────────────────────────────────────────────────────────────────────
+_SUBCARD_STYLE = {
+    "background": "#fff",
+    "border": "1px solid #e5e7eb",
+    "borderRadius": "12px",
+    "padding": "24px",
+    "height": "100%",
+    "display": "flex",
+    "flexDirection": "column",
+    "boxShadow": "0 2px 8px rgba(0,0,0,0.04)",
+    "transition": "transform 0.2s ease, box-shadow 0.2s ease",
+}
+
+# Blue pill — uses Tailwind-style blue palette so it reads as
+# "informational / on the roadmap".
+_COMING_SOON_BADGE_STYLE = {
+    "display": "inline-block",
+    "background": "#dbeafe",        # blue-100
+    "color": "#1e40af",             # blue-800
+    "border": "1px solid #93c5fd",  # blue-300
+    "fontSize": "11px",
+    "fontWeight": "700",
+    "letterSpacing": "1px",
+    "padding": "3px 10px",
+    "borderRadius": "12px",
+    "marginBottom": "12px",
+    "alignSelf": "flex-start",
+}
+
+_GITHUB_BTN_STYLE = {
+    "display": "inline-flex",
+    "alignItems": "center",
+    "padding": "7px 13px",
+    "background": "#1f2937",
+    "color": "white",
+    "fontSize": "12px",
+    "fontWeight": "600",
+    "borderRadius": "8px",
+    "textDecoration": "none",
+    "alignSelf": "flex-start",
+    "marginBottom": "10px",
+    "transition": "background 0.15s ease",
+}
+
+
+def _bullet_list(items):
+    """Render a tight bullet list with consistent typography."""
+    return html.Ul(
+        [html.Li(t, style={"marginBottom": "6px"}) for t in items],
+        style={
+            "fontSize": "15px",
+            "color": "#4b5563",
+            "lineHeight": "1.55",
+            "paddingLeft": "20px",
+            "marginBottom": "14px",
+        },
+    )
+
+
+def _coming_soon_subcard(title, bullets, image_src, image_alt,
+                         pre_image=None, image_href=None,
+                         image_max_height="80px"):
+    """One feature-preview card.
+    `bullets`           : list of short strings rendered as a bullet list.
+    `pre_image`         : optional element rendered between the bullets and
+                          the image frame (e.g. a GitHub button above the
+                          pvdeg pic).
+    `image_href`        : if provided, wraps the image in a link to that URL.
+    `image_max_height`  : per-card cap so individual logos can be sized
+                          independently.
+    """
+    img = html.Img(
+        src=image_src,
+        alt=image_alt,
+        style={
+            "maxWidth": "100%",
+            "maxHeight": image_max_height,
+            "objectFit": "contain",
+        },
+    )
+
+    if image_href:
+        img = html.A(
+            img,
+            href=image_href,
+            target="_blank",
+            rel="noopener noreferrer",
+            title=image_href,
+            style={"display": "inline-block", "lineHeight": 0},
+        )
+
+    image_frame = html.Div(
+        img,
+        style={
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "flex-start",   # left-aligned
+            "padding": "0",
+        },
+    )
+
+    return html.Div(
+        [
+            html.Span("COMING SOON", style=_COMING_SOON_BADGE_STYLE),
+            html.H4(title, style={
+                "fontSize": "18px",
+                "fontWeight": "700",
+                "color": "#1f2937",
+                "marginBottom": "10px",
+            }),
+            _bullet_list(bullets),
+            *([pre_image] if pre_image else []),
+            image_frame,
+        ],
+        style=_SUBCARD_STYLE,
+    )
+
+
+def create_coming_soon_container():
+    chat_card = _coming_soon_subcard(
+        title="Chat-based pathway analysis",
+        bullets=[
+            "Explore the dataset through natural conversation",
+            "Ask about specific stressors, mechanisms, or failure modes",
+            "Answers grounded in the underlying literature",
+        ],
+        image_src="/assets/pathway_chat_logo.png",
+        image_alt="Pathway chat preview",
+    )
+
+    github_url = "https://github.com/NatLabRockies/PVDegradationTools"
+    github_btn = html.A(
+        [
+            html.Span("View on GitHub", style={"marginRight": "6px"}),
+            html.Span("↗", style={"fontSize": "12px"}),
+        ],
+        href=github_url,
+        target="_blank",
+        rel="noopener noreferrer",
+        style=_GITHUB_BTN_STYLE,
+    )
+
+    pvdeg_card = _coming_soon_subcard(
+        title="Integration with pvdeg",
+        bullets=[
+            "Connect the pathway knowledge base with pvdeg, an open-source degradation modeling tool",
+            "Pathways help refine physics-based degradation models",
+        ],
+        image_src="/assets/pathway_pvdeg_logo.png",
+        image_alt="pvdeg integration preview",
+        pre_image=github_btn,         # button sits above the image
+        image_href=github_url,        # image itself is also clickable
+        image_max_height="50px",      # smaller pvdeg logo
+    )
+
+    return html.Div([
+        dbc.Row([
+            dbc.Col(chat_card,  xs=12, md=6),
+            dbc.Col(pvdeg_card, xs=12, md=6),
+        ], className="g-3 align-items-stretch"),
     ], style=_CONTAINER_STYLE)
 
 
@@ -624,7 +886,7 @@ def create_filter_section():
     def dropdown_block(label_text, dropdown_id, options, default_values):
         return html.Div([
             html.Label(label_text, style={
-                "fontWeight": "600", "marginBottom": "6px", "fontSize": "14px",
+                "fontWeight": "700", "marginBottom": "8px", "fontSize": "17px",
             }),
             dcc.Dropdown(
                 id=dropdown_id,
@@ -694,7 +956,10 @@ def create_layout(file_list):
                             style={"display": "none"}),
                 html.Hr(),
                 html.Div(
-                    html.H1("PV Module Degradation Pathway Explorer (Demo)"),
+                    html.H1(
+                        "PV Module Degradation Pathway Explorer",
+                        style={"fontWeight": 800, "letterSpacing": "-0.5px"},
+                    ),
                     style={'width': '100%', 'padding': '0 10px', 'textAlign': 'center'}
                 ),
                 html.Hr(),
@@ -706,8 +971,21 @@ def create_layout(file_list):
 
         dbc.Container([
             html.Div([
-                html.H3('Material degradation pathways by fault', style={"marginTop": "20px"}),
+                html.H3(
+                    'Material Degradation Pathways by Fault',
+                    style={"marginTop": "20px", "fontWeight": 800},
+                ),
                 create_common_pathway_container(),
+            ])
+        ]),
+
+        dbc.Container([
+            html.Div([
+                html.H3(
+                    'New Functions & Features to Come',
+                    style={"marginTop": "20px", "fontWeight": 800},
+                ),
+                create_coming_soon_container(),
             ])
         ]),
 

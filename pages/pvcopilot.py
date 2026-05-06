@@ -17,6 +17,7 @@ from page_supporting_files.analysis_utils import make_overview_figures, normaliz
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
+import time
 
 # --- Define Color Variables ---
 MAJOR_CARD_BACKGROUND = "#F8F8F8"
@@ -170,7 +171,7 @@ layout = dbc.Container([
                                 )
                             ),
                             html.A(
-                                "Download Code",
+                                "Download code (python)",
                                 id="download-link",
                                 href="",
                                 download="generated_code.py",
@@ -1784,9 +1785,27 @@ def toggle_panel(open_clicks, close_clicks):
 
 
 @app.callback(
-    Output("code-preview", "children"),
-    Output("download-link", "href"),
-    Output("download-link", "style"),
+    Output("code-preview", "children", allow_duplicate=True),
+    Output("download-link", "href", allow_duplicate=True),
+    Output("download-link", "style", allow_duplicate=True),
+    Input("upload-data", "filename"),
+    Input("analyze-btn", "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+    prevent_initial_call=True,
+)
+def clear_code_panel_on_new_data(*_):
+    """Reset the generated-code preview and hide the download link
+    whenever the user uploads a new file, clicks Analyze, or loads an example."""
+    hidden_style = {"display": "none", "marginTop": "10px"}
+    return None, "", hidden_style
+
+
+@app.callback(
+    Output("code-preview", "children", allow_duplicate=True),
+    Output("download-link", "href", allow_duplicate=True),
+    Output("download-link", "style", allow_duplicate=True),
     Input("generate-code-btn", "n_clicks"),
     State("stored-data-file-name", "data"),
     State("mapped-vars-store", "data"),
@@ -1800,20 +1819,38 @@ def generate_code(n,filename, mapped_variables_dict, selected_filters, selected_
     # Generate code (this triggers loading spinner automatically)
     clean_code = get_full_code(filename, mapped_variables_dict, selected_filters, selected_metric)
 
+    # Small delay so the loading spinner is visible and the reveal feels smooth
+    time.sleep(2)
+
     # Preview (first ~20 lines)
     preview_lines = "\n".join(clean_code.splitlines()[:20]) + "\n..."
 
-    preview = html.Pre(
-        preview_lines,
-        style={
-            "whiteSpace": "pre-wrap",
-            "fontSize": "12px",
-            "backgroundColor": "#f8f9fa",
-            "padding": "8px",
-            "borderRadius": "6px",
-            "maxHeight": "200px",
-            "overflowY": "auto"
-        }
+    preview = html.Div(
+        children=[
+            # Inject the keyframes once; harmless if rendered multiple times
+            dcc.Markdown(
+                """<style>
+                @keyframes pvcopilot-fade-in {
+                    from { opacity: 0; transform: translateY(4px); }
+                    to   { opacity: 1; transform: translateY(0); }
+                }
+                </style>""",
+                dangerously_allow_html=True,
+            ),
+            html.Pre(
+                preview_lines,
+                style={
+                    "whiteSpace": "pre-wrap",
+                    "fontSize": "12px",
+                    "backgroundColor": "#f8f9fa",
+                    "padding": "8px",
+                    "borderRadius": "6px",
+                    "maxHeight": "200px",
+                    "overflowY": "auto",
+                    "animation": "pvcopilot-fade-in 0.4s ease-out both",
+                },
+            ),
+        ]
     )
 
     # Create downloadable file
@@ -1825,7 +1862,8 @@ def generate_code(n,filename, mapped_variables_dict, selected_filters, selected_
         "display": "inline-block",
         "marginTop": "10px",
         "color": "#0070C0",
-        "cursor": "pointer"
+        "cursor": "pointer",
+        "animation": "pvcopilot-fade-in 0.4s ease-out 0.1s both",
     }
 
     return preview, href, download_style

@@ -830,7 +830,10 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
             pvcopilot_functions_code = f.read().replace('"', "'")
 
     with open("page_supporting_files/pvcopilot_packages_code.txt", "r", encoding="utf-8") as f:
-            pvcopilot_packages_code = f.read().replace('\n', ' ').replace('"', "'")
+            pvcopilot_packages_code = f.read().replace('"', "'")
+
+    with open("page_supporting_files/pvcopilot_main_code.txt", "r", encoding="utf-8") as f:
+            main_code = f.read().replace('"', "'")
 
     prompt = f"""
         Your task is to generate Python code and return it as a JSON object with TWO keys:
@@ -905,37 +908,57 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
         """
 
     # Call LLM
-    start_time = time.time()
+    # start_time = time.time()
 
-    response = client.chat.completions.create(
-        # model="openai/gpt-4.1-mini",
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1000,
-    )
+    # response = client.chat.completions.create(
+    #     # model="openai/gpt-4.1-mini",
+    #     model="gpt-4o-mini",
+    #     messages=[{"role": "user", "content": prompt}],
+    #     max_tokens=1000,
+    # )
 
-    end_time = time.time()
+    # end_time = time.time()
 
 
-    print(f"Time taken: {end_time - start_time:.2f} seconds")
+    # print(f"Time taken: {end_time - start_time:.2f} seconds")
 
-    res_text = response.choices[0].message.content.strip()
+    # res_text = response.choices[0].message.content.strip()
 
-    # Remove possible markdown wrappers
-    clean_text = re.sub(r"```json\n(.*?)```", r"\1", res_text, flags=re.DOTALL).strip()
-    clean_text = re.sub(r"```python\n(.*?)```", r"\1", clean_text, flags=re.DOTALL).strip()
+    # # Remove possible markdown wrappers
+    # clean_text = re.sub(r"```json\n(.*?)```", r"\1", res_text, flags=re.DOTALL).strip()
+    # clean_text = re.sub(r"```python\n(.*?)```", r"\1", clean_text, flags=re.DOTALL).strip()
 
     # Parse JSON
+    # try:
+    #     parsed = json.loads(clean_text)
+    #     packages_code = parsed.get("packages_code", "")
+    #     main_code = parsed.get("main_code", "")
+    #     full_code = packages_code + "\n\n" + pvcopilot_functions_code + "\n\n" + main_code
+
+    if 'csv' in filename:
+        code_read = f"df = pd.read_csv('{filename}')"
+
+    elif 'xls' in filename or 'xlsx' in filename:
+        code_read = f"df = pd.read_excel('{filename}')"
+
+    elif 'parquet' in filename:
+        code_read = f"df = pd.read_parquet('{filename}')"
+
+    code_variable_mapping = f"mapped_variables_dict = {mapped_variables_dict}"
+
     try:
-        parsed = json.loads(clean_text)
-        packages_code = parsed.get("packages_code", "")
-        main_code = parsed.get("main_code", "")
-        full_code = packages_code + "\n\n" + pvcopilot_functions_code + "\n\n" + main_code
+        full_code = (
+            pvcopilot_packages_code + "\n\n"
+            + pvcopilot_functions_code + "\n\n"
+            + code_read + "\n\n"
+            + code_variable_mapping + "\n\n"
+            + main_code
+        )
 
     except json.JSONDecodeError:
         raise ValueError("Response is not valid JSON")
 
-    with open("llm_response.txt", "w", encoding="utf-8") as f:
-        f.write(clean_text)
+    # with open("llm_response.txt", "w", encoding="utf-8") as f:
+    #     f.write(clean_text)
 
     return full_code

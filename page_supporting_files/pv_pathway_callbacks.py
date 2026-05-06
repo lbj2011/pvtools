@@ -631,28 +631,147 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         Output("common-pathway-graph", "elements", allow_duplicate=True),
         Input("common-pathway-graph", "mouseoverNodeData"),
         Input("common-pathway-graph", "mouseoutNodeData"),
+        Input("common-pathway-graph", "tapNodeData"),
+        Input({'type': 'fault-btn', 'index': ALL}, 'n_clicks'),
+        Input("common-pathway-unselect-btn", "n_clicks"),
         State("common-pathway-graph", "elements"),
         prevent_initial_call=True,
     )
-    def toggle_common_node_hover_class(over_data, out_data, elements):
+    def toggle_common_node_hover_class(over_data, out_data, tap_data, fault_clicks,
+                                       unselect_clicks, elements):
         if not elements:
             return dash.no_update
         ctx = dash.callback_context
         triggered = ctx.triggered_id
 
+        # Identify which property fired — ctx.triggered_id alone collapses
+        # mouseover/mouseout/tap into the same component id.
+        triggered_prop = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+        is_tap_event   = triggered_prop.endswith(".tapNodeData")
+        is_hover_event = triggered_prop.endswith(".mouseoverNodeData")
+
+        # Fault button switched → clear all hover/clicked classes
+        fault_switched = isinstance(triggered, dict) and triggered.get("type") == "fault-btn"
+
+        # Unselect button pressed → clear selection, same effect as fault switch
+        unselect_pressed = (triggered == "common-pathway-unselect-btn")
+
+        # Currently clicked node — read from existing elements (sticky across
+        # hover events because hover events do not modify it).
+        currently_clicked = None
+        for el in elements:
+            if "source" in el.get("data", {}):
+                continue
+            if "clicked" in (el.get("classes") or "").split():
+                currently_clicked = el["data"]["id"]
+                break
+
+        if fault_switched or unselect_pressed:
+            currently_clicked = None
+        elif is_tap_event and tap_data:
+            new_id = tap_data.get("id")
+            # toggle: clicking the same node again clears the highlight
+            currently_clicked = None if new_id == currently_clicked else new_id
+
+        # ── compute the connected set: direct ancestors + descendants
+        # of the clicked node in the DIRECTED graph. We do not treat
+        # edges as undirected — that would pull in every sibling that
+        # happens to share a downstream failure, which in dense
+        # pathways is essentially the whole graph. ──────────────────
+        connected_ids = set()
+        if currently_clicked:
+            forward  = {}   # node → set of children (follow edge direction)
+            backward = {}   # node → set of parents  (against edge direction)
+            for el in elements:
+                d = el.get("data", {})
+                if "source" in d:
+                    s, t = d["source"], d["target"]
+                    forward.setdefault(s, set()).add(t)
+                    backward.setdefault(t, set()).add(s)
+
+            connected_ids.add(currently_clicked)
+            # descendants
+            stack = [currently_clicked]
+            while stack:
+                n = stack.pop()
+                for nb in forward.get(n, ()):
+                    if nb not in connected_ids:
+                        connected_ids.add(nb)
+                        stack.append(nb)
+            # ancestors
+            stack = [currently_clicked]
+            seen_back = {currently_clicked}
+            while stack:
+                n = stack.pop()
+                for nb in backward.get(n, ()):
+                    if nb not in seen_back:
+                        seen_back.add(nb)
+                        connected_ids.add(nb)
+                        stack.append(nb)
+
         result = []
         for el in elements:
             el = dict(el)
-            if "source" in el.get("data", {}):
-                result.append(el)
-                continue
+            data = el.get("data", {})
             classes = set((el.get("classes") or "").split())
             classes.discard("mouseover")
-            if triggered == "common-pathway-graph" and over_data and el["data"]["id"] == over_data.get("id"):
+            classes.discard("clicked")
+            classes.discard("faded")
+
+            # ── edges ─────────────────────────────────────────────────
+            if "source" in data:
+                if currently_clicked and (
+                    data["source"] not in connected_ids
+                    or data["target"] not in connected_ids
+                ):
+                    classes.add("faded")
+                el["classes"] = " ".join(classes)
+                result.append(el)
+                continue
+
+            # ── nodes ─────────────────────────────────────────────────
+            node_id = data["id"]
+            # hover class: only while pointer is over a node
+            if (is_hover_event
+                and not fault_switched
+                and over_data
+                and node_id == over_data.get("id")):
                 classes.add("mouseover")
+            # clicked class: persistent until another node is tapped or fault changes
+            if currently_clicked and node_id == currently_clicked:
+                classes.add("clicked")
+            # faded class: any node not in the connected component of the click
+            if currently_clicked and node_id not in connected_ids:
+                classes.add("faded")
+
             el["classes"] = " ".join(classes)
             result.append(el)
         return result
+
+    # =========================================================================
+    # UNSELECT BUTTON VISIBILITY
+    # Show the button only while a node carries the `clicked` class; hide it
+    # otherwise. Driven off the elements list so it stays in sync regardless
+    # of which path produced the change (tap, fault switch, button click).
+    # =========================================================================
+    @app.callback(
+        Output("common-pathway-unselect-btn", "style"),
+        Input("common-pathway-graph", "elements"),
+        State("common-pathway-unselect-btn", "style"),
+        prevent_initial_call=True,
+    )
+    def toggle_unselect_btn_visibility(elements, current_style):
+        base_style = dict(current_style or {})
+        any_clicked = False
+        for el in (elements or []):
+            data = el.get("data", {})
+            if "source" in data:        # skip edges
+                continue
+            if "clicked" in (el.get("classes") or "").split():
+                any_clicked = True
+                break
+        base_style["display"] = "inline-flex" if any_clicked else "none"
+        return base_style
 
     # =========================================================================
     # GRAPH NODE DETAIL PANEL
@@ -815,15 +934,15 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
     @app.callback(
         Output("common-pathway-wiki", "children"),
 
-        Input("common-pathway-graph", "mouseoverNodeData"),
         Input("common-pathway-graph", "tapNodeData"),
         Input("wiki-node-id", "data"),
         Input({'type': 'fault-btn', 'index': ALL}, 'n_clicks'),
+        Input("common-pathway-unselect-btn", "n_clicks"),
     )
-    def update_common_wiki(hover_data, click_data, wiki_nav_id, fault_clicks):
+    def update_common_wiki(click_data, wiki_nav_id, fault_clicks, unselect_clicks):
 
         _PLACEHOLDER = html.Div(
-            "Hover or click a node to see details",
+            "Click a node to see details",
             style={
                 "color": "#aaa", "fontSize": "13px",
                 "fontStyle": "italic", "textAlign": "center",
@@ -841,15 +960,17 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
         if isinstance(triggered, dict) and triggered.get("type") == "fault-btn":
             return _PLACEHOLDER
 
+        # Unselect button pressed — reset panel
+        if triggered == "common-pathway-unselect-btn":
+            return _PLACEHOLDER
+
         # Determine node_id to display:
-        # priority: connection chip nav > graph hover > graph click
+        # priority: connection chip nav > graph click
         node_id = None
         if triggered == "wiki-node-id" and wiki_nav_id:
             node_id = wiki_nav_id
-        else:
-            node_data = hover_data or click_data
-            if node_data:
-                node_id = node_data.get("id", "")
+        elif click_data:
+            node_id = click_data.get("id", "")
 
         if not node_id:
             return _PLACEHOLDER

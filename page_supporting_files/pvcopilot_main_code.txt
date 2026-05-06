@@ -1,0 +1,45 @@
+# Normalize data
+ df_filtered = normalize(df, mapped_variables_dict)
+
+# Define selected filters
+selected_filters = ['timezone', 'low-irra-power', 'outlier', 'clearsky']
+
+# Apply low irradiance power filter if selected
+if 'low-irra-power' in selected_filters:
+    normal_idx, outlier_idx = low_irra_power_filter(df_filtered, mapped_variables_dict)
+
+# Identify outliers if selected
+if 'outlier' in selected_filters:
+    normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, 'norm')
+
+# Merge all normal indices
+
+# Print details about data points
+print('Total number of points:', len(df))
+print('Number of normal points:', len(normal_idx))
+print('Number of outliers:', len(outlier_idx))
+
+# Define final filtered DataFrame
+
+df_filtered_final = df_filtered.loc[normal_idx]
+
+# Aggregate daily data
+ daily_data = aggregate_daily(df_filtered_final, 'poa_irradiance')
+
+# Define selected metric
+selected_metric = ['YOY']
+
+# Compute based on selected metric
+if 'YOY' in selected_metric:
+    rd, _ = compute_yoy(daily_data)
+elif 'LR' in selected_metric:
+    rd, _ = compute_lr(daily_data)
+elif 'ARIMA' in selected_metric:
+    rd, _ = compute_arima(daily_data)
+elif 'CSD' in selected_metric:
+    rd, _ = compute_csd(daily_data)
+elif 'HW' in selected_metric:
+    rd, _ = compute_hw(daily_data)
+
+# Print the result
+print(rd)
