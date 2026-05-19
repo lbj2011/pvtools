@@ -1,0 +1,228 @@
+/* =========================================================================
+   PV-COPILOT — light-gray editorial / agent-chat layout
+   Append this block to your existing assets/style.css
+
+   Fonts: Arial (sans body/UI) and Times New Roman (serif accents).
+   No web fonts loaded — both are system fonts on every OS.
+   ========================================================================= */
+
+/* All rules scoped under .pvcopilot-root so the rest of pvtools is unaffected */
+
+.pvcopilot-root {
+    font-family: Arial, sans-serif;
+    color: #0f172a;
+    background: #f8fafc;
+    font-size: 15px;   /* base body size — bumped from default */
+    line-height: 1.55;
+}
+
+.pvcopilot-root ::-webkit-scrollbar { width: 8px; height: 8px; }
+.pvcopilot-root ::-webkit-scrollbar-track  { background: transparent; }
+.pvcopilot-root ::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 4px; }
+.pvcopilot-root ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Slide-in animation (separate keyframe so it doesn't collide with pvtools' existing slideInUp) */
+@keyframes pvcopilot-slide-in-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.pvcopilot-root .agent-msg {
+    animation: pvcopilot-slide-in-up 0.5s ease-out both;
+}
+
+/* Buttons inside the copilot get a subtle hover lift */
+.pvcopilot-root button {
+    transition: all 0.15s ease;
+}
+.pvcopilot-root button:hover:not(:disabled) {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+.pvcopilot-root button:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+/* Stepper row hover — subtle hover so it's obvious they're clickable */
+.pvcopilot-root div[id*='step-row'] {
+    cursor: pointer;
+}
+.pvcopilot-root div[id*='step-row']:hover {
+    background: #f1f5f9 !important;
+}
+
+/* Chat — typing animation */
+@keyframes pvcopilot-blink {
+    0%, 50%   { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+.pvcopilot-root .chat-typing-caret {
+    display: inline-block;
+    margin-left: 1px;
+    color: #0064AB;
+    animation: pvcopilot-blink 0.9s steps(2, end) infinite;
+    font-weight: 400;
+}
+/* Once the bubble is done typing, kill the caret entirely:
+   stop the keyframe animation AND hide the element. */
+.pvcopilot-root .chat-bubble-done .chat-typing-caret {
+    animation: none !important;
+    display: none !important;
+}
+
+/* Chat — thinking dots (pre-first-character pulse) */
+@keyframes pvcopilot-dots-pulse {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 1; }
+}
+.pvcopilot-root .chat-thinking-dots {
+    animation: pvcopilot-dots-pulse 1.2s ease-in-out infinite;
+}
+
+/* Chat — bubble fade-in on mount */
+@keyframes pvcopilot-bubble-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.pvcopilot-root #chat-history > div {
+    animation: pvcopilot-bubble-in 0.25s ease-out both;
+}
+
+/* Chat — example chip hover */
+.pvcopilot-root button[id*='chat-example']:hover {
+    background: #f8fafc !important;
+    border-color: #0064AB !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 100, 171, 0.12);
+}
+
+/* Example dataset buttons in Step 1: on hover, text + border shift to navy */
+.pvcopilot-root button[id*='load-example-btn']:hover,
+.pvcopilot-root button[id*='load-example-btn']:hover * {
+    color: #0064AB !important;
+    border-color: #0064AB !important;
+}
+
+/* Chat — composer input bold (both typed text and placeholder) */
+.pvcopilot-root #chat-composer,
+.pvcopilot-root #chat-composer::placeholder {
+    font-weight: 700 !important;
+}
+/* Chat — composer is on a blue background; make text + placeholder + caret white */
+.pvcopilot-root #chat-composer {
+    color: #ffffff !important;
+    caret-color: #ffffff !important;
+}
+.pvcopilot-root #chat-composer::placeholder {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* <details>/<summary>: replace the default flush-against-text disclosure
+   triangle with a custom CSS triangle that has a real gap before the text. */
+.pvcopilot-root summary {
+    list-style: none;
+    cursor: pointer;
+    position: relative;
+    padding-left: 18px;
+}
+/* Remove the native marker in WebKit / Firefox / others */
+.pvcopilot-root summary::-webkit-details-marker { display: none; }
+.pvcopilot-root summary::marker { content: ""; }
+
+/* Custom triangle (closed = ▸, open = ▾) — positioned absolutely so the
+   text-left padding controls the actual gap. */
+.pvcopilot-root summary::before {
+    content: "▸";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94a3b8;
+    font-size: 0.9em;
+    transition: transform 0.15s ease;
+}
+.pvcopilot-root details[open] > summary::before {
+    content: "▾";
+}
+
+/* Radio labels — keep inherited color (avoid Bootstrap link-blue bleed) */
+.pvcopilot-root .metric-radio-label,
+.pvcopilot-root .metric-radio-label:hover,
+.pvcopilot-root .metric-radio-label * {
+    color: inherit !important;
+    text-decoration: none !important;
+}
+
+/* <details>/<summary> caret styling */
+.pvcopilot-root details > summary {
+    list-style: none;
+    font-size: 14px;
+}
+.pvcopilot-root details > summary::-webkit-details-marker {
+    display: none;
+}
+.pvcopilot-root details > summary::before {
+    content: "▸ ";
+    transition: transform 0.2s;
+    display: inline-block;
+    color: #64748b;
+}
+.pvcopilot-root details[open] > summary::before {
+    content: "▾ ";
+}
+
+/* Recolor dash-bootstrap checkboxes to ink */
+.pvcopilot-root .form-check-input:checked {
+    background-color: #0f172a !important;
+    border-color:     #0f172a !important;
+}
+
+/* Hide the legacy page-title only inside the copilot */
+.pvcopilot-root .page-title {
+    display: none;
+}
+
+/* Inputs and number fields — readable size */
+.pvcopilot-root input[type="text"],
+.pvcopilot-root input[type="number"] {
+    font-size: 14px !important;
+    font-family: Arial, sans-serif;
+}
+
+/* Plotly default override */
+.pvcopilot-root .js-plotly-plot {
+    font-size: 13px;
+}
+
+/* Responsive: on narrow screens, stack the two panels vertically.
+   At wider breakpoints (>= 900px) they sit side-by-side. */
+@media (max-width: 900px) {
+    .pvcopilot-root .pvcopilot-shell {
+        flex-direction: column !important;
+        gap: 16px !important;
+    }
+    /* Both sidebar-render wrapper and chat panel take the full width */
+    .pvcopilot-root .pvcopilot-shell > div {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    /* Drop fixed heights so each panel grows to its natural content height. */
+    .pvcopilot-root .pvcopilot-shell > div > div,
+    .pvcopilot-root .pvcopilot-shell > div:nth-child(2),
+    .pvcopilot-root #sidebar-render > div {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+    /* The sidebar uses a flex:1 spacer to push About + Sign in to the bottom
+       on wide screens. On mobile that creates a giant blank gap — collapse it. */
+    .pvcopilot-root #sidebar-render > div > div[style*="flex: 1"],
+    .pvcopilot-root #sidebar-render > div > div[style*="flex:1"] {
+        flex: 0 0 auto !important;
+        height: 0 !important;
+    }
+}
