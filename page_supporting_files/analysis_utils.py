@@ -133,25 +133,131 @@ def parse_contents(contents=None, filename=None, df=None):
     # ----------------------------------
     # 3. Prepare LLM identification
     # ----------------------------------
-    required_vars = ["DC Power", "AC Power", "Irradiance", "Module temperature"]
+    # NOTE: "DC Voltage" and "DC Current" are required by the PVPRO degradation
+    # method (it does single-diode-model fitting on V and I).  They are NOT
+    # required by YoY / LR / HW / ARIMA / CSD (those only need DC Power), so
+    # they may safely come back as "N/A" without blocking the workflow.
+    required_vars = [
+        "DC Power",
+        "DC Voltage",
+        "DC Current",
+        "Irradiance",
+        "Module temperature",
+    ]
 
     if not time_in_index:
         required_vars.insert(1, "Time")
 
     prompt = f"""
-    The following is a list of column names from a data file: {colnames}.
-    Your task is to identify which column name corresponds to each of the following physical quantities:
+    You are identifying physical quantities from PV (photovoltaic) system data
+    column names. Below are the columns from the data file:
+
+    {colnames}
+
+    Map each of these physical quantities to the column name that represents
+    it (or "N/A" if no column matches):
     {', '.join(required_vars)}.
 
-    Return the result as a JSON object:
+    =======================================================================
+    NAMING CONVENTIONS YOU MUST KNOW
+    =======================================================================
+
+    PV inverters expose two electrical sides:
+      • DC side = "input" side  (panel array -> inverter input). On the DC
+        side you find DC Voltage, DC Current, DC Power.
+      • AC side = "output" side (inverter output -> grid). On the AC side
+        you find AC Voltage, AC Current, AC Power.
+
+    So if you see a column like `inv1_input_current`, `inv2_in_voltage`, or
+    `dc_input_power`, those are the DC side. Columns like `inv1_output_*`,
+    `ac_out_*`, `grid_*` are the AC side.
+
+    Symbol-style names follow the same logic:
+      • DC quantities:  v_dc, vdc, V_dc, v_mp, vmp, vpv, v_array, v_string,
+                        v_panel, v_input, vin, idc, i_dc, i_mp, imp, ipv,
+                        i_array, i_string, i_input, iin, pdc, p_dc, p_in,
+                        p_mp, pmpp, p_pv, p_array.
+      • AC quantities:  v_ac, vac, v_out, vout, v_grid, v_phase, v_line,
+                        iac, i_ac, i_out, iout, i_grid, pac, p_ac, p_out,
+                        p_grid.
+
+    Real-world column-name patterns to recognise as DC Voltage:
+        v_dc, vdc, V_DC, Vdc, dcvolt, dc_volt, dc_voltage, v_mp, vmp,
+        v_mpp, vmpp, v_pv, vpv, v_array, v_string, v_panel,
+        inv1_input_voltage, inv_input_voltage, inv1_v_in, inv1_vin,
+        inverter1_dc_voltage, dc_in_voltage, mppt1_voltage,
+        v_pos_neg, U_dc, Udc, panel_voltage, string_voltage.
+
+    Real-world column-name patterns to recognise as DC Current:
+        i_dc, idc, I_DC, Idc, dccurr, dc_curr, dc_current, i_mp, imp,
+        i_mpp, impp, i_pv, ipv, i_array, i_string,
+        inv1_input_current, inv_input_current, inv1_i_in, inv1_iin,
+        inverter1_dc_current, dc_in_current, mppt1_current, I_pos_neg,
+        string_current.
+
+    Real-world column-name patterns to recognise as DC Power:
+        p_dc, pdc, dc_power, P_DC, Pdc, p_mp, pmp, pmpp, p_pv, ppv,
+        p_array, p_string, inv1_input_power, inv1_dc_power,
+        inverter1_dc_power, mppt_power, panel_power, string_power.
+
+    NOTE: We do NOT need AC Power, AC Voltage, or AC Current for this
+    workflow.  If a column is on the AC side (output / grid / inverter
+    output), do NOT map it to any of the required variables -- skip it.
+
+    Patterns for Irradiance (plane-of-array):
+        poa, poa_irradiance, ghi, dni, irr, irrad, irradiance, g_poa,
+        g_pyranometer, g_silicon, isc_ref_cell, ref_cell, pyranometer,
+        plane_of_array, in_plane_irradiance, solar_radiation.
+
+    Patterns for Module temperature:
+        module_temperature, mod_temp, t_mod, tmod, t_module, tmodule,
+        cell_temperature, t_cell, tcell, panel_temp, back_of_module,
+        BOM, module_temp_C, mod_T, T_pv, temperature_module.
+
+    =======================================================================
+    DECISION RULES (apply IN THIS ORDER)
+    =======================================================================
+
+    1) SYMBOL FIRST. If a column literally contains "dc" or "DC" anywhere,
+       it is on the DC side. If it contains "ac" or "AC", it is on the AC
+       side. (Treat these as substring matches but be careful with words
+       like "factor", "track" — only match when "dc"/"ac" is a separate
+       token or clearly an electrical-side label.)
+
+    2) INVERTER INPUT/OUTPUT. If a column contains "input", "in_", or "_in"
+       on an inverter / mppt / converter, it is DC. If it contains "output",
+       "out_", "_out", "grid", or "phase", it is AC.
+
+    3) CONSISTENCY. If you identified one DC quantity from an inverter
+       (e.g. DC Current = `inv1_input_current`), look HARD for the matching
+       DC Voltage from the SAME inverter (e.g. `inv1_input_voltage`,
+       `inv1_v_in`, `inv1_dc_voltage`). It is very rare to have DC Current
+       without DC Voltage in the same file — assume it is there and find it.
+       Same in reverse: if you found a DC Voltage, look for the matching
+       DC Current.
+
+    4) UNITS HINTS. If the column name carries units (e.g. `*_V`, `*_kV`,
+       `*_A`, `*_kA`, `*_W`, `*_kW`, `*_kWh`, `*_W_m2`, `*_degC`), use them
+       to disambiguate quantity type (V -> voltage, A -> current, W -> power,
+       W/m^2 -> irradiance, degC/C -> temperature).
+
+    5) DON'T GUESS. If after applying rules 1-4 you genuinely cannot tell,
+       return "N/A". Returning a wrong column is worse than returning N/A.
+
+    =======================================================================
+    OUTPUT FORMAT
+    =======================================================================
+
+    Return ONLY a JSON object — no prose, no markdown fences:
+
     {{
       "variable_mapping": [
         {{"Metric": "DC Power", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "AC Power", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "DC Voltage", "Variable Name": "column_name_or_N/A"}},
+        {{"Metric": "DC Current", "Variable Name": "column_name_or_N/A"}},
         {{"Metric": "Irradiance", "Variable Name": "column_name_or_N/A"}},
         {{"Metric": "Module temperature", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Time", "Variable Name": "column_name_or_N/A"}},
-        ...
+        {{"Metric": "Time", "Variable Name": "column_name_or_N/A"}}
       ]
     }}
     """
@@ -201,6 +307,98 @@ def parse_contents(contents=None, filename=None, df=None):
                 mapping_df.loc[len(mapping_df)] = {"Metric": rv, "Variable Name": "N/A"}
 
         # ----------------------------------
+        # Deterministic safety net: pair up DC Voltage / DC Current.
+        #
+        # If the LLM identified one of {DC Voltage, DC Current} but not the
+        # other, try to find the partner by simple name-pattern substitution
+        # on the identified column. This handles the very common case where
+        # both DC sensors are named consistently (e.g. inv1_input_current ↔
+        # inv1_input_voltage, vdc ↔ idc, v_mp ↔ i_mp, ...).
+        # ----------------------------------
+        def _pair_partner(known_col, want):
+            """Find a column whose name is `known_col` with current<->voltage
+            tokens swapped. `want` is 'voltage' or 'current'."""
+            if not known_col or known_col == "N/A":
+                return None
+            # Token-replacement pairs (case-sensitive matches first, then
+            # fall back to a case-insensitive scan).
+            if want == "voltage":
+                swaps = [("current", "voltage"), ("Current", "Voltage"),
+                         ("CURRENT", "VOLTAGE"), ("curr",    "volt"),
+                         ("Curr",    "Volt"),    ("CURR",    "VOLT"),
+                         ("amps",    "volts"),   ("Amps",    "Volts"),
+                         ("amp",     "volt"),    ("Amp",     "Volt"),
+                         # symbol swaps: idc<->vdc, imp<->vmp, ipv<->vpv,
+                         # i_dc<->v_dc, i_mp<->v_mp, etc.
+                         ("i_dc",    "v_dc"),    ("I_dc",    "V_dc"),
+                         ("I_DC",    "V_DC"),    ("idc",     "vdc"),
+                         ("Idc",     "Vdc"),     ("IDC",     "VDC"),
+                         ("i_mp",    "v_mp"),    ("I_mp",    "V_mp"),
+                         ("imp",     "vmp"),     ("Imp",     "Vmp"),
+                         ("IMP",     "VMP"),     ("ipv",     "vpv"),
+                         ("Ipv",     "Vpv"),     ("IPV",     "VPV"),
+                         ("i_in",    "v_in"),    ("I_in",    "V_in"),
+                         ("iin",     "vin"),     ("Iin",     "Vin")]
+            else:  # want == 'current'
+                swaps = [("voltage", "current"), ("Voltage", "Current"),
+                         ("VOLTAGE", "CURRENT"), ("volt",    "curr"),
+                         ("Volt",    "Curr"),    ("VOLT",    "CURR"),
+                         ("volts",   "amps"),    ("Volts",   "Amps"),
+                         ("volt",    "amp"),     ("Volt",    "Amp"),
+                         ("v_dc",    "i_dc"),    ("V_dc",    "I_dc"),
+                         ("V_DC",    "I_DC"),    ("vdc",     "idc"),
+                         ("Vdc",     "Idc"),     ("VDC",     "IDC"),
+                         ("v_mp",    "i_mp"),    ("V_mp",    "I_mp"),
+                         ("vmp",     "imp"),     ("Vmp",     "Imp"),
+                         ("VMP",     "IMP"),     ("vpv",     "ipv"),
+                         ("Vpv",     "Ipv"),     ("VPV",     "IPV"),
+                         ("v_in",    "i_in"),    ("V_in",    "I_in"),
+                         ("vin",     "iin"),     ("Vin",     "Iin")]
+            for src, tgt in swaps:
+                if src in known_col:
+                    candidate = known_col.replace(src, tgt)
+                    if candidate in colnames and candidate != known_col:
+                        return candidate
+            # Case-insensitive fallback: replace 'current'/'voltage' as words.
+            lc = known_col.lower()
+            if want == "voltage" and "current" in lc:
+                # Map back to the actual column with the same case structure.
+                for c in colnames:
+                    cl = c.lower()
+                    if cl == lc.replace("current", "voltage") and c != known_col:
+                        return c
+            if want == "current" and "voltage" in lc:
+                for c in colnames:
+                    cl = c.lower()
+                    if cl == lc.replace("voltage", "current") and c != known_col:
+                        return c
+            return None
+
+        def _set_metric(metric_name, value):
+            mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"] = value
+
+        def _get_metric(metric_name):
+            rows = mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"]
+            return rows.iloc[0] if len(rows) else "N/A"
+
+        dc_v_now = _get_metric("DC Voltage")
+        dc_i_now = _get_metric("DC Current")
+
+        if dc_v_now == "N/A" and dc_i_now != "N/A":
+            partner = _pair_partner(dc_i_now, want="voltage")
+            if partner:
+                _set_metric("DC Voltage", partner)
+                print(f"[parse_contents] DC Voltage recovered by pairing: "
+                      f"{dc_i_now!r} -> {partner!r}")
+
+        if dc_i_now == "N/A" and dc_v_now != "N/A":
+            partner = _pair_partner(dc_v_now, want="current")
+            if partner:
+                _set_metric("DC Current", partner)
+                print(f"[parse_contents] DC Current recovered by pairing: "
+                      f"{dc_v_now!r} -> {partner!r}")
+
+        # ----------------------------------
         # Build dict of recognized variables (skip N/A)
         # ----------------------------------
         mapped_variables_dict = {
@@ -209,11 +407,10 @@ def parse_contents(contents=None, filename=None, df=None):
             if row["Variable Name"] != "N/A"
         }
 
-        # ----------------------------------
-        # Build summary table for display
-        # ----------------------------------
+        # The "Identified Variables" eyebrow is rendered by the consumer
+        # (pvcopilot.py wraps this table in a card with its own heading), so
+        # we don't add a second H5 here.
         summary_table = html.Div([
-            html.H5("Identified Variables"),
             html.Table(
                 [
                     html.Thead(html.Tr([html.Th(c) for c in mapping_df.columns])),
@@ -258,39 +455,59 @@ def parse_contents(contents=None, filename=None, df=None):
 # ================================
 # FIGURES OF RAW DATA
 # ================================
+
+# Module-level color palette for every physical variable rendered in the app.
+# Both `make_overview_figures` (Step 1 raw-data preview) and `compute_pvpro`
+# (Step 3 PVPRO trends) consume this so the user sees the same color for
+# the same physical quantity no matter which step they're looking at.
+#
+# Convention:  blues for environmental/meteorological inputs (power,
+# irradiance, temperature); greens for the electrical DC measurements
+# (voltage, current).  Adjust here and the change ripples everywhere.
+VAR_COLORS = {
+    "power":       "#0064AB",   # navy
+    "irradiance":  "#5b9bd5",   # mid blue
+    "temperature": "#8ec4e8",   # light blue
+    "voltage":     "#2a8e7a",   # teal
+    "current":     "#9bcc4e",   # lime green
+}
+
+
 def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 
     figures = []
     errors = []
 
-    # -------------------------
-    # Color palette
-    # -------------------------
+    # Local alias so existing reference names in the function keep working.
     COLORS = {
-        "power": "#0d6efd",        # blue
-        "irradiance": "#f59f00",   # amber/orange
-        "temp_raw": "#dc3545",     # red
+        "power":      VAR_COLORS["power"],
+        "irradiance": VAR_COLORS["irradiance"],
+        "temp_raw":   VAR_COLORS["temperature"],
+        "voltage":    VAR_COLORS["voltage"],
+        "current":    VAR_COLORS["current"],
     }
 
     # -------------------------
-    # Shared layout config
+    # Shared layout config -- compact: lower height, no redundant x-title.
+    # The subplot title is rendered in BOLD (HTML <b>) to give it more
+    # presence at this compact height.  The y-axis carries the unit only
+    # (e.g. "(W)", "(°C)") to keep the left gutter narrow.
     # -------------------------
     def apply_layout(fig, title, y_label):
         fig.update_layout(
-            title=dict(text=title, x=0.01),
+            title=dict(text=f"<b>{title}</b>", x=0.01,
+                       font=dict(size=14, family="Arial", color="#0f172a")),
             template="plotly_white",
-            height=180,
-            margin=dict(l=40, r=20, t=40, b=40),
-            xaxis_title="Time",
+            height=130,
+            margin=dict(l=50, r=20, t=28, b=24),
+            xaxis_title=None,
             yaxis_title=y_label,
             hovermode="x unified",
-            legend=dict(
-                orientation="h",
-                y=-0.25,
-                x=0.5,
-                xanchor="center"
-            )
+            showlegend=False,
         )
+        fig.update_xaxes(showgrid=True, gridcolor="#e2e8f0")
+        fig.update_yaxes(showgrid=True, gridcolor="#e2e8f0",
+                         title_font=dict(size=11))
         return fig
 
     # -------------------------
@@ -312,7 +529,7 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
             y=df[power_key],
             mode="markers",
             name="Power Output",
-            opacity=0.3,
+            opacity=0.18,
             marker=dict(color=COLORS["power"], size=4)
         ))
 
@@ -341,11 +558,11 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
             y=df[irr_key],
             mode="markers",
             name="Irradiance",
-            opacity=0.3,
+            opacity=0.18,
             marker=dict(color=COLORS["irradiance"], size=4)
         ))
 
-        fig_irr = apply_layout(fig_irr, "Irradiance", "Irradiance (W/m²)")
+        fig_irr = apply_layout(fig_irr, "Irradiance", "Irrad. (W/m²)")
 
         # --- Apply irradiance limit ---
         ymax = df[irr_key].max()
@@ -386,13 +603,13 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
             y=df[temp_raw],
             mode="markers",
             name="Module Temp raw",
-            opacity=0.3,
+            opacity=0.18,
             marker=dict(color=COLORS["temp_raw"], size=4)
         ))
 
         fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
 
-        fig_temp = apply_layout(fig_temp, "Temperature", "Temperature (°C)")
+        fig_temp = apply_layout(fig_temp, "Temperature", "Temp (°C)")
 
         # --- Apply temperature limit ---
         ymax = df[temp_raw].max()
@@ -413,6 +630,50 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 
     except Exception as e:
         errors.append(f"[Temperature Plot] {str(e)}")
+
+    # -------------------------
+    # 4. DC Voltage (purple) -- optional (only if mapped, used by PVPRO)
+    # -------------------------
+    try:
+        v_key = mapped_variables_dict.get("DC Voltage")
+
+        if v_key and v_key in df.columns:
+            fig_v = go.Figure()
+            fig_v.add_trace(go.Scattergl(
+                x=df.index,
+                y=df[v_key],
+                mode="markers",
+                name="DC Voltage",
+                opacity=0.18,
+                marker=dict(color=COLORS["voltage"], size=4)
+            ))
+            fig_v = apply_layout(fig_v, "DC Voltage", "Voltage (V)")
+            figures.append(dcc.Graph(figure=fig_v))
+
+    except Exception as e:
+        errors.append(f"[DC Voltage Plot] {str(e)}")
+
+    # -------------------------
+    # 5. DC Current (emerald) -- optional (only if mapped, used by PVPRO)
+    # -------------------------
+    try:
+        i_key = mapped_variables_dict.get("DC Current")
+
+        if i_key and i_key in df.columns:
+            fig_i = go.Figure()
+            fig_i.add_trace(go.Scattergl(
+                x=df.index,
+                y=df[i_key],
+                mode="markers",
+                name="DC Current",
+                opacity=0.18,
+                marker=dict(color=COLORS["current"], size=4)
+            ))
+            fig_i = apply_layout(fig_i, "DC Current", "Current (A)")
+            figures.append(dcc.Graph(figure=fig_i))
+
+    except Exception as e:
+        errors.append(f"[DC Current Plot] {str(e)}")
 
     return figures, errors
 
@@ -527,7 +788,7 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
             x=series.index,
             y=series,
             mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            marker=dict(size=8, opacity=0.7, color="#A6CAEC"),
             name="Daily-aggragated Power"
         )
     )
@@ -588,7 +849,7 @@ def compute_lr(series):
             x=series.index,
             y=series.values,
             mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            marker=dict(size=8, opacity=0.7, color="#A6CAEC"),
             name="Daily-aggragated Power"
         )
     )
@@ -656,7 +917,7 @@ def compute_hw(series, period=12):
             x=series.index,
             y=series.values,
             mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            marker=dict(size=8, opacity=0.7, color="#A6CAEC"),
             name="Daily-aggragated Power"
         )
     )
@@ -724,7 +985,7 @@ def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=
             x=series.index,
             y=series.values,
             mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            marker=dict(size=8, opacity=0.7, color="#A6CAEC"),
             name="Daily-aggragated Power"
         )
     )
@@ -787,7 +1048,7 @@ def compute_csd(series, period=12):
             x=series.index,
             y=series.values,
             mode="markers",
-            marker=dict(size=5, opacity=0.7, color="#A6CAEC"),
+            marker=dict(size=8, opacity=0.7, color="#A6CAEC"),
             name="Daily-aggragated Power"
         )
     )
@@ -962,3 +1223,864 @@ def get_full_code(filename, mapped_variables_dict,selected_filters, selected_met
     #     f.write(clean_text)
 
     return full_code
+
+
+# =============================================================================
+# PVPRO-LITE
+#
+# A self-contained, lightweight implementation of the PVPRO degradation
+# analysis approach (Meyers et al., IEEE JPV 10(2), 2020).  The full pvpro
+# package depends on solar-data-tools, rdtools, pvanalytics, pvlib and MOSEK;
+# this version is implemented in pure NumPy / SciPy / scikit-learn so that the
+# web app has zero extra dependencies beyond what the other compute_* methods
+# already need.
+#
+# What we keep (the science):
+#   1. De Soto single-diode-model translation of reference parameters
+#      (IL_ref, I0_ref, Rs_ref, Rsh_ref, n) to operating conditions (G, T_cell).
+#   2. Bishop88-style maximum-power-point solve via SciPy's Brent root-finder.
+#   3. Iteration of short (e.g. 14-day) windows over the dataset, fitting the
+#      five reference SDM parameters in each window by minimising the L2
+#      residual between predicted and measured (V_mp, I_mp).
+#   4. Year-over-year degradation extraction (rdtools-style) on the resulting
+#      P_mp,ref time series.
+#
+# What we drop (the heavy infrastructure):
+#   - solar-data-tools data classification & clear-sky detection (we rely on
+#     Step 2's filters in the web app instead).
+#   - pvanalytics operating-mode classifier (we assume every kept point is at
+#     MPP after Step 2 filtering).
+#   - rdtools.degradation_year_on_year (re-implemented inline, ~15 lines).
+#   - pvlib calcparams_desoto / bishop88_mpp (re-implemented inline).
+#   - MOSEK (no convex optimisation needed; L-BFGS-B is enough for SDM fits).
+# =============================================================================
+from scipy.optimize import minimize as _scipy_minimize, brentq as _scipy_brentq
+
+# ----- Physical constants -----
+_Q_E   = 1.602176634e-19       # electron charge, C
+_K_B   = 1.380649e-23          # Boltzmann constant, J/K
+_T_REF = 25.0 + 273.15         # STC cell temperature, K
+_G_REF = 1000.0                # STC irradiance, W/m^2
+
+# ----- Technology lookup (same values as pvpro.modeling.estimate_Eg_dEgdT) ---
+_TECH_TABLE = {
+    "mono-c-Si":  (1.121,   -0.0002677),
+    "multi-c-Si": (1.121,   -0.0002677),
+    "GaAs":       (1.424,   -0.000433),
+    "CIGS":       (1.15,    -0.00001),
+    "CdTe":       (1.475,   -0.0003),
+}
+
+
+def _estimate_Eg_dEgdT(technology):
+    if technology not in _TECH_TABLE:
+        raise ValueError(
+            f"Unknown technology '{technology}'. "
+            f"Valid choices: {sorted(_TECH_TABLE)}."
+        )
+    return _TECH_TABLE[technology]
+
+
+def _calcparams_desoto_lite(effective_irradiance,
+                            temperature_cell_C,
+                            photocurrent_ref,
+                            saturation_current_ref,
+                            resistance_series_ref,
+                            resistance_shunt_ref,
+                            diode_factor,
+                            cells_in_series,
+                            alpha_isc,
+                            Eg_ref,
+                            dEgdT):
+    """
+    Translate reference (STC) single-diode-model parameters to the operating
+    irradiance and temperature, following the standard De Soto / pvlib
+    formulation.
+
+    Returns
+    -------
+    IL, I0, Rs, Rsh, nNsVth : ndarray
+        SDM coefficients at each operating point (vectorised over time).
+    """
+    G    = np.asarray(effective_irradiance, dtype=float)
+    Tc   = np.asarray(temperature_cell_C,   dtype=float) + 273.15  # to Kelvin
+
+    # Band gap shifts linearly with temperature: Eg = Eg_ref * (1 + dEg/dT * dT).
+    dT  = Tc - _T_REF
+    Eg  = Eg_ref * (1.0 + dEgdT * dT)
+
+    # Light-generated current: linear in G, plus a small temperature term.
+    IL  = (G / _G_REF) * (photocurrent_ref + alpha_isc * dT)
+
+    # Saturation current: cubic-T scaling plus an Eg/kT exponential.
+    Vth_ratio = (_Q_E / _K_B) * (Eg_ref / _T_REF - Eg / Tc)
+    I0 = saturation_current_ref * (Tc / _T_REF) ** 3 * np.exp(Vth_ratio)
+
+    # Series resistance is temperature/irradiance-independent in De Soto.
+    Rs = np.full_like(G, resistance_series_ref, dtype=float)
+
+    # Shunt resistance scales as G_ref / G (with a tiny extra conductance to
+    # keep it bounded at very low irradiance — same trick pvpro uses).
+    Gsh_extra = 1e-5
+    Rsh_inv = (G / _G_REF) / resistance_shunt_ref + Gsh_extra
+    Rsh = 1.0 / Rsh_inv
+
+    # nNsVth: ideality factor × cells in series × thermal voltage.
+    nNsVth = diode_factor * cells_in_series * (_K_B * Tc / _Q_E)
+
+    return IL, I0, Rs, Rsh, nNsVth
+
+
+def _bishop88_iv_at_vd(Vd, IL, I0, Rs, Rsh, nNsVth):
+    """Current and terminal voltage as a function of the diode voltage Vd."""
+    # I = IL - I0*(exp(Vd/nNsVth) - 1) - Vd/Rsh
+    # The clip on Vd/nNsVth prevents overflow when L-BFGS-B explores ugly x.
+    arg = np.clip(Vd / nNsVth, -100.0, 100.0)
+    I_diode = I0 * (np.exp(arg) - 1.0)
+    I_term  = IL - I_diode - Vd / Rsh
+    V_term  = Vd - I_term * Rs
+    return V_term, I_term
+
+
+def _bishop88_dpdvd(Vd, IL, I0, Rs, Rsh, nNsVth):
+    """dP/dVd of the terminal power, used as the root for MPP."""
+    # P = V*I where both depend on Vd.  dP/dVd = dV/dVd * I + V * dI/dVd.
+    arg = np.clip(Vd / nNsVth, -100.0, 100.0)
+    g   = I0 / nNsVth * np.exp(arg)            # dI_diode/dVd
+    # dI_term/dVd  = -g - 1/Rsh
+    dI = -g - 1.0 / Rsh
+    # dV_term/dVd = 1 - Rs*dI/dVd
+    dV = 1.0 - Rs * dI
+    V_term, I_term = _bishop88_iv_at_vd(Vd, IL, I0, Rs, Rsh, nNsVth)
+    return dV * I_term + V_term * dI
+
+
+def _mpp_one_point(IL, I0, Rs, Rsh, nNsVth):
+    """Brent root-find for a single operating point. Returns (Vmp, Imp).
+
+    This scalar path is kept as a fallback / debugging aid.  The fitting
+    loop uses the vectorised Newton solver below.
+    """
+    if IL <= 0:
+        return 0.0, 0.0
+    Voc_est = nNsVth * np.log(max(IL / I0, 1.0) + 1.0)
+    if not np.isfinite(Voc_est) or Voc_est <= 0:
+        return 0.0, 0.0
+    lo, hi = 1e-6, Voc_est * 1.001
+    try:
+        f_lo = _bishop88_dpdvd(lo, IL, I0, Rs, Rsh, nNsVth)
+        f_hi = _bishop88_dpdvd(hi, IL, I0, Rs, Rsh, nNsVth)
+        if f_lo * f_hi > 0:
+            for hi in (Voc_est * 1.5, Voc_est * 2.0, Voc_est * 5.0):
+                f_hi = _bishop88_dpdvd(hi, IL, I0, Rs, Rsh, nNsVth)
+                if f_lo * f_hi <= 0:
+                    break
+            else:
+                return 0.0, 0.0
+        Vd_star = _scipy_brentq(_bishop88_dpdvd, lo, hi,
+                                args=(IL, I0, Rs, Rsh, nNsVth),
+                                xtol=1e-6, maxiter=100)
+    except (ValueError, RuntimeError):
+        return 0.0, 0.0
+    V, I = _bishop88_iv_at_vd(Vd_star, IL, I0, Rs, Rsh, nNsVth)
+    return float(V), float(I)
+
+
+def _mpp_vectorised(IL, I0, Rs, Rsh, nNsVth, n_iter=20):
+    """Vectorised MPP solver via Newton's method on dP/dVd = 0.
+
+    All inputs are 1-D arrays of equal length.  For each point we iterate
+    Vd ← Vd − f(Vd)/f'(Vd) where f = dP/dVd, then evaluate V_term, I_term
+    at the converged Vd.  Newton is well-behaved on this problem when
+    started from V_oc/2, which is the standard textbook initial guess.
+
+    n_iter=20 is a safe upper bound; convergence typically happens in 5–8
+    iterations and the extras cost almost nothing on vectors.
+    """
+    IL  = np.asarray(IL,  dtype=float)
+    I0  = np.asarray(I0,  dtype=float)
+    Rs  = np.asarray(Rs,  dtype=float)
+    Rsh = np.asarray(Rsh, dtype=float)
+    nNsVth = np.asarray(nNsVth, dtype=float)
+
+    # Open-circuit voltage estimate -> initial guess Vd ~ Voc/2.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        Voc_est = nNsVth * np.log(np.maximum(IL / np.maximum(I0, 1e-30), 1.0) + 1.0)
+    valid = (IL > 0) & np.isfinite(Voc_est) & (Voc_est > 0)
+
+    Vd = np.where(valid, 0.7 * Voc_est, 0.0)
+
+    # Vectorised Newton iteration on f(Vd) = dP/dVd.
+    for _ in range(n_iter):
+        arg = np.clip(Vd / np.maximum(nNsVth, 1e-30), -100.0, 100.0)
+        exp_a = np.exp(arg)
+        # I_term and its Vd-derivative
+        I_diode = I0 * (exp_a - 1.0)
+        I_term  = IL - I_diode - Vd / Rsh
+        # d/dVd of I_diode = I0/nNsVth * exp(Vd/nNsVth)
+        g = I0 / np.maximum(nNsVth, 1e-30) * exp_a
+        dI = -g - 1.0 / Rsh
+        # V_term and its Vd-derivative
+        V_term = Vd - I_term * Rs
+        dV = 1.0 - Rs * dI
+        # f(Vd) = dP/dVd, where P = V*I.
+        f = dV * I_term + V_term * dI
+        # f'(Vd) = d2V/dVd2 * I + 2 dV dI + V d2I/dVd2.
+        # d2I/dVd2 = -g/nNsVth.   d2V/dVd2 = -Rs * d2I/dVd2 = Rs*g/nNsVth.
+        d2I = -g / np.maximum(nNsVth, 1e-30)
+        d2V =  Rs * g / np.maximum(nNsVth, 1e-30)
+        f_prime = d2V * I_term + 2.0 * dV * dI + V_term * d2I
+        # Newton step, guarded against f' ~ 0.
+        step = np.where(np.abs(f_prime) > 1e-30, f / f_prime, 0.0)
+        Vd_new = Vd - step
+        # Keep Vd in (0, 1.05 * Voc_est).
+        Vd = np.where(valid, np.clip(Vd_new, 1e-6, 1.05 * Voc_est), Vd)
+
+    # Final evaluation.
+    arg = np.clip(Vd / np.maximum(nNsVth, 1e-30), -100.0, 100.0)
+    I_diode = I0 * (np.exp(arg) - 1.0)
+    I_term  = IL - I_diode - Vd / Rsh
+    V_term  = Vd - I_term * Rs
+
+    # Invalid points -> (0, 0).
+    V_term = np.where(valid, V_term, 0.0)
+    I_term = np.where(valid, I_term, 0.0)
+    return V_term, I_term
+
+
+def _voc_vectorised(IL, I0, Rs, Rsh, nNsVth, n_iter=20):
+    """Open-circuit voltage. Solves 0 = IL - I0*(exp(Voc/nNsVth) - 1) - Voc/Rsh
+    by Newton iteration. R_s does not appear (current is zero).
+    """
+    IL  = np.asarray(IL,  dtype=float)
+    I0  = np.asarray(I0,  dtype=float)
+    Rsh = np.asarray(Rsh, dtype=float)
+    nNsVth = np.asarray(nNsVth, dtype=float)
+
+    # Initial guess: ignore shunt branch -> Voc ~ nNsVth * ln(IL/I0 + 1).
+    with np.errstate(divide="ignore", invalid="ignore"):
+        V = nNsVth * np.log(np.maximum(IL / np.maximum(I0, 1e-30), 0.0) + 1.0)
+    valid = (IL > 0) & np.isfinite(V) & (V > 0)
+    V = np.where(valid, V, 0.0)
+
+    for _ in range(n_iter):
+        arg = np.clip(V / np.maximum(nNsVth, 1e-30), -100.0, 100.0)
+        ea  = np.exp(arg)
+        f   = IL - I0 * (ea - 1.0) - V / Rsh
+        # df/dV = -I0/nNsVth * exp(V/nNsVth) - 1/Rsh
+        fp  = -I0 / np.maximum(nNsVth, 1e-30) * ea - 1.0 / Rsh
+        step = np.where(np.abs(fp) > 1e-30, f / fp, 0.0)
+        V = np.where(valid, np.maximum(V - step, 1e-6), V)
+
+    return np.where(valid, V, 0.0)
+
+
+def _isc_vectorised(IL, I0, Rs, Rsh, nNsVth, n_iter=20):
+    """Short-circuit current. Solves Isc = IL - I0*(exp(Isc*Rs/nNsVth) - 1)
+    - Isc*Rs/Rsh by Newton iteration. V at the terminals is zero, but a
+    small voltage drop Isc*Rs lives across the diode.
+    """
+    IL  = np.asarray(IL,  dtype=float)
+    I0  = np.asarray(I0,  dtype=float)
+    Rs  = np.asarray(Rs,  dtype=float)
+    Rsh = np.asarray(Rsh, dtype=float)
+    nNsVth = np.asarray(nNsVth, dtype=float)
+
+    valid = IL > 0
+    # First-order guess assuming Rs is small: Isc ~ IL.
+    I = np.where(valid, IL, 0.0)
+
+    for _ in range(n_iter):
+        arg = np.clip(I * Rs / np.maximum(nNsVth, 1e-30), -100.0, 100.0)
+        ea  = np.exp(arg)
+        f   = I - IL + I0 * (ea - 1.0) + I * Rs / Rsh
+        # df/dI = 1 + I0*Rs/nNsVth * exp(I*Rs/nNsVth) + Rs/Rsh
+        fp  = 1.0 + I0 * Rs / np.maximum(nNsVth, 1e-30) * ea + Rs / Rsh
+        step = np.where(np.abs(fp) > 1e-30, f / fp, 0.0)
+        I = np.where(valid, np.maximum(I - step, 0.0), I)
+
+    return np.where(valid, I, 0.0)
+
+
+# ---------- numerical parameter transforms (same as pvpro for stability) -----
+def _p_to_x(p, key):
+    """Physical parameter -> numerical fit variable."""
+    if key == "saturation_current_ref":
+        return np.log(p) + 23.0
+    if key == "resistance_shunt_ref":
+        return np.log(p) / 2.0 + 1.0
+    if key == "resistance_series_ref":
+        return p * 2.2
+    return p
+
+
+def _x_to_p(x, key):
+    """Numerical fit variable -> physical parameter."""
+    if key == "saturation_current_ref":
+        return float(np.exp(x - 23.0))
+    if key == "resistance_shunt_ref":
+        return float(np.exp(2.0 * (x - 1.0)))
+    if key == "resistance_series_ref":
+        return float(x / 2.2)
+    return float(x)
+
+
+# ---------- single-window fit ------------------------------------------------
+_FIT_PARAMS = (
+    "photocurrent_ref",
+    "saturation_current_ref",
+    "resistance_series_ref",
+    "resistance_shunt_ref",
+    "diode_factor",
+)
+
+
+def _predict_vi(params, G, T, cells_in_series, alpha_isc, Eg_ref, dEgdT):
+    """Run the SDM forward for an entire window given reference parameters."""
+    IL, I0, Rs, Rsh, nNsVth = _calcparams_desoto_lite(
+        G, T,
+        photocurrent_ref       = params["photocurrent_ref"],
+        saturation_current_ref = params["saturation_current_ref"],
+        resistance_series_ref  = params["resistance_series_ref"],
+        resistance_shunt_ref   = params["resistance_shunt_ref"],
+        diode_factor           = params["diode_factor"],
+        cells_in_series        = cells_in_series,
+        alpha_isc              = alpha_isc,
+        Eg_ref                 = Eg_ref,
+        dEgdT                  = dEgdT,
+    )
+    V_pred, I_pred = _mpp_vectorised(IL, I0, Rs, Rsh, nNsVth)
+    return V_pred, I_pred
+
+
+def _loss(x, fit_params, G, T, V_meas, I_meas,
+          V_scale, I_scale,
+          cells_in_series, alpha_isc, Eg_ref, dEgdT):
+    """L2 loss in scaled (V, I) coords, same form as the original PVPRO loss."""
+    params = {k: _x_to_p(x[i], k) for i, k in enumerate(fit_params)}
+    V_pred, I_pred = _predict_vi(params, G, T,
+                                 cells_in_series, alpha_isc, Eg_ref, dEgdT)
+    v_err = (V_pred - V_meas) / V_scale
+    i_err = (I_pred - I_meas) / I_scale
+    return float(np.nanmean(v_err ** 2 + i_err ** 2))
+
+
+def _fit_window(G, T, V_meas, I_meas,
+                p0, lower_bounds, upper_bounds,
+                cells_in_series, alpha_isc, Eg_ref, dEgdT,
+                saturation_current_multistart=(0.2, 0.5, 1.0, 2.0, 5.0)):
+    """Fit the five reference SDM parameters in one window via L-BFGS-B with
+    multistart over the saturation-current start value (mirrors pvpro)."""
+    fit_params = list(_FIT_PARAMS)
+
+    x_lo = np.array([_p_to_x(lower_bounds[k], k) for k in fit_params])
+    x_hi = np.array([_p_to_x(upper_bounds[k], k) for k in fit_params])
+    bounds = list(zip(x_lo, x_hi))
+
+    Io_ref_seed = p0["saturation_current_ref"]
+    V_scale = max(float(np.nanmedian(V_meas)), 1e-3)
+    I_scale = max(float(np.nanmedian(I_meas)), 1e-3)
+
+    best = None
+    best_loss = np.inf
+    for mult in saturation_current_multistart:
+        p0_try = dict(p0)
+        p0_try["saturation_current_ref"] = Io_ref_seed * mult
+        x0 = np.array([_p_to_x(p0_try[k], k) for k in fit_params])
+        # Clip x0 into bounds.
+        x0 = np.minimum(np.maximum(x0, x_lo), x_hi)
+        try:
+            res = _scipy_minimize(
+                _loss, x0=x0, bounds=bounds, method="L-BFGS-B",
+                args=(fit_params, G, T, V_meas, I_meas, V_scale, I_scale,
+                      cells_in_series, alpha_isc, Eg_ref, dEgdT),
+                options={"maxiter": 80, "ftol": 1e-7, "disp": False},
+            )
+        except Exception:
+            continue
+        if np.isfinite(res.fun) and res.fun < best_loss:
+            best = res
+            best_loss = res.fun
+        # Yield the GIL momentarily between multistart attempts so a
+        # concurrent Dash polling callback can read progress without
+        # waiting for the entire window's fits to finish.
+        time.sleep(0)
+
+    if best is None:
+        return None
+    fit = {k: _x_to_p(best.x[i], k) for i, k in enumerate(fit_params)}
+    fit["loss"] = float(best.fun)
+    return fit
+
+
+# ---------- simple starting-point estimator ----------------------------------
+def _estimate_p0_simple(G, T, V, I,
+                        cells_in_series, alpha_isc, Eg_ref, dEgdT):
+    """Quick-and-dirty initial-guess routine that does NOT need pvanalytics.
+
+    Uses the highest-irradiance subset (~top 10 %) as approximate STC points,
+    then derives the standard textbook seeds:
+        photocurrent_ref      ~ I_mp(STC) (Isc ~ Imp at high G)
+        saturation_current_ref ~ I_mp * exp(-V_mp / nNsVth) / Ns
+        resistance_series_ref  = 0.4
+        resistance_shunt_ref   = 600
+        diode_factor           = 1.0
+    """
+    if len(G) < 10:
+        return None
+    g_hi = np.nanquantile(G, 0.9)
+    mask = G >= g_hi
+    if mask.sum() < 5:
+        mask = np.ones_like(G, dtype=bool)
+    Vmp_med = float(np.nanmedian(V[mask]))
+    Imp_med = float(np.nanmedian(I[mask]))
+    Gmed    = float(np.nanmedian(G[mask]))
+    if Vmp_med <= 0 or Imp_med <= 0 or Gmed <= 0:
+        return None
+
+    # Scale photocurrent up to STC: I_L,ref ~ Imp * (G_ref / G_obs)
+    IL_ref_guess = Imp_med * (_G_REF / Gmed)
+
+    # Rough saturation current from V_mp,ref ~ nNsVth * ln(IL/I0)
+    n_guess = 1.03
+    nNsVth_ref = n_guess * cells_in_series * (_K_B * _T_REF / _Q_E)
+    # Scale Vmp to STC roughly (drop temperature dependence): Vmp,ref ~ Vmp + small offset
+    Vmp_ref_guess = Vmp_med
+    I0_ref_guess = max(IL_ref_guess * np.exp(-Vmp_ref_guess / nNsVth_ref), 1e-13)
+
+    return dict(
+        photocurrent_ref       = float(np.clip(IL_ref_guess, 0.1, 20.0)),
+        saturation_current_ref = float(np.clip(I0_ref_guess, 1e-13, 1e-5)),
+        resistance_series_ref  = 0.4,
+        resistance_shunt_ref   = 600.0,
+        diode_factor           = n_guess,
+    )
+
+
+# ---------- rdtools-style year-on-year degradation ---------------------------
+def _yoy_degradation(series, eps=1e-9):
+    """Year-on-year degradation rate, in %/yr, computed rdtools-style.
+
+    For every timestamp t, compute the relative change to the value at t+365d
+    (when available).  The reported rate is the median of all such pairs.
+    """
+    s = series.dropna()
+    if len(s) < 4:
+        return np.nan
+    idx = pd.to_datetime(s.index)
+    vals = s.values
+    ratios = []
+    one_year = pd.Timedelta(days=365)
+    half_window = pd.Timedelta(days=15)  # tolerate ±15 days for nearest match
+    for k in range(len(idx)):
+        target = idx[k] + one_year
+        # nearest neighbour search
+        diffs = np.abs((idx - target).total_seconds())
+        j = int(np.argmin(diffs))
+        if abs(idx[j] - target) <= half_window and vals[k] > eps:
+            ratios.append(vals[j] / vals[k] - 1.0)
+    if not ratios:
+        return np.nan
+    return float(np.median(ratios) * 100.0)  # %/yr
+
+
+# =============================================================================
+# PVPRO  (single-diode-model based degradation) -- PUBLIC ENTRY POINT
+# =============================================================================
+def compute_pvpro(df,
+                  mapped_variables_dict,
+                  cells_in_series=60,
+                  modules_per_string=1,
+                  parallel_strings=1,
+                  alpha_isc=0.0046,
+                  technology="mono-c-Si",
+                  days_per_run=14,
+                  iterations_per_year=12,
+                  resistance_shunt_ref=600.0,
+                  delta_T=3.0,
+                  irradiance_threshold=200.0,
+                  min_points_per_window=20,
+                  progress_callback=None):
+    """
+    Lightweight PVPRO degradation analysis.
+
+    Walks the dataset in `days_per_run`-day windows (spaced so there are
+    `iterations_per_year` windows per year), fits the five reference
+    single-diode-model parameters in each window by minimising the L2
+    residual between measured and predicted (V_mp, I_mp), reconstructs
+    P_mp,ref, V_mp,ref, I_mp,ref, V_oc,ref, I_sc,ref at STC in each
+    window, and reports the long-term degradation rate of each via a
+    linear-trend fit.
+
+    Required mapped variables:
+        'DC Voltage', 'DC Current', 'Irradiance', 'Module temperature'.
+
+    Parameters
+    ----------
+    ...  (see web-app help panel) ...
+    progress_callback : callable or None
+        If supplied, called once per window as
+            progress_callback(stage, current, total, message)
+        where:
+            stage   in {"prepare", "p0", "fitting", "trend", "done"}
+            current is the zero-based index of the window just finished
+            total   is the total number of windows that will be fit
+            message is a short human-readable string
+        Exceptions raised by the callback are swallowed.
+
+    Returns
+    -------
+    rd : float
+        Annual degradation rate of P_mp,ref in %/yr (negative = power loss).
+    figs : dict[str, plotly.graph_objects.Figure]
+        One small Figure per quantity, keyed by column name.  The caller
+        arranges them in a grid (in pvcopilot.py each goes inside its own
+        rounded-corner card).  Keys: ``"p_mp_ref"``, ``"v_mp_ref"``,
+        ``"i_mp_ref"``, ``"v_oc_ref"``, ``"i_sc_ref"``.
+    rates : dict
+        Per-quantity degradation rates in %/yr:
+        ``{"p_mp_ref": ..., "v_mp_ref": ..., "i_mp_ref": ...,
+           "v_oc_ref": ..., "i_sc_ref": ...}``.
+    """
+    def _report(stage, current=0, total=1, message=""):
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(stage, current, total, message)
+        except Exception:
+            pass
+
+    _report("prepare", 0, 1, "Validating inputs and pulling V/I/G/T columns")
+    # -------------------------------------------------------------
+    # 1. Validate inputs and pull the four required columns.
+    # -------------------------------------------------------------
+    required = ["DC Voltage", "DC Current", "Irradiance", "Module temperature"]
+    missing = [r for r in required
+               if (mapped_variables_dict.get(r) is None
+                   or mapped_variables_dict[r] not in df.columns)]
+    if missing:
+        raise ValueError(
+            "PVPRO requires the following columns to be identified in Step 1: "
+            + ", ".join(missing)
+            + ". They were not found in the dataset."
+        )
+
+    v_key   = mapped_variables_dict["DC Voltage"]
+    i_key   = mapped_variables_dict["DC Current"]
+    irr_key = mapped_variables_dict["Irradiance"]
+    tm_key  = mapped_variables_dict["Module temperature"]
+
+    df_p = df[[v_key, i_key, irr_key, tm_key]].copy()
+    df_p.index = pd.to_datetime(df_p.index)
+    df_p = df_p.dropna()
+    df_p = df_p[df_p[irr_key] > irradiance_threshold]
+    # Drop obviously non-operating points (V*I <= 0).
+    df_p = df_p[(df_p[v_key] > 0) & (df_p[i_key] > 0)]
+
+    if len(df_p) < 100:
+        raise ValueError(
+            f"After dropping NaNs and points with irradiance ≤ {irradiance_threshold} "
+            f"W/m², only {len(df_p)} rows remain — too few for PVPRO. "
+            "Loosen the Step 2 filters or supply a longer dataset."
+        )
+
+    # Per-module / per-string normalisation (same convention as full pvpro).
+    V_arr = df_p[v_key].to_numpy(dtype=float) / max(modules_per_string, 1)
+    I_arr = df_p[i_key].to_numpy(dtype=float) / max(parallel_strings, 1)
+    G_arr = df_p[irr_key].to_numpy(dtype=float)
+    Tc_arr = df_p[tm_key].to_numpy(dtype=float) + delta_T  # cell temperature, °C
+    t_arr  = df_p.index.to_numpy()  # ns-precision datetime64
+
+    # -------------------------------------------------------------
+    # 2. Look up technology constants and define bounds for the fit.
+    # -------------------------------------------------------------
+    Eg_ref, dEgdT = _estimate_Eg_dEgdT(technology)
+
+    lower_bounds = dict(
+        photocurrent_ref       = 0.01,
+        saturation_current_ref = 1e-13,
+        resistance_series_ref  = 0.0,
+        resistance_shunt_ref   = 10.0,
+        diode_factor           = 0.5,
+    )
+    upper_bounds = dict(
+        photocurrent_ref       = 20.0,
+        saturation_current_ref = 1e-5,
+        resistance_series_ref  = 1.0,
+        resistance_shunt_ref   = 5000.0,
+        diode_factor           = 2.0,
+    )
+
+    # -------------------------------------------------------------
+    # 3. Use the whole-dataset top-decile points to get a stable p0.
+    # -------------------------------------------------------------
+    _report("p0", 0, 1, "Estimating starting parameters from top-decile irradiance")
+    p0_global = _estimate_p0_simple(
+        G_arr, Tc_arr, V_arr, I_arr,
+        cells_in_series, alpha_isc, Eg_ref, dEgdT,
+    )
+    if p0_global is None:
+        raise ValueError(
+            "Could not derive a starting point for the SDM fit. "
+            "Dataset may have too few high-irradiance points."
+        )
+    # Override Rsh seed with the user-supplied value (matches PVPRO behaviour).
+    p0_global["resistance_shunt_ref"] = float(resistance_shunt_ref)
+
+    # -------------------------------------------------------------
+    # 4. Walk the dataset in windows and fit each one.
+    # -------------------------------------------------------------
+    t_start_all = df_p.index.min()
+    t_end_all   = df_p.index.max()
+    span_days   = (t_end_all - t_start_all).days + 1
+    step_days   = max(int(round(365.25 / max(iterations_per_year, 1))), 1)
+
+    # Pre-compute the list of window start-times so we know the total
+    # count up front (needed by progress_callback for a tqdm-style bar).
+    window_starts = []
+    cur = t_start_all
+    while cur + pd.Timedelta(days=days_per_run) <= t_end_all + pd.Timedelta(days=1):
+        window_starts.append(cur)
+        cur = cur + pd.Timedelta(days=step_days)
+    n_total_windows = len(window_starts)
+
+    rows = []
+    for w_idx, cur in enumerate(window_starts):
+        # Report progress at the START of this window so the UI advances
+        # as soon as work begins, not only after it finishes.  Each report
+        # call is also a momentary GIL yield (it acquires a short lock),
+        # which lets the polling callback get a fresh read.
+        _report(
+            "fitting", w_idx, n_total_windows,
+            f"Fitting window {w_idx + 1} / {n_total_windows} "
+            f"({cur.strftime('%Y-%m-%d')})",
+        )
+
+        win_end = cur + pd.Timedelta(days=days_per_run)
+        # Boolean window mask.
+        idx_w = (df_p.index >= cur) & (df_p.index < win_end)
+        n_w = int(idx_w.sum())
+        if n_w >= min_points_per_window:
+            G_w  = G_arr[idx_w]
+            Tc_w = Tc_arr[idx_w]
+            V_w  = V_arr[idx_w]
+            I_w  = I_arr[idx_w]
+            fit = _fit_window(
+                G_w, Tc_w, V_w, I_w,
+                p0=p0_global,
+                lower_bounds=lower_bounds,
+                upper_bounds=upper_bounds,
+                cells_in_series=cells_in_series,
+                alpha_isc=alpha_isc,
+                Eg_ref=Eg_ref,
+                dEgdT=dEgdT,
+            )
+            if fit is not None:
+                # Reconstruct V_mp, I_mp, V_oc, I_sc at STC for this window.
+                IL, I0, Rs, Rsh, nNsVth = _calcparams_desoto_lite(
+                    np.array([_G_REF]), np.array([25.0]),
+                    photocurrent_ref       = fit["photocurrent_ref"],
+                    saturation_current_ref = fit["saturation_current_ref"],
+                    resistance_series_ref  = fit["resistance_series_ref"],
+                    resistance_shunt_ref   = fit["resistance_shunt_ref"],
+                    diode_factor           = fit["diode_factor"],
+                    cells_in_series        = cells_in_series,
+                    alpha_isc              = alpha_isc,
+                    Eg_ref                 = Eg_ref,
+                    dEgdT                  = dEgdT,
+                )
+                Vmp_ref, Imp_ref = _mpp_vectorised(IL, I0, Rs, Rsh, nNsVth)
+                Voc_ref = _voc_vectorised(IL, I0, Rs, Rsh, nNsVth)
+                Isc_ref = _isc_vectorised(IL, I0, Rs, Rsh, nNsVth)
+                p_mp_ref = float(Vmp_ref[0] * Imp_ref[0])
+                rows.append({
+                    "t_mid":   cur + pd.Timedelta(days=days_per_run / 2),
+                    "p_mp_ref": p_mp_ref,
+                    "v_mp_ref": float(Vmp_ref[0]),
+                    "i_mp_ref": float(Imp_ref[0]),
+                    "v_oc_ref": float(Voc_ref[0]),
+                    "i_sc_ref": float(Isc_ref[0]),
+                    "loss":     fit["loss"],
+                    "n_points": n_w,
+                    **{k: fit[k] for k in _FIT_PARAMS},
+                })
+
+        # Yield the GIL so the polling HTTP callback in the main Dash thread
+        # can be served between windows. Without this, scipy's L-BFGS-B holds
+        # the GIL almost continuously and the progress bar appears frozen
+        # until the whole fit completes.
+        time.sleep(0.01)
+
+    if len(rows) < 4:
+        raise ValueError(
+            f"PVPRO produced only {len(rows)} successful window fits. "
+            "Need at least 4. Try a longer dataset or fewer/looser filters."
+        )
+
+    pfit = pd.DataFrame(rows).set_index("t_mid").sort_index()
+
+    # -------------------------------------------------------------
+    # 5. Degradation rate for every reconstructed quantity.
+    #
+    # The per-window series are short (one point per ~14 days), have already
+    # averaged out diurnal & seasonal variability, and are essentially
+    # monotonic with small noise.  In that regime a linear fit on the trend
+    # (after IQR outlier rejection) is a more reliable estimator than
+    # rdtools-style YoY pairing, which assumes noisy daily data.  We compute
+    # the linear-slope rate for each electrical quantity and report them
+    # all in the result figure.
+    # -------------------------------------------------------------
+    _report("trend", 0, 1, "Computing degradation rates")
+    from sklearn.linear_model import LinearRegression as _LR
+
+    def _linear_rate(series):
+        """Returns (rd_pct_per_yr, clean_series_kept_after_iqr).
+        Linear regression slope normalised by the median, in %/yr."""
+        s = series.dropna()
+        if len(s) < 4:
+            return np.nan, s
+        q1, q3 = np.nanpercentile(s.values, [25, 75])
+        iqr = q3 - q1
+        keep = (s.values >= q1 - 1.5 * iqr) & (s.values <= q3 + 1.5 * iqr)
+        s_clean = s.loc[keep]
+        if len(s_clean) < 4:
+            s_clean = s
+        t_years = _time_to_years(s_clean.index).values.reshape(-1, 1)
+        lr = _LR().fit(t_years, s_clean.values)
+        med = float(np.nanmedian(s_clean.values))
+        if med == 0 or not np.isfinite(med):
+            return np.nan, s_clean
+        return float(lr.coef_[0] / med * 100.0), s_clean
+
+    quantities = [
+        # (column key, HTML title label, units, plain short name for axis).
+        ("p_mp_ref", "<b>Pmp</b> (ref)", "W", "Pmp"),
+        ("v_mp_ref", "<b>Vmp</b> (ref)", "V", "Vmp"),
+        ("i_mp_ref", "<b>Imp</b> (ref)", "A", "Imp"),
+        ("v_oc_ref", "<b>Voc</b> (ref)", "V", "Voc"),
+        ("i_sc_ref", "<b>Isc</b> (ref)", "A", "Isc"),
+    ]
+
+    rates = {}
+    cleaned = {}
+    for col, _, _, _ in quantities:
+        r, c = _linear_rate(pfit[col])
+        rates[col] = r
+        cleaned[col] = c
+
+    # Headline rate (the one returned to the caller) is P_mp,ref's.
+    rd = rates["p_mp_ref"]
+    if not np.isfinite(rd):
+        rd_yoy = _yoy_degradation(pfit["p_mp_ref"].dropna())
+        rd = rd_yoy if np.isfinite(rd_yoy) else np.nan
+
+    # -------------------------------------------------------------
+    # 6. Build the result figures.
+    #
+    # NOTE on layout: we produce one small Plotly Figure PER QUANTITY,
+    # returned as a dict keyed by the quantity column name.  The Dash
+    # callback in pvcopilot.py arranges them in a CSS grid where each
+    # figure sits inside its own rounded-corner card div.
+    #
+    # Going through HTML rather than Plotly subplot shapes gives us
+    # pixel-perfect rounded corners, clean axis-label margins, and no
+    # coordinate-system bleed-through into adjacent subplots.
+    # -------------------------------------------------------------
+    qmap = {col: (label, units, short)
+            for col, label, units, short in quantities}
+
+    # Map each PVPRO quantity to a key in the shared VAR_COLORS palette
+    # (defined at module scope).  Pmp -> 'power', Vmp/Voc -> 'voltage',
+    # Imp/Isc -> 'current'.  This is the SAME color the user saw for the
+    # same physical variable on the Step 1 raw-data preview.
+    PVPRO_COLOR_KEY = {
+        "p_mp_ref": "power",
+        "v_mp_ref": "voltage",
+        "i_mp_ref": "current",
+        "v_oc_ref": "voltage",
+        "i_sc_ref": "current",
+    }
+
+    def _hex_to_rgba(hex_str, alpha=0.4):
+        """'#0064AB' + 0.4 -> 'rgba(0,100,171,0.4)' for translucent scatter."""
+        h = hex_str.lstrip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    def _one_panel(col, height):
+        label, units, short = qmap[col]
+        series = pfit[col].dropna()
+        s_clean = cleaned[col]
+        rate = rates[col]
+        rate_str = f"({rate:+.2f} %/yr)" if np.isfinite(rate) else "(n/a)"
+
+        # Per-quantity color from the shared palette.
+        trend_color   = VAR_COLORS[PVPRO_COLOR_KEY[col]]
+        # Scatter is a translucent shade of the trend color.  Alpha 0.3
+        # keeps individual points faint so the trend line stands out.
+        scatter_color = _hex_to_rgba(trend_color, alpha=0.3)
+
+        fig = go.Figure()
+        if len(series) > 0:
+            # Scatter (translucent shade of the trend color).
+            fig.add_trace(go.Scatter(
+                x=series.index, y=series.values,
+                mode="markers",
+                marker=dict(size=8, color=scatter_color,
+                            line=dict(width=0)),
+                showlegend=False,
+                hovertemplate=("%{x|%Y-%m-%d}<br>"
+                               "%{y:.3g} " + units + "<extra></extra>"),
+            ))
+            # Trend line (full saturation of the same color).
+            if len(s_clean) >= 2 and np.isfinite(rate):
+                t_years_arr = _time_to_years(s_clean.index).values
+                med = float(np.nanmedian(s_clean.values))
+                slope_abs = rate / 100.0 * med
+                trend = med + slope_abs * (t_years_arr - np.nanmean(t_years_arr))
+                fig.add_trace(go.Scatter(
+                    x=s_clean.index, y=trend,
+                    mode="lines",
+                    line=dict(color=trend_color, width=2.5),
+                    showlegend=False,
+                ))
+
+        fig.update_layout(
+            # Panel title carries the quantity name (bold) + rate inline.
+            # The label string itself already includes <b>Pmp</b> etc.,
+            # so we do NOT wrap it again.
+            title=dict(
+                text=f"{label} &nbsp;"
+                     f"<span style='color:#475569;font-weight:400'>"
+                     f"{rate_str}</span>",
+                x=0.5, xanchor="center", y=0.97, yanchor="top",
+                font=dict(size=14, family="Arial", color="#0f172a"),
+            ),
+            template="plotly_white",
+            height=height,
+            margin=dict(l=55, r=14, t=36, b=30),
+            showlegend=False,
+            paper_bgcolor="rgba(0,0,0,0)",   # transparent: card BG shows through
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        # Y-axis label: short quantity name + unit (e.g. "Pmp (W)").
+        # Plotly axis titles render as plain text -- can't use <b> here, so
+        # we use the plain short name passed in via the quantities tuple.
+        fig.update_yaxes(title_text=f"{short} ({units})",
+                         title_font=dict(size=11),
+                         showgrid=True, gridcolor="#e2e8f0", zeroline=False)
+        fig.update_xaxes(showgrid=True, gridcolor="#e2e8f0", zeroline=False)
+        return fig
+
+    # Pmp gets a taller panel (full-width row); the four secondary panels
+    # are shorter and arranged in two rows of two.
+    figs = {
+        "p_mp_ref": _one_panel("p_mp_ref", height=210),
+        "v_mp_ref": _one_panel("v_mp_ref", height=180),
+        "i_mp_ref": _one_panel("i_mp_ref", height=180),
+        "v_oc_ref": _one_panel("v_oc_ref", height=180),
+        "i_sc_ref": _one_panel("i_sc_ref", height=180),
+    }
+
+    _report("done", n_total_windows, n_total_windows, "Done")
+    return rd, figs, rates

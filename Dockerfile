@@ -58,11 +58,30 @@ COPY . .
 # Expose port (optional for documentation)
 EXPOSE 8000
 
-# Use gthread worker for Dash concurrency
-# 1 worker recommended for Heroku 1X dyno (512MB RAM)
+# Gunicorn config for a Heroku 1X dyno (512 MB RAM total).
+#
+# IMPORTANT -- PVPRO compute is RAM-heavy.  Each Python worker process
+# carries its own copy of numpy / pandas / scipy / statsmodels / sklearn,
+# which is ~150-200 MB before any data is loaded.  Running 3 workers on a
+# 512 MB dyno exceeds the limit during a PVPRO run, the OOM killer
+# SIGKILLs the worker mid-computation, and the polling UI sees the job
+# stuck at "phase=fitting" forever because the worker thread never gets a
+# chance to write its "done" update.
+#
+# 1 worker + 4 gthread threads is the recommended Dash topology on a
+# small dyno:
+#   - One Python process keeps memory usage well under 512 MB.
+#   - 4 threads handle concurrent HTTP requests (Dash callbacks return
+#     quickly except for PVPRO, which runs in its own background thread).
+#   - With diskcache (PVPRO_DISKCACHE_DIR set), the background-job state
+#     persists across requests even with the single-worker setup.
+#
+# --timeout 300 covers PVPRO's worst-case ~3 minute runtime; the default
+# of 30s would kill long-running gunicorn workers, the default 120 might
+# be tight for the larger datasets.
 CMD gunicorn index:server \
     -k gthread \
-    --workers 3 \
+    --workers 1 \
     --threads 4 \
-    --timeout 120 \
+    --timeout 300 \
     --bind 0.0.0.0:${PORT:-8000}

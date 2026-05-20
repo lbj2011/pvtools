@@ -14,11 +14,246 @@ from dash import callback_context as ctx
 from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
-from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd
+from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
 import time
+import threading
+import uuid
+import copy
+import collections
+
+# =============================================================================
+# PVPRO BACKGROUND-JOB INFRASTRUCTURE
+#
+# PVPRO can take 1–3 minutes; running it inside a Dash callback would block the
+# entire request and the user would see nothing until it finished.  Instead we
+# launch the fit in a background thread and let a dcc.Interval poll a
+# job-state store for progress updates.
+#
+# DEPLOYMENT NOTES
+# ----------------
+# The job-state store needs to be VISIBLE to the polling callback regardless
+# of which Gunicorn worker handles each poll request.  We support two backends:
+#
+#   1. **In-memory dict** (default) -- works for single-worker setups
+#      (`flask run`, `gunicorn --workers 1`, the Dash dev server).
+#
+#   2. **diskcache** -- a tiny disk-backed key/value store that all workers
+#      on the same host share.  Used automatically if the `diskcache`
+#      package is importable AND the env var `PVPRO_DISKCACHE_DIR` is set
+#      to a writable directory (e.g. `/tmp/pvpro-jobs`).
+#
+#      Recommended for any multi-worker Gunicorn deployment.  In your
+#      requirements.txt add:    diskcache>=5.6
+#      In your start command:   gunicorn -w 4 ... env PVPRO_DISKCACHE_DIR=/tmp/pvpro-jobs
+#
+# Without either fix, the symptom is exactly what you saw on the deployed
+# server: the user clicks Run, the progress bar shows 0% forever, and no
+# result ever appears -- because the worker handling the poll requests has
+# never seen the job_id created by the (different) worker that started the
+# thread.
+# =============================================================================
+
+_PVPRO_DISKCACHE_DIR = os.environ.get("PVPRO_DISKCACHE_DIR")
+_PVPRO_USE_DISKCACHE = False
+_PVPRO_JOB_CACHE = None
+_PVPRO_DISKCACHE_STATUS = ""      # human-readable reason for what happened
+
+if not _PVPRO_DISKCACHE_DIR:
+    _PVPRO_DISKCACHE_STATUS = (
+        "PVPRO_DISKCACHE_DIR env var not set -- using in-memory dict "
+        "(works only with a single worker process)."
+    )
+else:
+    try:
+        import diskcache as _diskcache
+    except ImportError as _e:
+        _PVPRO_DISKCACHE_STATUS = (
+            f"PVPRO_DISKCACHE_DIR is set ({_PVPRO_DISKCACHE_DIR!r}) but "
+            f"the `diskcache` package is NOT installed. "
+            f"Add `diskcache>=5.6` to requirements.txt and redeploy.  "
+            f"(ImportError: {_e})"
+        )
+    else:
+        # Let diskcache manage the directory itself.  It creates the dir
+        # (and any missing parents) when first written to.  We do NOT
+        # pre-probe with a raw open() -- on container filesystems the
+        # parent-of-parent might not exist yet, and diskcache's own
+        # initialisation handles that more reliably than os.makedirs +
+        # tempfile.  Verify the cache works with a real round-trip
+        # through the diskcache API itself.
+        try:
+            os.makedirs(_PVPRO_DISKCACHE_DIR, exist_ok=True)
+            _PVPRO_JOB_CACHE = _diskcache.Cache(_PVPRO_DISKCACHE_DIR)
+            # Round-trip a tiny test key to confirm everything actually
+            # works (catches permission issues, corrupt SQLite from a
+            # previous crash, etc).
+            _PVPRO_JOB_CACHE.set("__pvpro_init_probe__", 1, expire=60)
+            assert _PVPRO_JOB_CACHE.get("__pvpro_init_probe__") == 1
+            _PVPRO_JOB_CACHE.delete("__pvpro_init_probe__")
+            _PVPRO_USE_DISKCACHE = True
+            _PVPRO_DISKCACHE_STATUS = (
+                f"diskcache ENABLED at {_PVPRO_DISKCACHE_DIR}"
+            )
+        except OSError as _e:
+            _PVPRO_DISKCACHE_STATUS = (
+                f"PVPRO_DISKCACHE_DIR={_PVPRO_DISKCACHE_DIR!r} is not "
+                f"usable from this worker (PID {os.getpid()}).  "
+                f"On Heroku containers, /tmp is per-dyno and not shared "
+                f"across dynos; if you're running multiple dynos you need "
+                f"Redis instead.  "
+                f"(OSError: {_e})"
+            )
+        except Exception as _e:
+            _PVPRO_DISKCACHE_STATUS = (
+                f"diskcache failed to initialise at "
+                f"{_PVPRO_DISKCACHE_DIR!r}: {type(_e).__name__}: {_e}.  "
+                f"Try `rm -rf {_PVPRO_DISKCACHE_DIR}` to clear stale "
+                f"state, then restart the dyno."
+            )
+
+_PVPRO_JOBS = {}              # in-memory fallback
+_PVPRO_JOBS_LOCK = threading.Lock()
+
+# -----------------------------------------------------------------------------
+# Per-job render lock.  The polling callback can fire concurrently from
+# multiple gthread worker threads (each browser-side dcc.Interval tick is a
+# separate HTTP request).  When the PVPRO worker has just transitioned to
+# phase="done", two polls can race into the done-branch simultaneously:
+#   - Thread A starts building the (slow, 200-500ms) final_layout.
+#   - Thread B reads phase="done" too, also enters the done-branch, and
+#     finishes its rendering FIRST (maybe with a slightly different figure
+#     state if the worker is still writing).
+# Dash sees overlapping responses for the same Output, and the late arrival
+# either clobbers the good UI or gets dropped depending on the property's
+# allow_duplicate semantics.  Symptom: progress bar stuck at 99%.
+#
+# Solution: a single Lock per job_id.  The first thread into the done-branch
+# acquires the lock, builds the final layout, marks phase="rendered", and
+# returns.  All subsequent threads that try to acquire the lock either:
+#   - Block briefly, find phase="rendered", and return no_update (cheap).
+#   - Or skip with non-blocking acquire when we're sure the UI is already
+#     written (even cheaper).
+# -----------------------------------------------------------------------------
+_PVPRO_RENDER_LOCKS = {}            # job_id -> threading.Lock
+_PVPRO_RENDER_LOCKS_LOCK = threading.Lock()
+
+
+def _pvpro_get_render_lock(job_id):
+    """Return the per-job render lock, creating it on first use."""
+    with _PVPRO_RENDER_LOCKS_LOCK:
+        lock = _PVPRO_RENDER_LOCKS.get(job_id)
+        if lock is None:
+            lock = threading.Lock()
+            _PVPRO_RENDER_LOCKS[job_id] = lock
+            # Tidy up: cap the dict so a long-running server doesn't leak
+            # one Lock per ever-created job_id.  Keep only the 32 newest.
+            if len(_PVPRO_RENDER_LOCKS) > 32:
+                # Drop the oldest entries (dict insertion order in Py3.7+).
+                oldest = list(_PVPRO_RENDER_LOCKS.keys())[:-32]
+                for k in oldest:
+                    _PVPRO_RENDER_LOCKS.pop(k, None)
+        return lock
+
+
+# -----------------------------------------------------------------------------
+# Per-worker debug ring buffer.  Captures the most recent N events that
+# touched the PVPRO job store.  Surfaced in a collapsible panel next to the
+# PVPRO progress UI so users can see -- without ssh'ing into the server --
+# which worker received their poll request, whether it found the job_id
+# they expected, and the lifecycle of the job.
+# -----------------------------------------------------------------------------
+_PVPRO_DEBUG_LOG = collections.deque(maxlen=80)
+_PVPRO_DEBUG_LOCK = threading.Lock()
+
+
+def _pvpro_debug(event, **fields):
+    """Append a single line to the per-worker debug log."""
+    entry = {
+        "t":     time.strftime("%H:%M:%S"),
+        "pid":   os.getpid(),
+        "event": event,
+        **fields,
+    }
+    with _PVPRO_DEBUG_LOCK:
+        _PVPRO_DEBUG_LOG.append(entry)
+
+
+def _pvpro_debug_snapshot():
+    """Return a list copy of the current debug log (oldest -> newest)."""
+    with _PVPRO_DEBUG_LOCK:
+        return list(_PVPRO_DEBUG_LOG)
+
+
+def _pvpro_make_job():
+    job_id = str(uuid.uuid4())
+    job = {
+        "phase": "starting", "current": 0, "total": 1,
+        "message": "Queued…",
+        "result": None, "error": None,
+        "started_at": time.time(),
+    }
+    if _PVPRO_USE_DISKCACHE:
+        _PVPRO_JOB_CACHE.set(job_id, job, expire=3600)   # auto-expire after 1 h
+    else:
+        with _PVPRO_JOBS_LOCK:
+            _PVPRO_JOBS[job_id] = job
+    _pvpro_debug("make_job", job_id=job_id[:8])
+    return job_id
+
+
+def _pvpro_update_job(job_id, **kwargs):
+    if _PVPRO_USE_DISKCACHE:
+        # diskcache get/set is atomic enough for our purposes; the worker
+        # thread is the sole writer for any given job_id.
+        cur = _PVPRO_JOB_CACHE.get(job_id)
+        if cur is not None:
+            cur.update(kwargs)
+            _PVPRO_JOB_CACHE.set(job_id, cur, expire=3600)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            if job_id in _PVPRO_JOBS:
+                _PVPRO_JOBS[job_id].update(kwargs)
+    _pvpro_debug("update_job", job_id=job_id[:8],
+                 phase=kwargs.get("phase"),
+                 current=kwargs.get("current"),
+                 total=kwargs.get("total"))
+
+
+def _pvpro_read_job(job_id):
+    """Return a shallow snapshot — caller mutates without affecting state."""
+    if _PVPRO_USE_DISKCACHE:
+        job = _PVPRO_JOB_CACHE.get(job_id)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            job = _PVPRO_JOBS.get(job_id)
+    found = job is not None
+    _pvpro_debug("read_job", job_id=job_id[:8],
+                 found=found, phase=(job.get("phase") if found else None))
+    return None if not found else dict(job)
+
+
+def _pvpro_drop_job(job_id):
+    """Free memory once a finished job has been rendered into the UI.
+
+    Note: callers should generally PREFER marking the job phase as
+    'rendered' and letting the 1-hour diskcache TTL clean it up.  Hard
+    delete creates a tiny race window where a late poll from the browser
+    (queued before the polling Interval was disabled) sees `found=False`
+    and triggers the 'PVPRO progress lost' UI, clobbering the just-rendered
+    result.  See _pvpro_poll_callback for the full reasoning.
+    """
+    if _PVPRO_USE_DISKCACHE:
+        try:
+            _PVPRO_JOB_CACHE.delete(job_id)
+        except Exception:
+            pass
+    else:
+        with _PVPRO_JOBS_LOCK:
+            _PVPRO_JOBS.pop(job_id, None)
+    _pvpro_debug("drop_job", job_id=job_id[:8])
 
 # =============================================================================
 # DESIGN TOKENS — editorial / agent-chat aesthetic
@@ -42,6 +277,27 @@ ROSE           = NAVY
 SLATE          = NAVY
 SUCCESS        = "#65BCF0"
 MUTED          = "#94a3b8"        # disabled / pending step
+
+# Color reserved for the "filtered out" data in Step 2 -- pie slice, scatter
+# dots, and the "Filtered: N" counter all use this so the user can match the
+# number visually to its pie slice at a glance.  Matches the pale blue tone
+# we use elsewhere for de-emphasised information.
+FILTERED_COLOR = "#A3CEED"
+
+# -----------------------------------------------------------------------------
+# Numeric-value tokens.
+#
+# Throughout the UI we display two flavours of number side-by-side:
+#   - "major"  : the headline / featured number the user came to see
+#                (e.g. the retained-count, the degradation rate).  Coloured.
+#   - "detail" : supporting numbers (totals, durations, elapsed seconds).
+#                Plain dark text.
+#
+# Defining them once at the top makes it trivial to retune the palette
+# without hunting through every component.
+# -----------------------------------------------------------------------------
+VALUE_MAJOR    = NAVY       # blue for the featured number
+VALUE_DETAIL   = INK        # near-black for supporting numbers
 
 # Legacy aliases (used inside existing callback bodies — kept identical so
 # nothing downstream breaks)
@@ -92,6 +348,191 @@ def _no_data_alert(message):
 
 def get_layout():
     return layout
+
+
+def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
+    """Render the PVPRO progress display: tqdm-style bar + status text.
+
+    Renders into `pvpro-progress-output`, which sits OUTSIDE the
+    dcc.Loading wrapper around `degradation-output`.  Keeping the two
+    separate prevents the Loading spinner from overlaying this UI on
+    every Interval tick.
+    """
+    pct = 0 if not total else int(round(100 * current / max(total, 1)))
+    pct = max(0, min(100, pct))
+
+    PHASE_LABELS = {
+        "starting":   "Starting PVPRO",
+        "prepare":    "Preparing data",
+        "p0":         "Estimating initial parameters",
+        "fitting":    "Fitting time-windows",
+        "trend":      "Computing degradation trends",
+        "finalising": "Packing results",
+        "done":       "Finalising",
+        "rendered":   "Complete",
+    }
+    sub_label = PHASE_LABELS.get(phase, phase or "Working")
+
+    bar_inner = html.Div(
+        style={
+            "height": "100%",
+            "width": f"{pct}%",
+            "background": ACCENT,
+            "borderRadius": "999px",
+            "transition": "width 0.25s ease",
+        }
+    )
+    bar = html.Div(
+        bar_inner,
+        style={
+            "height": "8px",
+            "width": "100%",
+            "background": "#e2e8f0",
+            "borderRadius": "999px",
+            "overflow": "hidden",
+            "margin": "10px 0 6px 0",
+        }
+    )
+
+    return html.Div([
+        # Title line: constant "Running PVPRO" + percent only.
+        html.Div([
+            html.Span(
+                "Running PVPRO",
+                style={
+                    "fontWeight": "600", "fontSize": "15px",
+                    "color": INK, "fontFamily": "Arial, sans-serif",
+                }
+            ),
+            html.Span(
+                f"  ·  {pct}%",
+                style={
+                    "marginLeft": "8px", "fontSize": "13px",
+                    "color": ACCENT, "fontWeight": "600",
+                    "fontFamily": "Arial, sans-serif",
+                }
+            ),
+        ]),
+        bar,
+        # Subtitle: the current phase label, with (current/total) appended
+        # only during the "fitting" phase where a counter is meaningful.
+        html.Div(
+            sub_label + (
+                f" ({current}/{total})"
+                if phase == "fitting" and total and total > 1
+                else ""
+            ),
+            style={
+                "fontSize": "13px", "color": INK_SOFT,
+                "fontFamily": "Arial, sans-serif",
+            }
+        ),
+        html.Div(
+            f"Elapsed: {int(elapsed_s):d}s",
+            style={
+                "fontSize": "11px", "color": MUTED, "marginTop": "4px",
+                "fontFamily": "Arial, sans-serif",
+            }
+        ),
+    ], style={
+        "padding": "16px 18px",
+        "background": "#f8fafc",
+        "border": f"1px solid {BORDER}",
+        "borderRadius": "10px",
+        "marginTop": "16px",
+    })
+
+
+# =============================================================================
+# DEBUG PANEL -- collapsible inline diagnostic next to the PVPRO progress UI.
+#
+# Shows worker PID, storage backend, diskcache status, active job_id, and the
+# most recent N events from this worker's job store.  Default-folded so it
+# doesn't clutter the main UI; expand it when something's wrong on a deployed
+# server and the user can copy/paste the contents into a support email.
+#
+# The panel is shown DURING progress AND on the final 'done' UI, so the user
+# can always inspect the trace of their last PVPRO run.
+# =============================================================================
+def _pvpro_debug_panel(current_job_id=None):
+    log_lines = []
+    for entry in _pvpro_debug_snapshot()[-40:]:
+        bits = [f"{entry['t']}", f"pid={entry['pid']}", entry["event"]]
+        for k, v in entry.items():
+            if k in ("t", "pid", "event") or v is None:
+                continue
+            bits.append(f"{k}={v}")
+        log_lines.append("  ".join(bits))
+    log_text = "\n".join(log_lines) if log_lines else "(no events yet)"
+
+    storage_summary = (
+        f"diskcache @ {_PVPRO_DISKCACHE_DIR}"
+        if _PVPRO_USE_DISKCACHE
+        else "in-memory dict (single-worker only)"
+    )
+
+    rows = [
+        ("Worker PID",       str(os.getpid())),
+        ("Storage backend",  storage_summary),
+        ("Diskcache status", _PVPRO_DISKCACHE_STATUS or "(unset)"),
+        ("Active job_id",    (current_job_id or "—")[:8]),
+        ("Events in log",    str(len(_PVPRO_DEBUG_LOG))),
+    ]
+    info_table = html.Table(
+        [html.Tr([
+            html.Td(k, style={"color": INK_SOFT, "paddingRight": "12px",
+                              "verticalAlign": "top",
+                              "fontFamily": "Arial, sans-serif"}),
+            html.Td(v, style={"fontFamily": "monospace",
+                              "wordBreak": "break-all"}),
+         ]) for k, v in rows],
+        style={"fontSize": "12px", "lineHeight": "1.5",
+               "borderCollapse": "collapse", "marginBottom": "8px"},
+    )
+
+    return html.Details(
+        [
+            html.Summary(
+                "Debug · expand for worker state and recent events",
+                style={
+                    "cursor": "pointer",
+                    "fontSize": "11px",
+                    "color": MUTED,
+                    "textTransform": "uppercase",
+                    "letterSpacing": "0.08em",
+                    "fontWeight": "600",
+                    "fontFamily": "Arial, sans-serif",
+                    # 20px left padding leaves room for the CSS-generated
+                    # disclosure triangle (at left:2 from .pvcopilot-root
+                    # summary::before) -- otherwise the text overlaps it.
+                    "padding": "8px 0 8px 20px",
+                }
+            ),
+            info_table,
+            html.Pre(
+                log_text,
+                style={
+                    "fontSize": "11px",
+                    "color": "#334155",
+                    "background": "#f1f5f9",
+                    "border": f"1px solid {BORDER}",
+                    "borderRadius": "6px",
+                    "padding": "8px 10px",
+                    "maxHeight": "180px",
+                    "overflowY": "auto",
+                    "whiteSpace": "pre-wrap",
+                    "fontFamily": "monospace",
+                    "margin": "0",
+                },
+            ),
+        ],
+        open=False,
+        style={
+            "marginTop": "12px",
+            "borderTop": f"1px dashed {BORDER}",
+            "paddingTop": "6px",
+        },
+    )
 
 
 # =============================================================================
@@ -178,8 +619,7 @@ def agent_message(agent_key, body, intro=None):
                     "padding": "20px 22px",
                     "background": PAPER_RAISED,
                     "border": f"1px solid {BORDER}",
-                    "borderLeft": f"3px solid {a['color']}",
-                    "borderRadius": "4px 12px 12px 12px",
+                    "borderRadius": "12px",
                     "boxShadow": "0 1px 2px rgba(0,0,0,0.02)",
                 }
             ),
@@ -198,7 +638,10 @@ def locked_placeholder(agent_key, name, step_num):
             html.Div(
                 [
                     html.Div(
-                        "🔒",
+                        # Show the step number rather than a lock icon --
+                        # the number alone communicates "step X is next"
+                        # and is consistent with the active/done states.
+                        str(step_num),
                         style={
                             "width": "26px",
                             "height": "26px",
@@ -209,6 +652,8 @@ def locked_placeholder(agent_key, name, step_num):
                             "alignItems": "center",
                             "justifyContent": "center",
                             "fontSize": "13px",
+                            "fontWeight": "600",
+                            "fontFamily": "Arial, sans-serif",
                             "flexShrink": "0",
                         }
                     ),
@@ -273,6 +718,38 @@ def section_label(text):
             "letterSpacing": "0.08em",
             "fontFamily": "Arial, sans-serif",
             "marginBottom": "10px",
+        }
+    )
+
+
+def soft_blue_callout(children, icon=None, margin_bottom="14px", margin_top="0"):
+    """A pale-blue rounded rectangle for informational notes.
+
+    Visually matches the parent app's "Note: This tool is currently under
+    active development" banner.  Use it for short warnings or requirement
+    summaries that should be noticed but aren't full alerts.  Pass `icon`
+    (a one-character emoji or symbol) to prepend a leading glyph.
+    """
+    body = []
+    if icon:
+        body.append(html.Span(icon, style={"marginRight": "8px"}))
+    if isinstance(children, list):
+        body.extend(children)
+    else:
+        body.append(children)
+    return html.Div(
+        body,
+        style={
+            "fontSize": "14px",
+            "color": "#0c4a6e",       # dark blue, readable on pale BG
+            "background": "#eff6ff",  # blue-50
+            "border": "1px solid #bfdbfe",   # blue-200
+            "borderRadius": "10px",
+            "padding": "10px 14px",
+            "lineHeight": "1.55",
+            "fontFamily": "Arial, sans-serif",
+            "marginTop": margin_top,
+            "marginBottom": margin_bottom,
         }
     )
 
@@ -519,6 +996,33 @@ def metric_explanations_block():
                         "Phinikarides, A. et al., Renew. Sustain. Energy Rev. 40, 143–152, 2014. ",
                         html.A("10.1016/j.rser.2014.07.155",
                                href="https://doi.org/10.1016/j.rser.2014.07.155",
+                               target="_blank", style=_exp_link_style())
+                    ], style=_ref_style()),
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("PVPRO (Single-diode-model fitting)"), style=_exp_summary_style()),
+                html.Div([
+                    "Fits the five single-diode-model parameters (photocurrent, saturation current, "
+                    "series resistance, shunt resistance, diode factor) to short time-windows of DC "
+                    "voltage and current measurements. The reference maximum-power point P_mp,ref is "
+                    "reconstructed from the fitted parameters in each window, and its long-term trend "
+                    "(via rdtools year-over-year) is reported as the degradation rate. Unlike the "
+                    "power-based methods, PVPRO can attribute degradation to specific physical mechanisms.",
+                    dcc.Markdown(
+                        r"$$\hat{P}_{mp,ref}(t) = f_{SDM}\bigl(I_L, I_0, R_s, R_{sh}, n\bigr)(t), \quad "
+                        r"R_d = \text{YoY}\bigl(\hat{P}_{mp,ref}\bigr)$$",
+                        mathjax=True, style=_eq_style()
+                    ),
+                    html.Div([
+                        html.Sup("[3] "),
+                        "Li, B., Karin, T., Meyers, B. E., Chen, X., Jordan, D. C., "
+                        "Hansen, C. W., ... & Jain, A. (2023). Determining circuit model "
+                        "parameters from operation data for PV system degradation analysis: "
+                        "PVPRO. Solar Energy 254, 168–181. ",
+                        html.A("10.1016/j.solener.2023.03.011",
+                               href="https://doi.org/10.1016/j.solener.2023.03.011",
                                target="_blank", style=_exp_link_style())
                     ], style=_ref_style()),
                 ], style=_exp_inner_style()),
@@ -845,15 +1349,17 @@ def build_sidebar(progress=None):
                                     "width": "32px",
                                     "height": "32px",
                                     "borderRadius": "50%",
-                                    "background": f"linear-gradient(135deg, {TEAL}, {INDIGO})",
-                                    "color": "white",
+                                    # Light gray, not navy -- it's a disabled
+                                    # placeholder until sign-in ships.
+                                    "background": "#cbd5e1",
+                                    "color": "#ffffff",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "justifyContent": "center",
                                     "fontSize": "15px",
                                     "fontWeight": "600",
                                     "fontFamily": "Arial, sans-serif",
-                                    "opacity": "0.7",
+                                    "opacity": "0.85",
                                 }
                             ),
                             html.Div(
@@ -959,12 +1465,13 @@ data_agent_body = html.Div([
         }
     ),
 
-    # Requirements
+    # Requirements -- the IMPORTANT badge sits inside the summary, just
+    # after the CSS-generated triangle.  The whole summary line is bold.
     html.Details(
         [
             html.Summary(
                 [
-                    html.Span("IMPORTANT", style={
+                    html.Span("IMPORTANT", className="important-badge", style={
                         "fontSize": "10px",
                         "fontWeight": "700",
                         "color": "white",
@@ -975,7 +1482,7 @@ data_agent_body = html.Div([
                         "marginRight": "10px",
                         "verticalAlign": "middle",
                     }),
-                    html.Span("Data requirements"),
+                    html.Span("Click to see data requirements"),
                 ],
                 style={
                     "cursor": "pointer",
@@ -1175,7 +1682,14 @@ def filter_row(checkbox_id, label, customize_body=None):
     parts = [
         html.Div(
             [
-                dbc.Checkbox(id=checkbox_id, value=True, className="me-2 d-inline-block"),
+                dbc.Checkbox(
+                    id=checkbox_id, value=True,
+                    className="me-2 d-inline-block",
+                    # Make the filled checkbox NAVY (matches the rest of
+                    # the app's accents).  `accent-color` is the modern
+                    # CSS property browsers use to theme form controls.
+                    input_style={"accentColor": NAVY},
+                ),
                 html.Span(label, style={
                     "fontSize": "15px",
                     "color": INK,
@@ -1429,7 +1943,189 @@ metric_options = [
         ]),
         "value": "CSD",
     },
+    {
+        "label": html.Div([
+            # Title row: PVPRO name + description on the left, PVPRO logo
+            # (link to the upstream repo) on the right.  `justifyContent:
+            # space-between` keeps the logo pinned to the right edge even
+            # when the parent <label> is content-sized; `marginLeft: auto`
+            # on the anchor is a belt-and-braces fallback.
+            # Title row: PVPRO name + a short "light version" subtitle on
+            # the left, PVPRO logo (link to upstream repo) on the right.
+            html.Div([
+                html.Div([
+                    html.B("PVPRO", style={"fontFamily": "Arial, sans-serif",
+                                           "fontSize": "16px"}),
+                    # No data-requirement here -- it moves down to the note
+                    # below, where it can be underlined for emphasis.
+                    html.Span(
+                        " — a lightweight in-app implementation",
+                        style={"color": INK_SOFT, "fontSize": "14px"},
+                    ),
+                ], style={"flex": "1", "minWidth": "0"}),
+                # Logo link — opens the upstream PVPRO repo in a new tab.
+                html.A(
+                    html.Img(
+                        src=app.get_asset_url("pvpro_logo.png"),
+                        alt="PVPRO",
+                        style={"height": "40px", "width": "auto",
+                               "display": "block"},
+                    ),
+                    href="https://github.com/DuraMAT/pvpro",
+                    target="_blank",
+                    title="PVPRO on GitHub",
+                    style={"marginLeft": "auto", "paddingLeft": "12px",
+                           "flexShrink": "0",
+                           "display": "inline-block",
+                           "textDecoration": "none"},
+                ),
+            ], style={"display": "flex", "alignItems": "center",
+                      "justifyContent": "space-between",
+                      "width": "100%"}),
+            # Runtime + data-requirement note, presented as a soft-blue
+            # callout (matches the parent app's "active development" banner).
+            # Per the latest spec: "Need" (not "needs"), no bolding -- the
+            # data-requirement gets a simple underline so it's visually
+            # distinct without competing with the IMPORTANT row below.
+            soft_blue_callout(
+                [
+                    "⏱ ~1–3 minutes runtime · Need ",
+                    html.Span("DC Voltage and DC Current",
+                              style={"textDecoration": "underline"}),
+                    " columns identified in Step 1",
+                ],
+                margin_top="6px",
+                # Breathing room between the warning callout and the
+                # IMPORTANT disclosure that follows.
+                margin_bottom="12px",
+            ),
+            html.Details([
+                html.Summary(
+                    [
+                        html.Span("IMPORTANT",
+                                  className="important-badge",
+                                  style={
+                                      "fontSize": "10px",
+                                      "fontWeight": "700",
+                                      "color": "white",
+                                      "background": NAVY,
+                                      "padding": "2px 8px",
+                                      "borderRadius": "999px",
+                                      "letterSpacing": "0.06em",
+                                      "marginRight": "10px",
+                                      "verticalAlign": "middle",
+                                  }),
+                        html.Span("Provide module & array parameters for PVPRO"),
+                    ],
+                    style={"cursor": "pointer",
+                           "fontSize": "13px",
+                           "color": INK,
+                           "fontWeight": "700",
+                           "fontFamily": "Arial, sans-serif",
+                           "marginTop": "4px"},
+                ),
+                html.Div([
+                    html.Div(style={"display": "flex", "gap": "8px",
+                                    "marginBottom": "8px"}, children=[
+                        html.Div([
+                            html.Div("Cells in series (per module)",
+                                     style=_label_style),
+                            dcc.Input(id="param-pvpro-cells", type="number",
+                                      value=60, step=1, min=1,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                        html.Div([
+                            html.Div("Modules per string",
+                                     style=_label_style),
+                            dcc.Input(id="param-pvpro-mps", type="number",
+                                      value=1, step=1, min=1,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                        html.Div([
+                            html.Div("Parallel strings",
+                                     style=_label_style),
+                            dcc.Input(id="param-pvpro-ps", type="number",
+                                      value=1, step=1, min=1,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                    ]),
+                    html.Div(style={"display": "flex", "gap": "8px",
+                                    "marginBottom": "8px"}, children=[
+                        html.Div([
+                            html.Div("alpha_isc (A/°C)",
+                                     style=_label_style),
+                            dcc.Input(id="param-pvpro-alphaisc",
+                                      type="number", value=0.0046,
+                                      step=0.0001, min=0,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                        html.Div([
+                            html.Div("Technology", style=_label_style),
+                            dcc.Dropdown(
+                                id="param-pvpro-tech",
+                                options=[
+                                    {"label": "mono-c-Si", "value": "mono-c-Si"},
+                                    {"label": "multi-c-Si", "value": "multi-c-Si"},
+                                    {"label": "GaAs", "value": "GaAs"},
+                                    {"label": "CIGS", "value": "CIGS"},
+                                    {"label": "CdTe", "value": "CdTe"},
+                                ],
+                                value="mono-c-Si",
+                                clearable=False,
+                                style={"fontSize": "13px"},
+                            ),
+                        ], style={"flex": "1"}),
+                    ]),
+                    html.Div(style={"display": "flex", "gap": "8px"}, children=[
+                        html.Div([
+                            html.Div("Days per run", style=_label_style),
+                            dcc.Input(id="param-pvpro-days",
+                                      type="number", value=14,
+                                      step=1, min=2,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                        html.Div([
+                            html.Div("Iterations per year",
+                                     style=_label_style),
+                            dcc.Input(id="param-pvpro-iters",
+                                      type="number", value=12,
+                                      step=1, min=2,
+                                      style=_param_input_style),
+                        ], style={"flex": "1"}),
+                    ]),
+                ], style={"marginTop": "6px", "padding": "12px 14px",
+                          "background": "#f1f5f9", "borderRadius": "8px",
+                          "border": f"1px solid {BORDER}",
+                          "width": "100%", "minWidth": "640px",
+                          "boxSizing": "border-box"}),
+            ]),  # closes html.Details
+        ], style={"width": "100%"}),
+        "value": "PVPRO",
+    },
 ]
+
+
+# Split the radio options into two categories so we can render them as two
+# logically-separate groups with a divider and category headings between
+# them.  The first group is the fast statistical / trend methods that all
+# operate on aggregated daily power; the second is PVPRO, the only
+# physics-based single-diode-model fit (different inputs, much slower).
+stat_metric_options  = [o for o in metric_options if o["value"] != "PVPRO"]
+pvpro_metric_options = [o for o in metric_options if o["value"] == "PVPRO"]
+
+
+def _metric_category_heading(text):
+    """Small uppercase, letter-spaced heading used to introduce each category
+    of degradation method in the radio group."""
+    return html.Div(text, style={
+        "fontSize": "11px",
+        "color": INK_SOFT,
+        "textTransform": "uppercase",
+        "letterSpacing": "0.1em",
+        "fontWeight": "600",
+        "fontFamily": "Arial, sans-serif",
+        "marginBottom": "8px",
+    })
 
 
 calc_agent_body = html.Div([
@@ -1446,24 +2142,74 @@ calc_agent_body = html.Div([
     ),
 
     section_label("Choose a metric"),
-    html.Div(
+    html.Div([
+        # Category 1 — statistical / trend methods (YoY, LR, HW, ARIMA, CSD).
+        _metric_category_heading("statistical / trend methods"),
         dcc.RadioItems(
-            id="metric-selected-visible",
+            id="metric-stat-radio",
             value="YOY",
-            options=metric_options,
-            labelStyle={"display": "block", "marginBottom": "10px", "cursor": "pointer", "color": "inherit"},
+            options=stat_metric_options,
+            labelStyle={"display": "block", "marginBottom": "10px",
+                        "cursor": "pointer", "color": "inherit"},
             labelClassName="metric-radio-label",
-            inputStyle={"marginRight": "10px", "marginTop": "3px", "accentColor": ROSE},
+            inputStyle={"marginRight": "10px", "marginTop": "3px",
+                        "accentColor": NAVY},
             style={"marginBottom": "0"},
         ),
-        style={
-            "padding": "16px 18px",
-            "background": "#f8fafc",
-            "border": f"1px solid {BORDER}",
-            "borderRadius": "10px",
-            "marginBottom": "14px",
-        }
-    ),
+
+        # Visual separator between the two categories.  Stepped up from
+        # the BORDER token (#e2e8f0) to slate-400 because lighter shades
+        # disappear on the #f8fafc card background; the user explicitly
+        # wanted it more visible.
+        html.Hr(style={
+            "border": "none",
+            "borderTop": "1px solid #94a3b8",
+            "margin": "18px 0 16px 0",
+        }),
+
+        # Category 2 — physics-based SDM fit (PVPRO only, for now).
+        _metric_category_heading("single-diode-model fitting"),
+        dcc.RadioItems(
+            id="metric-pvpro-radio",
+            value=None,
+            options=pvpro_metric_options,
+            labelStyle={"display": "block", "marginBottom": "10px",
+                        "cursor": "pointer", "color": "inherit"},
+            labelClassName="metric-radio-label",
+            inputStyle={"marginRight": "10px", "marginTop": "3px",
+                        "accentColor": NAVY},
+            style={"marginBottom": "0"},
+        ),
+
+        # Hidden "master" radio that downstream callbacks read for the
+        # currently-selected method.  The two visible RadioItems above
+        # mirror their selection into this one via clientside callbacks.
+        # Keeping it as a RadioItems (rather than a dcc.Store) means we
+        # don't have to touch the rest of the codebase.
+        #
+        # IMPORTANT: we pass *plain-text* options here -- NOT `metric_options`
+        # -- because `metric_options` contains dcc.Input components inside
+        # each option's label (the per-method "Customize parameters" panel).
+        # Including those again in the hidden master would create duplicate
+        # component IDs in the layout, in which case Dash reads from the
+        # WRONG (hidden, always-default) copy and the user's input values
+        # silently never reach the callback.
+        html.Div(
+            dcc.RadioItems(
+                id="metric-selected-visible",
+                value="YOY",
+                options=[{"label": opt["value"], "value": opt["value"]}
+                         for opt in metric_options],
+            ),
+            style={"display": "none"},
+        ),
+    ], style={
+        "padding": "16px 18px",
+        "background": "#f8fafc",
+        "border": f"1px solid {BORDER}",
+        "borderRadius": "10px",
+        "marginBottom": "14px",
+    }),
 
     dcc.Store(id="_rb-sync-dummy"),
 
@@ -1488,6 +2234,7 @@ calc_agent_body = html.Div([
     # Collapsible metric explanations (descriptions, equations, references)
     metric_explanations_block(),
 
+    # FAST methods (YoY/LR/HW/ARIMA/CSD) render under the dcc.Loading spinner.
     dcc.Loading(
         type="circle",
         color=ROSE,
@@ -1496,6 +2243,12 @@ calc_agent_body = html.Div([
             style={"marginTop": "22px"}
         ),
     ),
+
+    # PVPRO renders here, OUTSIDE the dcc.Loading boundary. The polling
+    # callback writes to this element every ~400 ms while the fit runs,
+    # and the dcc.Loading overlay must not flicker on top of it on every
+    # tick — that's why it's a sibling, not a child, of the Loading.
+    html.Div(id="pvpro-progress-output", style={"marginTop": "22px"}),
 ], style={"fontFamily": "Arial, sans-serif"})
 
 
@@ -1672,6 +2425,30 @@ chat_stream = html.Div(
                                 }
                             ),
                         ),
+                        # Active-development banner -- placed inside the
+                        # hero block so it sits ABOVE the hero's bottom
+                        # divider line.  Visually: hero text + banner read
+                        # as one introductory unit, separated from the
+                        # agents below by the divider.
+                        soft_blue_callout(
+                            [
+                                html.B("Note: "),
+                                "This tool is currently under active "
+                                "development. If you encounter issues, "
+                                "have suggestions, or would like to "
+                                "collaborate, please ",
+                                html.A(
+                                    "contact us",
+                                    href="mailto:baojieli@lbl.gov",
+                                    style={"color": "#0c4a6e",
+                                           "textDecoration": "underline",
+                                           "fontWeight": "600"},
+                                ),
+                                ".",
+                            ],
+                            margin_top="20px",
+                            margin_bottom="0",
+                        ),
                     ],
                     style={"padding": "32px 0 28px", "borderBottom": f"1px solid {BORDER}", "marginBottom": "32px"}
                 ),
@@ -1810,7 +2587,10 @@ chat_stream = html.Div(
                                             "border": "none",
                                             "outline": "none",
                                             "background": "transparent",
-                                            "fontSize": "15px",
+                                            # Bumped from 15px -> 17px so
+                                            # the composer reads as the
+                                            # main input on the page.
+                                            "fontSize": "17px",
                                             "fontFamily": "Arial, sans-serif",
                                             "fontWeight": "700",
                                             "color": "white",
@@ -1948,6 +2728,15 @@ layout = html.Div([
     # NEW: track which steps are complete
     dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
 
+    # PVPRO long-running job tracker: holds {"job_id": "..."} when a fit is
+    # running, {} when idle.
+    dcc.Store(id="pvpro-job", data={}),
+
+    # Disabled by default; the PVPRO branch of the degradation callback flips
+    # it on, and the polling callback flips it off again when done.
+    dcc.Interval(id="pvpro-poll-interval", interval=400,
+                 n_intervals=0, disabled=True),
+
     # Main container — sidebar + chat side-by-side, BOTH inside dbc.Container so
     # their edges line up with the LBNL/DuraMAT logos in the global header.
     dbc.Container(
@@ -1979,12 +2768,14 @@ layout = html.Div([
                             "Built at LBNL · Questions or feedback? ",
                             html.A("baojieli@lbl.gov",
                                 href="mailto:baojieli@lbl.gov",
-                                style={"color": ACCENT, "textDecoration": "none", "fontWeight": "500"}
+                                style={"color": MUTED,
+                                       "textDecoration": "none",
+                                       "fontWeight": "400"}
                             ),
                         ],
                         style={
-                            "fontSize": "13px",
-                            "color": INK_SOFT,
+                            "fontSize": "12px",
+                            "color": MUTED,
                             "textAlign": "center",
                             "padding": "0 0 8px",
                             "fontFamily": "Arial, sans-serif",
@@ -2021,6 +2812,45 @@ app.clientside_callback(
     Input("cb-low-irra-power", "value"),
     Input("cb-outlier", "value"),
     Input("cb-clearsky", "value"),
+)
+
+
+# =============================================================================
+# CLIENTSIDE SYNC — two visible RadioItems -> one hidden master radio.
+#
+# The "Choose a metric" panel splits its options into two visible groups
+# (statistical methods vs PVPRO).  We mirror whichever one the user
+# touched most recently into the hidden `metric-selected-visible` radio,
+# which is the source of truth read by every downstream callback.  We
+# also clear the OTHER group so only one ever shows a selected dot,
+# preserving single-select semantics.
+# =============================================================================
+app.clientside_callback(
+    """
+    function(statVal, pvproVal) {
+        var triggered = dash_clientside.callback_context.triggered;
+        if (!triggered || triggered.length === 0) {
+            // Initial firing -- whichever has a value wins; default to stat.
+            return [statVal || pvproVal || "YOY", statVal, pvproVal];
+        }
+        var prop = triggered[0].prop_id;  // "metric-stat-radio.value" etc.
+        if (prop.indexOf("metric-stat-radio") === 0 && statVal) {
+            // Stat group picked -> clear PVPRO group, mirror stat.
+            return [statVal, statVal, null];
+        }
+        if (prop.indexOf("metric-pvpro-radio") === 0 && pvproVal) {
+            // PVPRO picked -> clear stat group, mirror PVPRO.
+            return [pvproVal, null, pvproVal];
+        }
+        // Neither has a value: fall back to YoY.
+        return ["YOY", "YOY", null];
+    }
+    """,
+    Output("metric-selected-visible", "value"),
+    Output("metric-stat-radio",       "value"),
+    Output("metric-pvpro-radio",      "value"),
+    Input("metric-stat-radio",  "value"),
+    Input("metric-pvpro-radio", "value"),
 )
 
 
@@ -2174,7 +3004,7 @@ def run_filter(filter_clicks, upload_clicks,
         labels=["High-quality", "Filtered"],
         values=[n_good, n_bad],
         hole=0.62,
-        marker=dict(colors=[INDIGO, "#cdc7e3"]),
+        marker=dict(colors=[INDIGO, FILTERED_COLOR]),
         textinfo="percent",
         hoverinfo="label+percent",
     )])
@@ -2194,7 +3024,7 @@ def run_filter(filter_clicks, upload_clicks,
         x=df_filtered.loc[outlier_indices].index,
         y=df_filtered.loc[outlier_indices]["norm"],
         mode="markers",
-        marker=dict(size=4, opacity=0.35, color="#cdc7e3"),
+        marker=dict(size=4, opacity=0.35, color=FILTERED_COLOR),
         name="Filtered"
     ))
     scatter_fig.add_trace(go.Scattergl(
@@ -2227,14 +3057,15 @@ def run_filter(filter_clicks, upload_clicks,
             "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "8px",
             "fontFamily": "Arial, sans-serif",
         }),
+        # Headline percentage -- this is the "major" featured number for
+        # this step, so it gets the major-value blue.
         html.Div(f"{pct_good:.1%}", style={
             "fontSize": "44px",
             "fontFamily": "Arial, sans-serif",
             "fontWeight": "700",
-            "color": INK,
+            "color": VALUE_MAJOR,
             "lineHeight": "1",
             "marginBottom": "4px",
-            
         }),
         html.Div("high-quality points retained", style={
             "fontSize": "15px", "color": INK_SOFT,
@@ -2242,9 +3073,23 @@ def run_filter(filter_clicks, upload_clicks,
             "fontStyle": "italic", "marginBottom": "12px",
         }),
         html.Div([
-            html.Div([html.Span("Total: ", style={"color": INK_SOFT}), html.B(f"{n_total:,}")], style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Retained: ", style={"color": INK_SOFT}), html.B(f"{n_good:,}", style={"color": INDIGO})], style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Filtered: ", style={"color": INK_SOFT}), html.B(f"{n_bad:,}")], style={"fontSize": "14px"}),
+            # All three supporting counts are detail values -- plain dark
+            # text.  The headline percentage above is the sole blue number.
+            html.Div(
+                [html.Span("Total: ", style={"color": INK_SOFT}),
+                 html.B(f"{n_total:,}", style={"color": VALUE_DETAIL})],
+                style={"fontSize": "14px", "marginBottom": "3px"},
+            ),
+            html.Div(
+                [html.Span("Retained: ", style={"color": INK_SOFT}),
+                 html.B(f"{n_good:,}", style={"color": VALUE_DETAIL})],
+                style={"fontSize": "14px", "marginBottom": "3px"},
+            ),
+            html.Div(
+                [html.Span("Filtered: ", style={"color": INK_SOFT}),
+                 html.B(f"{n_bad:,}", style={"color": VALUE_DETAIL})],
+                style={"fontSize": "14px"},
+            ),
         ], style={"fontFamily": "Arial, sans-serif"}),
         html.Details([
             html.Summary("Show details", style={"color": INK_SOFT, "cursor": "pointer", "fontSize": "13px", "marginTop": "10px", "fontFamily": "Arial, sans-serif"}),
@@ -2260,7 +3105,18 @@ def run_filter(filter_clicks, upload_clicks,
             html.Div(summary_block, style={"flex": "1", "minWidth": "180px"}),
             html.Div(dcc.Graph(figure=pie_fig, config={"displayModeBar": False}), style={"flex": "1", "minWidth": "240px"}),
         ], style={"display": "flex", "gap": "20px", "flexWrap": "wrap", "marginBottom": "16px"}),
-        html.Div(dcc.Graph(figure=scatter_fig, config={"displayModeBar": False})),
+        # Trend figure sits inside its own white rounded card, matching the
+        # per-panel cards on the PVPRO results page.
+        html.Div(
+            dcc.Graph(figure=scatter_fig, config={"displayModeBar": False}),
+            style={
+                "background": "#ffffff",
+                "border": f"1px solid {BORDER}",
+                "borderRadius": "10px",
+                "padding": "10px 12px",
+                "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.04)",
+            },
+        ),
     ], className="slide-in-up", style={
         "padding": "20px",
         "background": "#f8fafc",
@@ -2277,10 +3133,13 @@ def run_filter(filter_clicks, upload_clicks,
 # CALLBACK — DEGRADATION (UNCHANGED logic, restyled output)
 # =============================================================================
 @app.callback(
-    Output("degradation-output", "children"),
+    Output("degradation-output", "children", allow_duplicate=True),
+    Output("pvpro-progress-output", "children", allow_duplicate=True),
     Output("run-btn", "disabled",  allow_duplicate=True),
     Output("run-btn", "children",  allow_duplicate=True),
     Output("degradation-result-store", "data"),
+    Output("pvpro-job", "data", allow_duplicate=True),
+    Output("pvpro-poll-interval", "disabled", allow_duplicate=True),
 
     Input("run-btn",              "n_clicks"),
     Input("upload-data",          "filename"),
@@ -2299,6 +3158,13 @@ def run_filter(filter_clicks, upload_clicks,
     State("param-arima-q",           "value"),
     State("param-arima-s",           "value"),
     State("param-csd-period",        "value"),
+    State("param-pvpro-cells",       "value"),
+    State("param-pvpro-mps",         "value"),
+    State("param-pvpro-ps",          "value"),
+    State("param-pvpro-alphaisc",    "value"),
+    State("param-pvpro-tech",        "value"),
+    State("param-pvpro-days",        "value"),
+    State("param-pvpro-iters",       "value"),
 
     prevent_initial_call=True
 )
@@ -2307,44 +3173,109 @@ def analyze_uploaded_data_callback(
         example1_clicks, example2_clicks, example3_clicks,
         df_filtered_json, mapped_variables_dict, selected_metric,
         yoy_window, yoy_iqr, hw_period,
-        arima_p, arima_d, arima_q, arima_s, csd_period):
+        arima_p, arima_d, arima_q, arima_s, csd_period,
+        pvpro_cells, pvpro_mps, pvpro_ps, pvpro_alphaisc,
+        pvpro_tech, pvpro_days, pvpro_iters):
 
     trigger = ctx.triggered_id
 
     if trigger in ["load-example-btn-1", "load-example-btn-2", "load-example-btn-3", "upload-data"]:
-        return ["", False, "Calculate Degradation", {}]
+        return ["", "", False, "Calculate Degradation", {}, {}, True]
 
     if not df_filtered_json:
         if trigger == "run-btn":
             return [_no_data_alert("Please apply filters first before running degradation analysis."),
-                    False, "Calculate Degradation", {}]
-        return ["", False, "Calculate Degradation", {}]
+                    "", False, "Calculate Degradation", {}, {}, True]
+        return ["", "", False, "Calculate Degradation", {}, {}, True]
 
     df_filtered = _df_from_store(df_filtered_json)
     irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
     if irra_key is None or irra_key not in df_filtered.columns:
-        return ["❌ Irradiance column not found.", False, "Calculate Degradation", {}]
+        return ["❌ Irradiance column not found.", "", False, "Calculate Degradation", {}, {}, True]
 
-    daily_data = aggregate_daily(df_filtered, irra_key)
+    # ---------- PVPRO: long-running, so launch in a thread and let a polling
+    # ---------- callback render the result when it's ready.
+    if selected_metric == "PVPRO":
+        # Snapshot all the user-controlled params into kwargs.
+        pvpro_kwargs = dict(
+            cells_in_series   = pvpro_cells     if pvpro_cells     else 60,
+            modules_per_string= pvpro_mps       if pvpro_mps       else 1,
+            parallel_strings  = pvpro_ps        if pvpro_ps        else 1,
+            alpha_isc         = pvpro_alphaisc  if pvpro_alphaisc is not None else 0.0046,
+            technology        = pvpro_tech      if pvpro_tech      else "mono-c-Si",
+            days_per_run      = pvpro_days      if pvpro_days      else 14,
+            iterations_per_year = pvpro_iters   if pvpro_iters     else 12,
+        )
 
-    if selected_metric == "YOY":
-        rd, fig = compute_yoy(daily_data,
-                              rolling_window=yoy_window if yoy_window else 30,
-                              iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
-    elif selected_metric == "LR":
-        rd, fig = compute_lr(daily_data)
-    elif selected_metric == "HW":
-        rd, fig = compute_hw(daily_data, period=hw_period if hw_period else 12)
-    elif selected_metric == "ARIMA":
-        rd, fig = compute_arima(daily_data,
-                                p=arima_p if arima_p is not None else 1,
-                                d=arima_d if arima_d is not None else 1,
-                                q=arima_q if arima_q is not None else 0,
-                                seasonal_period=arima_s if arima_s else 12)
-    elif selected_metric == "CSD":
-        rd, fig = compute_csd(daily_data, period=csd_period if csd_period else 12)
+        job_id = _pvpro_make_job()
+
+        def _progress_cb(stage, current, total, message, _jid=job_id):
+            _pvpro_update_job(_jid, phase=stage, current=current,
+                              total=total, message=message)
+
+        def _worker(_df=df_filtered, _mapping=mapped_variables_dict,
+                    _kwargs=pvpro_kwargs, _jid=job_id, _cb=_progress_cb):
+            try:
+                rd, figs, rates = compute_pvpro(_df, _mapping,
+                                                progress_callback=_cb, **_kwargs)
+                # Log AFTER compute_pvpro returns successfully but BEFORE
+                # we serialize the (potentially heavy) figs dict into the
+                # job store.  If the worker dies between the fitting loop
+                # and the "done" update -- e.g. OOM-killed by Heroku
+                # because the figs accumulator pushed us over the dyno's
+                # memory limit -- this event will be the last thing in
+                # the debug log, making the cause obvious.
+                _pvpro_update_job(_jid, phase="finalising",
+                                  message="Packing results…")
+                _pvpro_update_job(
+                    _jid, phase="done",
+                    result={"rd": float(rd), "figs": figs, "rates": rates},
+                    message="Done",
+                )
+            except Exception as exc:
+                _pvpro_update_job(_jid, phase="error",
+                                  error=f"{type(exc).__name__}: {exc}",
+                                  message=str(exc))
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        # Initial progress UI: status block + debug panel. The polling
+        # Interval lives in the page layout (initially disabled); we
+        # enable it here.
+        initial_ui = html.Div([
+            _pvpro_progress_ui(
+                phase="starting", current=0, total=1,
+                message="Spinning up PVPRO worker…", elapsed_s=0,
+            ),
+            _pvpro_debug_panel(current_job_id=job_id),
+        ])
+        # Clear any previous fast-method output, send the progress UI to its
+        # own (Loading-free) container, disable the run button, enable poll.
+        return ["", initial_ui, True, "Running PVPRO…",
+                {}, {"job_id": job_id}, False]
+
     else:
-        raise ValueError(f"Unknown metric: {selected_metric}")
+        daily_data = aggregate_daily(df_filtered, irra_key)
+
+        if selected_metric == "YOY":
+            rd, fig = compute_yoy(daily_data,
+                                  rolling_window=yoy_window if yoy_window else 30,
+                                  iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
+        elif selected_metric == "LR":
+            rd, fig = compute_lr(daily_data)
+        elif selected_metric == "HW":
+            rd, fig = compute_hw(daily_data, period=hw_period if hw_period else 12)
+        elif selected_metric == "ARIMA":
+            rd, fig = compute_arima(daily_data,
+                                    p=arima_p if arima_p is not None else 1,
+                                    d=arima_d if arima_d is not None else 1,
+                                    q=arima_q if arima_q is not None else 0,
+                                    seasonal_period=arima_s if arima_s else 12)
+        elif selected_metric == "CSD":
+            rd, fig = compute_csd(daily_data, period=csd_period if csd_period else 12)
+        else:
+            raise ValueError(f"Unknown metric: {selected_metric}")
 
     # Restyle the figure
     if fig is not None:
@@ -2365,7 +3296,8 @@ def analyze_uploaded_data_callback(
 
     # Editorial summary with HUGE rate display
     rate_pct = rd / 100
-    rate_color = ROSE if rate_pct < 0 else SUCCESS
+    # Single unified rate color across methods (major-value blue).
+    rate_color = VALUE_MAJOR
 
     summary_block = html.Div([
         html.Div("annual degradation rate", style={
@@ -2379,7 +3311,6 @@ def analyze_uploaded_data_callback(
                 "fontFamily": "Arial, sans-serif",
                 "fontWeight": "700",
                 "color": rate_color,
-                
                 "lineHeight": "1",
             }),
             html.Span("/year", style={
@@ -2391,11 +3322,18 @@ def analyze_uploaded_data_callback(
             }),
         ], style={"marginBottom": "16px"}),
         html.Div([
-            html.Div([html.Span("Method: ",   style={"color": INK_SOFT}), html.B(selected_metric)],            style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Duration: ", style={"color": INK_SOFT}), html.B(f"{duration_years:.1f} years")], style={"fontSize": "14px", "marginBottom": "3px"}),
+            # All three are supporting/detail values -- plain dark text.
+            html.Div([html.Span("Method: ",   style={"color": INK_SOFT}),
+                      html.B(selected_metric, style={"color": VALUE_DETAIL})],
+                     style={"fontSize": "14px", "marginBottom": "3px"}),
+            html.Div([html.Span("Duration: ", style={"color": INK_SOFT}),
+                      html.B(f"{duration_years:.1f} years",
+                             style={"color": VALUE_DETAIL})],
+                     style={"fontSize": "14px", "marginBottom": "3px"}),
             html.Div([html.Span("Window: ",   style={"color": INK_SOFT}),
                       html.B(f"{start_date.strftime('%Y-%m-%d') if hasattr(start_date,'strftime') else start_date}  →  {end_date.strftime('%Y-%m-%d') if hasattr(end_date,'strftime') else end_date}",
-                            style={"fontFamily": "Arial, sans-serif", "fontSize": "13px"})],
+                            style={"fontFamily": "Arial, sans-serif",
+                                   "fontSize": "13px", "color": VALUE_DETAIL})],
                      style={"fontSize": "14px"}),
         ], style={"fontFamily": "Arial, sans-serif"}),
     ])
@@ -2418,7 +3356,380 @@ def analyze_uploaded_data_callback(
         "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
         "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
     }
-    return [degradation_layout, False, "Calculate Degradation", result_dict]
+    # Write to degradation-output (under Loading), clear pvpro-progress-output.
+    return [degradation_layout, "", False, "Calculate Degradation",
+            result_dict, {}, True]
+
+
+# =============================================================================
+# CALLBACK — PVPRO progress polling
+#
+# While `compute_pvpro` runs in a background thread, this callback fires every
+# ~400ms, reads the latest progress from _PVPRO_JOBS, and re-renders the
+# progress bar in `pvpro-progress-output`.  This output lives OUTSIDE the
+# dcc.Loading wrapper so the spinner does not overlay the progress bar on
+# every tick.  When the worker finishes (`phase == "done"`) it pulls the
+# result off the job and replaces the progress UI with the final summary +
+# multi-panel figure.  At that point the Interval is disabled, so polling
+# naturally stops.
+# =============================================================================
+@app.callback(
+    Output("pvpro-progress-output", "children", allow_duplicate=True),
+    Output("run-btn", "disabled",  allow_duplicate=True),
+    Output("run-btn", "children",  allow_duplicate=True),
+    Output("degradation-result-store", "data", allow_duplicate=True),
+    Output("pvpro-job", "data", allow_duplicate=True),
+    Output("pvpro-poll-interval", "disabled", allow_duplicate=True),
+    Input("pvpro-poll-interval", "n_intervals"),
+    State("pvpro-job", "data"),
+    State("dataframe-filtered", "data"),
+    prevent_initial_call=True,
+)
+def _pvpro_poll_callback(_n, job_store, df_filtered_json):
+    from dash import no_update
+
+    job_id = (job_store or {}).get("job_id")
+    if not job_id:
+        # No active job_id in the store, which means a previous poll's
+        # response already cleared it -- the run is done and the UI is
+        # already on screen.  Return all-no_update so this late tick (the
+        # browser had queued it before disabled=True propagated) cannot
+        # clobber the freshly-rendered final UI.  If we returned concrete
+        # values like "Calculate Degradation" for the button, those would
+        # race against the winner's response and potentially overwrite
+        # only some of the six outputs (leaving pvpro-progress-output
+        # stuck on the progress bar -- the bug we saw in production).
+        return [no_update, no_update, no_update,
+                no_update, no_update, no_update]
+
+    job = _pvpro_read_job(job_id)
+    if job is None:
+        # Could be either:
+        #   (1) genuine multi-worker bug -- the worker that created the job
+        #       is different from the one handling this poll, and diskcache
+        #       isn't bridging them.  Symptom: the user never saw progress
+        #       advance, so the orange "lost" alert is helpful.
+        #   (2) a benign race after a successful render -- the browser had
+        #       already queued the next poll tick by the time the Interval's
+        #       disable=True propagated back, so a late poll arrives AFTER
+        #       _pvpro_drop_job() has run.  This is harmless and used to
+        #       clobber the just-rendered result with the orange alert.
+        #
+        # We disambiguate using the debug log: if THIS worker has ever seen
+        # this job_id (any event mentioning it), the None means "job was
+        # just dropped" -- race case, all-no_update.  Otherwise it's the
+        # smoking-gun multi-worker bug, show the orange banner.
+        prefix = job_id[:8]
+        seen_here = any(e.get("job_id") == prefix
+                        for e in _pvpro_debug_snapshot())
+        if seen_here:
+            # Race after success/error: silently idle, do NOT touch any
+            # output.  See the comment on the not-job_id early-out above
+            # for why all-no_update is essential here.
+            return [no_update, no_update, no_update,
+                    no_update, no_update, no_update]
+
+        # Genuine multi-worker bug -- show the diagnostic banner alongside
+        # the debug panel so the user can inspect what happened.
+        lost_ui = html.Div([
+            html.Div(
+                "PVPRO progress lost — this worker has never seen the job "
+                "that was started. If you're on a multi-worker deployment, "
+                "enable diskcache (set PVPRO_DISKCACHE_DIR + install "
+                "diskcache). Expand the Debug panel below for details.",
+                style={
+                    "padding": "12px 14px",
+                    "background": "#fff7ed",
+                    "border": "1px solid #fed7aa",
+                    "borderRadius": "10px",
+                    "color": "#7c2d12",
+                    "fontSize": "13px",
+                    "fontFamily": "Arial, sans-serif",
+                },
+            ),
+            _pvpro_debug_panel(current_job_id=job_id),
+        ])
+        return [lost_ui, False, "Calculate Degradation",
+                no_update, {}, True]
+
+    phase = job.get("phase", "")
+    elapsed = max(0.0, time.time() - job.get("started_at", time.time()))
+
+    # --- Still working ---
+    # Phases that mean "PVPRO worker is still going": anything other than
+    # the terminal states (done, error, rendered).  "rendered" means a
+    # previous poll already rendered the final UI; we still re-render it
+    # below (cheap belt-and-suspenders) so that a race between the done
+    # branch and a late poll never leaves the user looking at an old
+    # progress bar.
+    if phase not in ("done", "error", "rendered"):
+        ui = html.Div([
+            _pvpro_progress_ui(
+                phase=phase,
+                current=job.get("current", 0),
+                total=job.get("total", 1),
+                message=job.get("message", ""),
+                elapsed_s=elapsed,
+            ),
+            _pvpro_debug_panel(current_job_id=job_id),
+        ])
+        return [ui, True, "Running PVPRO…", no_update, job_store, False]
+
+    # --- Failed ---
+    if phase == "error":
+        # Mark rendered instead of hard-dropping so a late poll doesn't
+        # clobber the error UI we're about to render.
+        _pvpro_update_job(job_id, phase="rendered")
+        return [
+            html.Div([
+                _no_data_alert(f"PVPRO failed: {job.get('error', 'unknown error')}"),
+                _pvpro_debug_panel(current_job_id=job_id),
+            ]),
+            False, "Calculate Degradation", {}, {}, True,
+        ]
+
+    # --- Done OR already-rendered: render the final layout under a per-job
+    # lock to prevent concurrent polls from racing into the same render
+    # path.  The first thread in builds the UI and marks phase="rendered";
+    # all subsequent threads either find phase="rendered" inside the lock
+    # (and return no_update — the UI is already on screen) or skip with a
+    # non-blocking try-acquire that fails (also returns no_update).
+    # Either way only ONE thread does the expensive final_layout build,
+    # which eliminates the "stuck at 99%" timing race.
+    render_lock = _pvpro_get_render_lock(job_id)
+    acquired = render_lock.acquire(blocking=False)
+    if not acquired:
+        # Another thread is currently rendering this job.  We can safely
+        # idle this poll out -- the other thread WILL write the final UI
+        # and set disabled=True.  CRITICALLY, we return no_update for
+        # ALL SIX outputs, not just the children.  If we returned any
+        # concrete value (e.g. button text = "Calculate Degradation",
+        # interval-disabled = True), this late response could land at the
+        # browser AFTER the winner's response and Dash's "last response
+        # wins" semantics would apply our no_update children alongside
+        # those concrete values -- the user would see button reset and
+        # polling stopped BUT pvpro-progress-output still stuck on the
+        # old progress bar (no_update means "keep previous value").
+        # All-no_update means Dash applies nothing from this response,
+        # so the winner's full UI sticks regardless of arrival order.
+        _pvpro_debug("done_branch_skip",
+                     job_id=job_id[:8], reason="render-locked")
+        return [no_update, no_update, no_update,
+                no_update, no_update, no_update]
+
+    try:
+        # Re-read inside the lock.  If a different thread already marked
+        # this job "rendered", the UI is already on screen -- this is a
+        # late poll, return all-no_update (same reasoning as above).
+        job = _pvpro_read_job(job_id)
+        if job is None or job.get("phase") == "rendered":
+            _pvpro_debug("done_branch_skip",
+                         job_id=job_id[:8],
+                         reason=("job-gone" if job is None
+                                 else "already-rendered"))
+            return [no_update, no_update, no_update,
+                    no_update, no_update, no_update]
+
+        result = job.get("result") or {}
+        rd = result.get("rd", float("nan"))
+        figs = result.get("figs") or {}
+        rates = result.get("rates", {}) or {}
+
+        # Recover the window dates from the filtered dataframe (same logic as
+        # the synchronous path).
+        try:
+            df_f = _df_from_store(df_filtered_json)
+            start_date = df_f.index.min()
+            end_date   = df_f.index.max()
+            duration_years = (end_date - start_date).days / 365.25
+            start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
+            end_str   = end_date.strftime('%Y-%m-%d')   if hasattr(end_date,   'strftime') else str(end_date)
+        except Exception:
+            start_str = end_str = "—"
+            duration_years = 0.0
+
+        rate_pct = rd / 100 if np.isfinite(rd) else 0.0
+        # Major-value blue for the headline rate (consistent across methods).
+        rate_color = VALUE_MAJOR
+
+        # Per-quantity rates panel (the "Pmp, Vmp, Imp, Voc, Isc" table).
+        QUANT_LABELS = [
+            ("p_mp_ref", "Pmp", "max power point power"),
+            ("v_mp_ref", "Vmp", "max power point voltage"),
+            ("i_mp_ref", "Imp", "max power point current"),
+            ("v_oc_ref", "Voc", "open-circuit voltage"),
+            ("i_sc_ref", "Isc", "short-circuit current"),
+        ]
+        rates_rows = []
+        for key, short, descr in QUANT_LABELS:
+            r = rates.get(key, float("nan"))
+            if not np.isfinite(r):
+                r_str = "n/a"
+            else:
+                r_str = f"{r:+.2f}%/yr"
+            # Label cell:  <b>Pmp</b> (ref)
+            label_cell = html.Td(
+                [html.B(short, style={"fontFamily": "Arial, sans-serif"}),
+                 html.Span(" (ref)", style={
+                     "color": INK_SOFT, "fontSize": "13px",
+                     "fontFamily": "Arial, sans-serif",
+                 })],
+                style={"padding": "4px 12px 4px 0", "whiteSpace": "nowrap"},
+            )
+            rates_rows.append(html.Tr([
+                label_cell,
+                html.Td(descr, style={"padding": "4px 12px 4px 0",
+                                      "color": INK_SOFT, "fontSize": "13px",
+                                      "fontFamily": "Arial, sans-serif"}),
+                # Detail-value (per-row supporting number, not the headline).
+                html.Td(r_str, style={"padding": "4px 0", "color": VALUE_DETAIL,
+                                      "fontWeight": "700", "textAlign": "right",
+                                      "fontFamily": "Arial, sans-serif"}),
+            ]))
+        rates_table = html.Div([
+            html.Div("parameter degradation rates", style={
+                "fontSize": "12px", "color": INK_SOFT,
+                "textTransform": "uppercase", "letterSpacing": "0.1em",
+                "fontWeight": "600", "marginBottom": "8px",
+                "fontFamily": "Arial, sans-serif",
+            }),
+            html.Table(html.Tbody(rates_rows), style={
+                "width": "100%", "fontSize": "14px",
+                "borderCollapse": "collapse",
+            }),
+        ], style={"marginTop": "14px", "marginBottom": "16px"})
+
+        summary_block = html.Div([
+            html.Div("annual degradation rate (Pmp, ref)", style={
+                "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
+                "fontFamily": "Arial, sans-serif",
+            }),
+            html.Div([
+                html.Span(f"{rate_pct:.2%}", style={
+                    "fontSize": "56px", "fontFamily": "Arial, sans-serif",
+                    "fontWeight": "700", "color": rate_color, "lineHeight": "1",
+                }),
+                html.Span("/year", style={
+                    "fontSize": "20px", "color": INK_SOFT, "marginLeft": "8px",
+                    "fontFamily": "Arial, sans-serif", "fontStyle": "italic",
+                }),
+            ], style={"marginBottom": "10px"}),
+            html.Div([
+                # Detail (supporting) numbers -- plain dark text.
+                html.Div([html.Span("Method: ",   style={"color": INK_SOFT}),
+                          html.B("PVPRO", style={"color": VALUE_DETAIL})],
+                         style={"fontSize": "14px", "marginBottom": "3px"}),
+                html.Div([html.Span("Duration: ", style={"color": INK_SOFT}),
+                          html.B(f"{duration_years:.1f} years",
+                                 style={"color": VALUE_DETAIL})],
+                         style={"fontSize": "14px", "marginBottom": "3px"}),
+                html.Div([html.Span("Window: ",   style={"color": INK_SOFT}),
+                          html.B(f"{start_str}  →  {end_str}",
+                                 style={"fontFamily": "Arial, sans-serif",
+                                        "fontSize": "13px",
+                                        "color": VALUE_DETAIL})],
+                         style={"fontSize": "14px"}),
+                html.Div([html.Span("Elapsed: ",  style={"color": INK_SOFT}),
+                          html.B(f"{int(elapsed)} s",
+                                 style={"color": VALUE_DETAIL})],
+                         style={"fontSize": "13px", "marginTop": "4px"}),
+            ], style={"fontFamily": "Arial, sans-serif"}),
+            rates_table,
+        ])
+
+        # ---------------------------------------------------------------
+        # Build the figure grid.  Each Plotly figure is wrapped in its OWN
+        # rounded-corner card div (white background, subtle border).  Using
+        # HTML cards instead of Plotly shapes guarantees axis tick labels
+        # don't overlap the background, and lets us tune row heights with CSS.
+        #
+        # Layout (CSS Grid):
+        #   row 1:  [          Pmp (spans 2 cols)          ]
+        #   row 2:  [   Vmp    ]   [   Imp    ]
+        #   row 3:  [   Voc    ]   [   Isc    ]
+        # ---------------------------------------------------------------
+        card_style = {
+            "background": "#ffffff",
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "10px",
+            "padding": "8px 10px",
+            "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.04)",
+        }
+
+        def _fig_card(key, span_cols=False):
+            f = figs.get(key)
+            if f is None:
+                return html.Div()
+            style = dict(card_style)
+            if span_cols:
+                style["gridColumn"] = "1 / -1"   # span both columns
+            return html.Div(
+                dcc.Graph(figure=f, config={"displayModeBar": False}),
+                style=style,
+            )
+
+        fig_grid = html.Div(
+            [
+                _fig_card("p_mp_ref", span_cols=True),
+                _fig_card("v_mp_ref"),
+                _fig_card("i_mp_ref"),
+                _fig_card("v_oc_ref"),
+                _fig_card("i_sc_ref"),
+            ],
+            style={
+                "display": "grid",
+                "gridTemplateColumns": "1fr 1fr",
+                "gap": "10px",
+                "marginTop": "8px",
+            },
+        )
+
+        # Section heading above the figure grid — matches the rates-table
+        # heading style for consistency.
+        fig_grid_heading = html.Div("pvpro-lite degradation trends", style={
+            "fontSize": "12px", "color": INK_SOFT,
+            "textTransform": "uppercase", "letterSpacing": "0.1em",
+            "fontWeight": "600", "marginBottom": "6px", "marginTop": "8px",
+            "fontFamily": "Arial, sans-serif",
+        })
+
+        final_layout = html.Div([
+            html.Div(summary_block, style={"marginBottom": "20px"}),
+            fig_grid_heading,
+            fig_grid,
+        ], className="slide-in-up", style={
+            "padding": "20px",
+            "background": "#f8fafc",
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "10px",
+            "marginTop": "16px",
+        })
+
+        result_dict = {
+            "rate_pct_per_year": round(float(rate_pct) * 100, 4)
+                if np.isfinite(rate_pct) else None,
+            "method": "PVPRO",
+            "duration_years": round(float(duration_years), 2),
+            "start": start_str,
+            "end":   end_str,
+            "rates_per_quantity": {k: round(float(v), 4)
+                                   for k, v in rates.items()
+                                   if v is not None and np.isfinite(v)},
+        }
+        # Mark 'rendered' AS LATE AS POSSIBLE -- only once the full final_layout
+        # has been built.  If we marked earlier, a concurrent poll could see
+        # phase="rendered" mid-construction and take an early code path that
+        # competes with this branch (the race that caused the 96%-stuck bug).
+        _pvpro_update_job(job_id, phase="rendered")
+        return [html.Div([final_layout, _pvpro_debug_panel(current_job_id=job_id)]),
+                False, "Calculate Degradation",
+                result_dict, {}, True]
+    finally:
+        # Always release the lock, even if rendering raised.  If we
+        # don't release, every future poll for this job_id will
+        # silently no_update and the user will never see the result.
+        render_lock.release()
 
 
 # =============================================================================
@@ -2486,8 +3797,8 @@ def analyze_uploaded_data_callback(
     # Example dataset
     if trigger in ["load-example-btn-1", "load-example-btn-2", "load-example-btn-3"]:
         file_map = {
-            "load-example-btn-1": "sys_1278_downsampled.parquet",
-            "load-example-btn-2": "sys_1403_part1_downsampled.parquet",
+            "load-example-btn-1": "sys_1278_downsampled_with_VI.parquet",
+            "load-example-btn-2": "sys_1403_part1_downsampled_with_VI.parquet",
             "load-example-btn-3": "sys_1422_downsampled.parquet",
         }
         example_filename = file_map.get(trigger)
@@ -2718,7 +4029,10 @@ _TOPIC_CLASSIFIER_PROMPT = """You are a strict topic classifier for the PV-Copil
 PV-Copilot is a web app for analyzing photovoltaic (PV) field data to estimate
 module / system degradation rates. In-scope topics include:
 - The PV-Copilot tool itself (its 4 steps: Data Prescreening, Filter, Degradation, Code)
-- PV / solar panel degradation analysis, methods (YoY, LR, ARIMA, Holt-Winters, CSD)
+- PV / solar panel degradation analysis, methods (YoY, LR, ARIMA, Holt-Winters, CSD,
+  and PVPRO single-diode-model fitting -- including its reference parameters
+  IL_ref, I0_ref, Rs, Rsh, n, and the reconstructed STC quantities Pmp, Vmp,
+  Imp, Voc, Isc)
 - Filtering of PV time-series data (irradiance, clear-sky, outliers, temperature)
 - PV physics and engineering concepts directly relevant to degradation analysis
   (e.g., normalized power, IV curves, temperature coefficients, soiling, encapsulant)
@@ -2891,6 +4205,10 @@ def build_chat_context(mapped_vars, df_data, df_filtered, deg_result,
             "duration_years": deg_result.get("duration_years"),
             "window_start": deg_result.get("start"),
             "window_end":   deg_result.get("end"),
+            # Carry through the per-quantity PVPRO rates (Pmp / Vmp / Imp /
+            # Voc / Isc) if they exist, so the LLM can answer questions like
+            # "did my current degrade more than my voltage?".
+            "rates_per_quantity": deg_result.get("rates_per_quantity"),
         }
 
     # ----- Step 4: Code generation -----
@@ -2956,9 +4274,27 @@ def _format_context_for_prompt(ctx: dict) -> str:
         g = ctx["degradation"]
         lines.append("")
         lines.append("✓ STEP 3 (Degradation) — COMPLETED")
-        lines.append(f"  • Annual degradation rate: {g.get('rate_percent_per_year')}%/year")
+        # Always quote the rate to TWO decimal places in chat output ("0.46%").
+        # The result-store keeps higher precision for the figure summary.
+        rate_raw = g.get('rate_percent_per_year')
+        rate_fmt = (f"{float(rate_raw):.2f}%/year"
+                    if rate_raw is not None and rate_raw == rate_raw  # not NaN
+                    else "unavailable")
+        lines.append(f"  • Annual degradation rate: {rate_fmt}")
+        lines.append(f"    (when discussing this number in chat, always format to "
+                     f"TWO decimal places like '{rate_fmt}', NOT four decimals)")
         lines.append(f"  • Method used: {g.get('method')}")
         lines.append(f"  • Window: {g.get('window_start')} to {g.get('window_end')} ({g.get('duration_years')} years)")
+        # Per-quantity PVPRO rates (if present) -- each gets the same
+        # two-decimal formatting rule.
+        rpq = g.get("rates_per_quantity") or {}
+        if rpq:
+            lines.append("  • Per-quantity rates (only when method = PVPRO):")
+            for key, val in rpq.items():
+                try:
+                    lines.append(f"      - {key}: {float(val):.2f}%/year")
+                except Exception:
+                    pass
     else:
         lines.append("")
         lines.append("✗ STEP 3 (Degradation) — NOT YET RUN")
@@ -3252,20 +4588,23 @@ app.clientside_callback(
 # =============================================================================
 # CALLBACK — STEP PROGRESS TRACKER
 # Watches the existing data stores; flips boolean flags as steps complete.
+# Uses `degradation-result-store` (rather than the output children) so the
+# `calc` flag flips only when a successful rate has been computed — both
+# fast methods and PVPRO write to this store on completion.
 # =============================================================================
 @app.callback(
     Output("step-progress", "data", allow_duplicate=True),
     Input("mapped-vars-store",  "data"),
     Input("dataframe-filtered", "data"),
-    Input("degradation-output", "children"),
+    Input("degradation-result-store", "data"),
     Input("download-link",      "style"),
     prevent_initial_call="initial_duplicate",
 )
-def update_progress(mapped_vars, df_filtered, deg_children, dl_style):
+def update_progress(mapped_vars, df_filtered, deg_result, dl_style):
     return {
         "data":   bool(mapped_vars),                               # data parsed
         "filter": bool(df_filtered),                               # filters applied
-        "calc":   bool(deg_children) and deg_children != "",       # degradation rendered
+        "calc":   bool(deg_result) and deg_result.get("rate_pct_per_year") is not None,
         "code":   bool(dl_style) and dl_style.get("display") not in (None, "none"),
     }
 

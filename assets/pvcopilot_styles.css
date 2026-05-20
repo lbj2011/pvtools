@@ -114,9 +114,13 @@
 .pvcopilot-root #chat-composer {
     color: #ffffff !important;
     caret-color: #ffffff !important;
+    /* Override the global input[type="text"] 14px rule below -- the chat
+       composer is the page's primary input and should read larger. */
+    font-size: 17px !important;
 }
 .pvcopilot-root #chat-composer::placeholder {
     color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 17px !important;
 }
 
 /* <details>/<summary>: replace the default flush-against-text disclosure
@@ -147,12 +151,103 @@
     content: "▾";
 }
 
-/* Radio labels — keep inherited color (avoid Bootstrap link-blue bleed) */
+/* Radio labels — keep inherited color (avoid Bootstrap link-blue / purple
+   :visited bleed).  The parent app's style.css has this rule scoped to the
+   single id #metric-selected-visible.  Now that we split the metric chooser
+   into two visible RadioItems (stat vs PVPRO) plus a hidden master, the
+   parent rule no longer covers the visible ones -- so without the addition
+   below they fall through to Bootstrap's default link color (often rendered
+   purple due to the browser's :visited state on the underlying anchor). */
 .pvcopilot-root .metric-radio-label,
 .pvcopilot-root .metric-radio-label:hover,
-.pvcopilot-root .metric-radio-label * {
+.pvcopilot-root .metric-radio-label:focus,
+.pvcopilot-root .metric-radio-label:active,
+.pvcopilot-root .metric-radio-label:visited,
+.pvcopilot-root .metric-radio-label *,
+.pvcopilot-root #metric-stat-radio .form-check-label,
+.pvcopilot-root #metric-stat-radio .form-check-label:hover,
+.pvcopilot-root #metric-stat-radio .form-check-label:focus,
+.pvcopilot-root #metric-stat-radio .form-check-label:active,
+.pvcopilot-root #metric-stat-radio .form-check-label:visited,
+.pvcopilot-root #metric-stat-radio .form-check-label *,
+.pvcopilot-root #metric-pvpro-radio .form-check-label,
+.pvcopilot-root #metric-pvpro-radio .form-check-label:hover,
+.pvcopilot-root #metric-pvpro-radio .form-check-label:focus,
+.pvcopilot-root #metric-pvpro-radio .form-check-label:active,
+.pvcopilot-root #metric-pvpro-radio .form-check-label:visited,
+.pvcopilot-root #metric-pvpro-radio .form-check-label * {
     color: inherit !important;
     text-decoration: none !important;
+}
+
+/* dcc.RadioItems renders each option as a <label> (no class).  The above
+   rule only covers labels with className="metric-radio-label" OR labels
+   inside the metric radios with the Bootstrap class.  Also catch plain
+   <label> children inside the two metric radios as a belt-and-braces
+   measure. */
+.pvcopilot-root #metric-stat-radio label,
+.pvcopilot-root #metric-stat-radio label:hover,
+.pvcopilot-root #metric-stat-radio label:visited,
+.pvcopilot-root #metric-stat-radio label *,
+.pvcopilot-root #metric-pvpro-radio label,
+.pvcopilot-root #metric-pvpro-radio label:hover,
+.pvcopilot-root #metric-pvpro-radio label:visited,
+.pvcopilot-root #metric-pvpro-radio label * {
+    color: #0f172a !important;        /* INK */
+    text-decoration: none !important;
+}
+
+/* PVPRO radio option: lay out so the input + label content sit side-by-
+   side, and the label-content span fills the remaining row width.
+   Dash's dcc.RadioItems renders each option as:
+       <label class="dash-options-list-option">
+         <span class="dash-options-list-option-wrapper"><input ...></span>
+         <span class="dash-options-list-option-text">{our content}</span>
+       </label>
+   We flex the label so the two inner spans become flex siblings, then
+   give the text span flex:1 so it stretches.  This is what finally lets
+   the inner title-row Div (with the logo pinned right) get the full row
+   width to push the logo to the right edge. */
+.pvcopilot-root #metric-pvpro-radio .dash-options-list-option {
+    display: flex !important;
+    align-items: flex-start !important;
+    width: 100% !important;
+}
+.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-wrapper {
+    flex-shrink: 0;
+    /* No margin-top -- alignment is handled by line-height:1 on the
+       title row so the radio dot center lines up with PVPRO's cap-height. */
+}
+.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-text {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    display: block !important;
+}
+/* Top-align the radio input with the "PVPRO" text.  The default 1.55
+   body line-height adds vertical space above the glyph; tightening just
+   the title row to line-height:1 brings the text up to where the radio
+   dot is sitting. */
+.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-text
+       > div:first-child {
+    line-height: 1.1 !important;
+}
+
+/* Exception: the IMPORTANT badge needs to keep its white text against the
+   navy pill background -- otherwise the rules above force it to inherit
+   the ink-dark label color and the badge becomes unreadable.  The selector
+   has to match or exceed the specificity of the #metric-*-radio rules
+   that force INK, so we list every radio-scoped form explicitly. */
+.pvcopilot-root .important-badge,
+.pvcopilot-root .important-badge *,
+.pvcopilot-root #metric-stat-radio  .important-badge,
+.pvcopilot-root #metric-stat-radio  .important-badge *,
+.pvcopilot-root #metric-pvpro-radio .important-badge,
+.pvcopilot-root #metric-pvpro-radio .important-badge *,
+.pvcopilot-root #metric-stat-radio  label .important-badge,
+.pvcopilot-root #metric-stat-radio  label .important-badge *,
+.pvcopilot-root #metric-pvpro-radio label .important-badge,
+.pvcopilot-root #metric-pvpro-radio label .important-badge * {
+    color: #ffffff !important;
 }
 
 /* <details>/<summary> caret styling */
@@ -173,10 +268,17 @@
     content: "▾ ";
 }
 
-/* Recolor dash-bootstrap checkboxes to ink */
+/* Recolor dash-bootstrap checkboxes to NAVY (matches the rest of the app's
+   accents).  This is what wins over the inline `accentColor: NAVY` set on
+   the Python side, because Bootstrap's .form-check-input rule is also
+   !important.  Keep both in sync. */
 .pvcopilot-root .form-check-input:checked {
-    background-color: #0f172a !important;
-    border-color:     #0f172a !important;
+    background-color: #0064AB !important;
+    border-color:     #0064AB !important;
+}
+.pvcopilot-root .form-check-input:focus {
+    border-color:     #0064AB !important;
+    box-shadow: 0 0 0 0.15rem rgba(0, 100, 171, 0.18) !important;
 }
 
 /* Hide the legacy page-title only inside the copilot */
