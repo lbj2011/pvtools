@@ -76,12 +76,20 @@ EXPOSE 8000
 #   - With diskcache (PVPRO_DISKCACHE_DIR set), the background-job state
 #     persists across requests even with the single-worker setup.
 #
-# --timeout 300 covers PVPRO's worst-case ~3 minute runtime; the default
-# of 30s would kill long-running gunicorn workers, the default 120 might
-# be tight for the larger datasets.
+# --timeout 600 covers PVPRO's worst-case ~6 minute runtime on large
+# datasets with non-trivial array geometry (e.g. 14 modules/string,
+# 37 parallel strings).  Each window fit can take 1-3 seconds when
+# p0 lands far from the converged optimum, and 100+ windows is normal
+# for 8-year datasets.  Lower timeouts cause gunicorn to SIGKILL the
+# worker mid-run, which manifests as a "stuck" UI to the user.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONFAULTHANDLER=1
+
 CMD gunicorn index:server \
     -k gthread \
     --workers 1 \
     --threads 4 \
-    --timeout 300 \
+    --timeout 600 \
     --bind 0.0.0.0:${PORT:-8000}
+    

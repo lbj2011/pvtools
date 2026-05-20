@@ -357,6 +357,22 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
     dcc.Loading wrapper around `degradation-output`.  Keeping the two
     separate prevents the Loading spinner from overlaying this UI on
     every Interval tick.
+
+    Bottom-row stats
+    ----------------
+    Once at least one window has been fit (`current >= 1` and phase is
+    "fitting"), we compute two derived numbers from the wall-clock
+    elapsed time and the (current, total) counter:
+
+        time_per_window = elapsed_s / current
+        eta_seconds     = time_per_window * (total - current)
+
+    These get appended to the existing "Elapsed: Ns" line as
+    "  ·  ~Xs/window  ·  ETA: Ms".  They're observed-rate-based, so they
+    self-correct if the worker speeds up or slows down (warm-start, for
+    example, makes later windows faster -- the ETA shrinks accordingly).
+    We don't show them during pre-fitting phases (prepare, p0) because
+    the counter is meaningless there.
     """
     pct = 0 if not total else int(round(100 * current / max(total, 1)))
     pct = max(0, min(100, pct))
@@ -394,6 +410,25 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
         }
     )
 
+    # Build the bottom stats line.  Always shows elapsed; when we have
+    # enough info, also shows the observed per-window time and ETA.
+    def _fmt_secs(s):
+        """Render seconds as either 'Xs' (under a minute) or 'Mm Ss'."""
+        s = max(0, int(round(s)))
+        if s < 60:
+            return f"{s}s"
+        m, s_rem = divmod(s, 60)
+        return f"{m}m {s_rem:02d}s"
+
+    stats_text = f"Elapsed: {_fmt_secs(elapsed_s)}"
+    if phase == "fitting" and current and current >= 1 and total and total > current:
+        per_window = elapsed_s / max(current, 1)
+        eta_secs   = per_window * (total - current)
+        stats_text += (
+            f"  ·  ~{per_window:.1f}s/window"
+            f"  ·  ETA: {_fmt_secs(eta_secs)}"
+        )
+
     return html.Div([
         # Title line: constant "Running PVPRO" + percent only.
         html.Div([
@@ -427,8 +462,9 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
                 "fontFamily": "Arial, sans-serif",
             }
         ),
+        # Bottom stats: elapsed + (during fitting) per-window time + ETA.
         html.Div(
-            f"Elapsed: {int(elapsed_s):d}s",
+            stats_text,
             style={
                 "fontSize": "11px", "color": MUTED, "marginTop": "4px",
                 "fontFamily": "Arial, sans-serif",
@@ -1218,6 +1254,96 @@ def _step_state(progress, step_key, prior_done):
     return "pending"
 
 
+def _chat_sidebar_item():
+    """A clickable sidebar row for the Ask-Assistant chat section.
+
+    Visually distinct from the numbered steppers:
+      * Light-blue tint (NAVY_SOFT) for the background, matching the
+        "active" treatment of the numbered steps -- chat is *always*
+        available, so always reading as available is on-brand.
+      * Top-border + margin-top to create a clear gray divider between
+        the linear workflow (steps 1-4) and the always-on chat helper.
+        Without the divider the chat row read as a fifth step.
+
+    Carries the same pattern-dict id (`{"type": "step-row", "step": "chat"}`)
+    as the numbered steps, so the existing scroll-to-target clientside
+    callback picks it up automatically; it scrolls to the element with
+    id="agent-chat-wrap" on the right panel.
+    """
+    return html.Div(
+        [
+            # Bullet -- chat glyph instead of a digit.  Solid blue
+            # background instead of an outline since this row is always
+            # "active".
+            html.Div(
+                "💬",
+                style={
+                    "width": "26px",
+                    "height": "26px",
+                    "borderRadius": "50%",
+                    "background": "white",
+                    "color": NAVY,
+                    "border": f"1.5px solid {BORDER_STRONG}",
+                    "display": "flex",
+                    "alignItems": "center",
+                    "justifyContent": "center",
+                    "fontSize": "13px",
+                    "flexShrink": "0",
+                }
+            ),
+            html.Div(
+                [
+                    html.Div("Ask the Assistant", style={
+                        "fontSize": "15px",
+                        "fontWeight": "600",
+                        "color": INK,
+                        "fontFamily": "Arial, sans-serif",
+                        "whiteSpace": "nowrap",
+                    }),
+                    html.Div("Chat about your data", style={
+                        "fontSize": "13px",
+                        "color": INK_SOFT,
+                        "marginTop": "1px",
+                        "fontFamily": "Arial, sans-serif",
+                        "whiteSpace": "nowrap",
+                    }),
+                ],
+                style={"marginLeft": "12px", "flex": "1", "minWidth": "0"}
+            ),
+            # Empty right slot to match the stepper_item layout (where
+            # the "done"/"active" status pill lives).
+            html.Div(
+                "",
+                style={
+                    "fontSize": "10px",
+                    "flexShrink": "0",
+                    "marginLeft": "8px",
+                }
+            ),
+        ],
+        id={"type": "step-row", "step": "chat"},
+        n_clicks=0,
+        style={
+            "display": "flex",
+            "alignItems": "center",
+            "padding": "10px 12px",
+            "borderRadius": "8px",
+            # Light gray (slate-100) instead of NAVY_SOFT -- the blue
+            # was reading too close to the "active" stepper row and
+            # competing for attention; a neutral gray makes the chat
+            # entry feel like a calm, always-available helper rather
+            # than a step the user needs to act on next.
+            "background": "#f1f5f9",
+            "border": f"1px solid {BORDER}",
+            "marginTop": "0",
+            "marginBottom": "4px",
+            "transition": "all 0.25s ease",
+            "cursor": "pointer",
+            "userSelect": "none",
+        }
+    )
+
+
 def build_sidebar(progress=None):
     progress = progress or {"data": False, "filter": False, "calc": False, "code": False}
 
@@ -1252,7 +1378,11 @@ def build_sidebar(progress=None):
                 style={"padding": "20px 18px 24px"}
             ),
 
-            # Workflow section
+            # Workflow section.  Horizontal padding matches the brand
+            # block above (18px) so the "WORKFLOW" label aligns flush
+            # with the left edge of the "PV Copilot" logo and the
+            # "Data in. Results out." slogan.  (The previous 12px left
+            # padding offset it 6px to the left and read as misaligned.)
             html.Div(
                 [
                     section_label("Workflow"),
@@ -1260,6 +1390,21 @@ def build_sidebar(progress=None):
                     stepper_item(2, "Filter",             "Clean the signal", INDIGO, state=s_filter, step_key="filter"),
                     stepper_item(3, "Degradation",        "Compute the rate", ROSE,   state=s_calc,   step_key="calc"),
                     stepper_item(4, "Code",               "Export & reuse",   SLATE,  state=s_code,   step_key="code"),
+                    # Divider between the linear workflow (steps 1-4)
+                    # and the always-on Chat helper.  A 1px gray line
+                    # sitting in 14px of vertical breathing room reads
+                    # as a hard category break rather than a fifth step.
+                    html.Div(style={
+                        "borderTop": f"1px solid {BORDER}",
+                        "margin": "14px 4px",
+                    }),
+                    # Chat is a "bonus" entry, NOT a numbered step -- not
+                    # gated on prior progress, never marked done.  Clicking
+                    # it scrolls the right panel to the Ask-Assistant chat
+                    # section (id="agent-chat-wrap"), via the same
+                    # scroll-into-view clientside callback that handles the
+                    # numbered steps.  See _chat_sidebar_item() above.
+                    _chat_sidebar_item(),
 
                     # Restart button — shown when at least one step is complete
                     html.Div(
@@ -1287,13 +1432,15 @@ def build_sidebar(progress=None):
                         }
                     ),
                 ],
-                style={"padding": "0 12px"}
+                style={"padding": "0 18px"}
             ),
 
             # Spacer
             html.Div(style={"flex": "1"}),
 
-            # About box
+            # About box.  Same 18px horizontal padding as the workflow
+            # block above and the brand block at the top -- keeps the
+            # whole left rail visually aligned.
             html.Div(
                 [
                     section_label("About"),
@@ -1517,7 +1664,11 @@ data_agent_body = html.Div([
         style={"marginBottom": "16px"}
     ),
 
-    # Upload zone
+    # Upload zone.  Padding intentionally compact -- the box was twice
+    # this tall and users found it visually dominant relative to the
+    # other Step-1 elements (example chips, Analyze button).  16px of
+    # vertical padding fits the icon + two lines of text without
+    # crowding, and matches the visual weight of the rest of the panel.
     dcc.Upload(
         id="upload-data",
         accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .parquet",
@@ -1526,10 +1677,11 @@ data_agent_body = html.Div([
                 html.Div(
                     "↑",
                     style={
-                        "fontSize": "24px",
+                        "fontSize": "20px",
                         "color": INK_SOFT,
-                        "marginBottom": "4px",
+                        "marginBottom": "2px",
                         "fontWeight": "300",
+                        "lineHeight": "1",
                     }
                 ),
                 html.Div(
@@ -1537,12 +1689,12 @@ data_agent_body = html.Div([
                         "Drag a file here, or ",
                         html.Span("browse", style={"color": ACCENT, "textDecoration": "underline", "fontWeight": "500"}),
                     ],
-                    style={"fontSize": "15px", "color": INK, "fontFamily": "Arial, sans-serif"}
+                    style={"fontSize": "14px", "color": INK, "fontFamily": "Arial, sans-serif"}
                 ),
                 html.Div(".csv  ·  .xlsx  ·  .parquet", style={
-                    "fontSize": "13px",
+                    "fontSize": "12px",
                     "color": INK_SOFT,
-                    "marginTop": "4px",
+                    "marginTop": "2px",
                     "fontFamily": "Arial, sans-serif",
                 }),
             ],
@@ -1550,7 +1702,7 @@ data_agent_body = html.Div([
         ),
         style={
             "width": "100%",
-            "padding": "26px 16px",
+            "padding": "14px 16px",
             "border": f"1.5px dashed {BORDER_STRONG}",
             "borderRadius": "10px",
             "backgroundColor": "#f8fafc",
@@ -1999,7 +2151,8 @@ metric_options = [
                 # IMPORTANT disclosure that follows.
                 margin_bottom="12px",
             ),
-            html.Details([
+            html.Details(
+                [
                 html.Summary(
                     [
                         html.Span("IMPORTANT",
@@ -2098,7 +2251,14 @@ metric_options = [
                           "border": f"1px solid {BORDER}",
                           "width": "100%", "minWidth": "640px",
                           "boxSizing": "border-box"}),
-            ]),  # closes html.Details
+                ],
+                id="pvpro-params-details",
+                # open state is driven by the metric-selected callback below:
+                # auto-open when PVPRO is the active metric, collapse otherwise
+                # and on any new-data event.  Start closed (the default radio
+                # value is "YOY", not PVPRO).
+                open=False,
+            ),  # closes html.Details
         ], style={"width": "100%"}),
         "value": "PVPRO",
     },
@@ -2269,8 +2429,12 @@ code_agent_body = html.Div([
         }
     ),
 
+    # Generate-code button.  The leading ⬇ glyph was removed per
+    # request -- the button text alone reads cleanly enough, and an
+    # arrow inside a primary-action button risks being confused with
+    # navigation ("download" vs. "generate then download").
     html.Button(
-        [html.Span("⬇  "), "Generate Full Python Code"],
+        "Generate Full Python Code",
         id="generate-code-btn",
         n_clicks=0,
         style={
@@ -2522,6 +2686,9 @@ chat_stream = html.Div(
         ),
 
         # ── Conversational chat (LLM-powered Q&A) ──────────────────────────
+        # `agent-chat-wrap` is the scroll target for the "Ask the Assistant"
+        # sidebar item; the same scroll-into-view callback that drives the
+        # numbered steppers picks this id up via its pattern-dict input.
         html.Div(
             [
                 # Section heading — outside the chat panel
@@ -2690,11 +2857,17 @@ chat_stream = html.Div(
                 # Drives the typing animation
                 dcc.Interval(id="chat-typer-interval", interval=20, disabled=True),
             ],
+            id="agent-chat-wrap",
             style={
                 "padding": "32px 64px 40px",
                 "background": "transparent",
                 "borderTop": f"1px solid {BORDER}",
                 "marginTop": "32px",
+                # scroll-margin-top compensates for any fixed header above
+                # the scroll container so `scrollIntoView` doesn't tuck
+                # this section's heading under it.  20px = visual breathing
+                # room above the "Ask the Assistant" title.
+                "scrollMarginTop": "20px",
             }
         ),
     ],
@@ -2722,6 +2895,12 @@ layout = html.Div([
     dcc.Store(id="code-read-store",       data={}),
     dcc.Store(id="data-source-store",     data=None),
     dcc.Store(id="stored-data-file-name", data=None),
+    # Tracks which example chip is currently "active" (the source of the
+    # loaded dataset).  Values: "load-example-btn-1" | "load-example-btn-2"
+    # | "load-example-btn-3" | None (cleared when the user uploads a file
+    # or hasn't picked an example yet).  Drives the blue ring around the
+    # active chip; the styling itself happens in a clientside callback.
+    dcc.Store(id="selected-example-store", data=None),
     # NEW: holds the computed degradation rate & method so the chat can reference it
     dcc.Store(id="degradation-result-store", data={}),
 
@@ -2734,7 +2913,17 @@ layout = html.Div([
 
     # Disabled by default; the PVPRO branch of the degradation callback flips
     # it on, and the polling callback flips it off again when done.
-    dcc.Interval(id="pvpro-poll-interval", interval=400,
+    #
+    # interval=1000ms (was 400ms): on Heroku, a faster poll starves the
+    # PVPRO worker thread of the GIL.  scipy.least_squares releases the
+    # GIL inside its C extension, but the Python-level fitting loop in
+    # compute_pvpro has to reacquire it between scipy calls -- and if a
+    # poll callback is sitting on the GIL too often each window's
+    # wall-clock time balloons.  1s polls give the worker enough breathing
+    # room while keeping the elapsed counter and progress numbers
+    # advancing visibly every second.  (We tried 2s -- the worker is a
+    # bit faster but the UI feels jumpy.)
+    dcc.Interval(id="pvpro-poll-interval", interval=1000,
                  n_intervals=0, disabled=True),
 
     # Main container — sidebar + chat side-by-side, BOTH inside dbc.Container so
@@ -3733,8 +3922,104 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json):
 
 
 # =============================================================================
-# CALLBACK — clientside "analyzing" button text (UNCHANGED)
+# CALLBACKS — Example chip "selected" highlight
+#
+# When the user clicks one of the three example chips, we want the
+# clicked chip to gain a blue ring and keep it until the user either
+# (a) clicks a DIFFERENT example chip (ring moves to the new one) or
+# (b) uploads a file of their own (rings clear from all chips).
+#
+# Two callbacks:
+#   1. selected-example-store gets written whenever an example chip is
+#      clicked (set to that chip's id) or an upload arrives (set to
+#      None).
+#   2. A single clientside callback reads selected-example-store and
+#      rewrites all three chips' style objects, applying the active
+#      style to the matching chip and the resting style to the others.
 # =============================================================================
+
+@app.callback(
+    Output("selected-example-store", "data", allow_duplicate=True),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+    Input("upload-data", "contents"),
+    prevent_initial_call=True,
+)
+def track_selected_example(*_):
+    trigger = ctx.triggered_id
+    if trigger in ("load-example-btn-1", "load-example-btn-2",
+                   "load-example-btn-3"):
+        return trigger
+    # An upload happened; the user is no longer using an example dataset.
+    return None
+
+
+# Style-update clientside callback.  We build the two style dicts in JS
+# (rather than relying on a CSS class) so the look is self-contained --
+# no external stylesheet to keep in sync.  The "active" look is a 2px
+# blue ring + faint blue tint; the "resting" look is the original
+# transparent + neutral grey border.
+app.clientside_callback(
+    """
+    function(selected) {
+        var resting = {
+            "padding": "8px 14px",
+            "background": "transparent",
+            "border": "1px solid #cbd5e1",
+            "borderRadius": "8px",
+            "fontSize": "14px",
+            "color": "#0f172a",
+            "cursor": "pointer",
+            "marginRight": "8px",
+            "fontFamily": "Arial, sans-serif",
+            "fontWeight": "500",
+            "transition": "border-color 0.15s ease, background 0.15s ease"
+        };
+        var active = Object.assign({}, resting, {
+            "border": "2px solid #0064AB",
+            "background": "#eff6ff",
+            "padding": "7px 13px"   // -1px to keep total width with 2px border
+        });
+        // Third chip has no right-margin in the layout -- mirror that.
+        var resting3 = Object.assign({}, resting); delete resting3.marginRight;
+        var active3  = Object.assign({}, active);  delete active3.marginRight;
+
+        return [
+            selected === "load-example-btn-1" ? active  : resting,
+            selected === "load-example-btn-2" ? active  : resting,
+            selected === "load-example-btn-3" ? active3 : resting3
+        ];
+    }
+    """,
+    [Output("load-example-btn-1", "style"),
+     Output("load-example-btn-2", "style"),
+     Output("load-example-btn-3", "style")],
+    Input("selected-example-store", "data"),
+)
+
+
+# =============================================================================
+# CALLBACKS — clientside button state machines
+#
+# Each step's primary action button needs to flip into a "working" state
+# the instant the user clicks, then back to the idle state once the
+# corresponding Python callback finishes.  We use clientside callbacks
+# for the "working" half (so the UI feels instant -- no round-trip to
+# the server) and let the Python callbacks supply the "done" half via
+# allow_duplicate Outputs.
+#
+# Three buttons:
+#   * analyze-btn  (Step 1): "Analyze Data" -> "Uploading data..." when a
+#     new file/example is loading, OR -> "Analyzing..." when the user
+#     hits Analyze on an already-loaded dataset.  Both states disable
+#     the button.
+#   * filter-btn   (Step 2): "Apply Filters" -> "Applying filters..."
+#   * run-btn      (Step 4): "Calculate Degradation" -> "Calculating…"
+# =============================================================================
+
+# Step 4 -- Calculate / run-btn.  Same as before; no upload-state to
+# worry about because by Step 4 the dataset is already loaded.
 app.clientside_callback(
     """
     function(n_clicks) {
@@ -3749,17 +4034,128 @@ app.clientside_callback(
     prevent_initial_call=True
 )
 
+# Step 2 -- filter-btn.  Goes "Applying filters..." disabled the moment
+# the user clicks; the existing run_filter Python callback returns
+# results which (via allow_duplicate=True on the duplicate-Output
+# callback below) flips it back to "Apply Filters" enabled.
 app.clientside_callback(
     """
     function(n_clicks) {
         if (!n_clicks || n_clicks === 0) {
+            return [false, "Apply Filters"];
+        }
+        return [true, "Applying filters..."];
+    }
+    """,
+    [Output("filter-btn", "disabled"), Output("filter-btn", "children")],
+    Input("filter-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+
+# Step 4 -- generate-code-btn ("Generate Full Python Code").  Same idea:
+# the moment the user clicks, show "Generating code..." and disable so
+# the user can't double-trigger the (intentionally slow, 2s+) code build.
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks || n_clicks === 0) {
+            return [false, "Generate Full Python Code"];
+        }
+        return [true, "Generating code..."];
+    }
+    """,
+    [Output("generate-code-btn", "disabled"),
+     Output("generate-code-btn", "children")],
+    Input("generate-code-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+
+# Reset generate-code-btn back to the idle state once the code preview
+# has landed in the DOM (i.e. the Python `generate_code` callback has
+# finished writing `code-preview.children`).
+app.clientside_callback(
+    """
+    function(_preview_children) {
+        return [false, "Generate Full Python Code"];
+    }
+    """,
+    [Output("generate-code-btn", "disabled",  allow_duplicate=True),
+     Output("generate-code-btn", "children",  allow_duplicate=True)],
+    Input("code-preview", "children"),
+    prevent_initial_call=True
+)
+
+# When filtering finishes -- detectable as a non-null `dataframe-filtered`
+# write OR an error rendered into `data-filter-output` -- restore the
+# Apply Filters button to its idle state.  Triggering off the OUTPUT of
+# run_filter sidesteps having to modify run_filter's signature.
+app.clientside_callback(
+    """
+    function(_filtered_data, _output_children) {
+        // Either output landing means the filter callback has finished.
+        return [false, "Apply Filters"];
+    }
+    """,
+    [Output("filter-btn", "disabled",  allow_duplicate=True),
+     Output("filter-btn", "children",  allow_duplicate=True)],
+    Input("dataframe-filtered",  "data"),
+    Input("data-filter-output",  "children"),
+    prevent_initial_call=True
+)
+
+# Step 1 -- analyze-btn.  Three trigger paths:
+#   1. User clicks one of the example chips -> "Uploading data..."
+#   2. A file lands in upload-data.contents  -> "Uploading data..."
+#   3. User clicks Analyze on a loaded set   -> "Analyzing..."
+# The Python `analyze_uploaded_data_callback` resets the button at the
+# end of (1) and (3); for (2) we additionally reset on a non-null
+# data-source-store write below.
+app.clientside_callback(
+    """
+    function(analyze_n, ex1_n, ex2_n, ex3_n, upload_contents) {
+        var ctx = window.dash_clientside.callback_context;
+        if (!ctx.triggered || ctx.triggered.length === 0) {
             return [false, "Analyze Data"];
         }
-        return [true, "Analyzing…"];
+        var trigger = ctx.triggered[0].prop_id.split('.')[0];
+        if (trigger === "analyze-btn") {
+            if (!analyze_n || analyze_n === 0) return [false, "Analyze Data"];
+            return [true, "Analyzing..."];
+        }
+        if (trigger === "upload-data") {
+            // Only treat a *non-empty* contents arrival as an upload.
+            if (!upload_contents) return [false, "Analyze Data"];
+            return [true, "Uploading data..."];
+        }
+        // Any of the three example chips.
+        return [true, "Uploading data..."];
     }
     """,
     [Output("analyze-btn", "disabled"), Output("analyze-btn", "children")],
     Input("analyze-btn", "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+    Input("upload-data", "contents"),
+    prevent_initial_call=True
+)
+
+# When an upload completes (browser has the file bytes -> data-source-store
+# gets set by update_upload_status), reset the analyze button to enabled.
+# Example loads go through analyze_uploaded_data_callback which already
+# resets the button; this callback covers ONLY the upload-finished case.
+app.clientside_callback(
+    """
+    function(data_source) {
+        if (data_source === "upload") {
+            return [false, "Analyze Data"];
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    [Output("analyze-btn", "disabled",  allow_duplicate=True),
+     Output("analyze-btn", "children",  allow_duplicate=True)],
+    Input("data-source-store", "data"),
     prevent_initial_call=True
 )
 
@@ -3905,6 +4301,87 @@ def analyze_uploaded_data_callback(
 def clear_code_panel_on_new_data(*_):
     hidden_style = {"display": "none"}
     return None, "", hidden_style
+
+
+# =============================================================================
+# CALLBACK — AUTO-OPEN PVPRO PARAMS WHEN PVPRO IS THE SELECTED METRIC
+#
+# The PVPRO param panel is an html.Details whose `open` attribute we
+# drive from the master metric selector.  Two reasons to do this rather
+# than leaving it as a manually-toggled disclosure:
+#
+#   1. PVPRO is the *only* metric with required dataset-specific
+#      parameters (cells in series, modules per string, etc.).  If the
+#      user picks PVPRO but doesn't notice the collapsed panel, they'll
+#      run with defaults that almost certainly don't match their array
+#      and get garbage degradation rates.  Auto-unfolding makes the
+#      requirement impossible to miss.
+#
+#   2. When the user switches AWAY from PVPRO (back to YOY, LR, etc.),
+#      the panel becomes irrelevant clutter.  Collapsing it preserves
+#      vertical space for the controls that ARE relevant.
+#
+# The callback uses allow_duplicate=True on the open output so the
+# "reset on new data" callback below can also drive it.
+# =============================================================================
+@app.callback(
+    Output("pvpro-params-details", "open", allow_duplicate=True),
+    Input("metric-selected-visible", "value"),
+    prevent_initial_call=True,
+)
+def autoopen_pvpro_params_panel(metric):
+    return metric == "PVPRO"
+
+
+# =============================================================================
+# CALLBACK — RESET PVPRO PARAMS AND COLLAPSE PANEL ON NEW DATA
+#
+# Triggered whenever the user loads a different dataset -- either by
+# uploading a file (`upload-data.filename`) or clicking one of the
+# three example chips (`load-example-btn-{1,2,3}`).
+#
+# What this does
+# --------------
+#   * Wipes every PVPRO input back to the SAME defaults declared in the
+#     layout above (cells=60, mps=1, ps=1, alphaisc=0.0046,
+#     tech="mono-c-Si", days=14, iters=12).  This protects users from
+#     the footgun of running PVPRO on a new dataset with the previous
+#     dataset's array geometry -- which earlier produced rd ≈ 0 and
+#     made the tool look broken.
+#
+#   * Collapses the param panel (`open=False`).  Even if PVPRO is
+#     currently selected, when a new dataset lands we want the user to
+#     consciously expand and review the parameters again -- not just
+#     hit Calculate on auto-pilot.  The auto-open callback above will
+#     re-open it automatically the next time the user reselects PVPRO,
+#     which is the correct "make me look at these defaults again"
+#     behaviour.
+#
+# allow_duplicate=True on the Output is required because
+# `autoopen_pvpro_params_panel` above already targets the same prop;
+# Dash forbids two callbacks writing to the same Output unless every
+# binding marks itself as duplicate-aware.
+# =============================================================================
+@app.callback(
+    Output("param-pvpro-cells",    "value", allow_duplicate=True),
+    Output("param-pvpro-mps",      "value", allow_duplicate=True),
+    Output("param-pvpro-ps",       "value", allow_duplicate=True),
+    Output("param-pvpro-alphaisc", "value", allow_duplicate=True),
+    Output("param-pvpro-tech",     "value", allow_duplicate=True),
+    Output("param-pvpro-days",     "value", allow_duplicate=True),
+    Output("param-pvpro-iters",    "value", allow_duplicate=True),
+    Output("pvpro-params-details", "open",  allow_duplicate=True),
+    Input("upload-data",         "filename"),
+    Input("load-example-btn-1",  "n_clicks"),
+    Input("load-example-btn-2",  "n_clicks"),
+    Input("load-example-btn-3",  "n_clicks"),
+    prevent_initial_call=True,
+)
+def reset_pvpro_params_on_new_data(*_):
+    # The defaults below MUST stay in sync with the layout's
+    # dcc.Input(value=...) declarations.  If you change one, change
+    # both, or "reset" stops actually returning to fresh-page state.
+    return 60, 1, 1, 0.0046, "mono-c-Si", 14, 12, False
 
 
 # =============================================================================

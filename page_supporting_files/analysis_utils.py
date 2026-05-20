@@ -1845,6 +1845,15 @@ def compute_pvpro(df,
     n_total_windows = len(window_starts)
 
     rows = []
+    # Warm-start state: after the first successful fit, reuse that fit's
+    # parameters as the starting point for the next window's optimisation.
+    # Adjacent ~14-day windows have very similar SDM parameters (modules
+    # don't change much in two weeks), so a warm p0 typically cuts each
+    # window's scipy.least_squares iteration count in half.  We keep the
+    # original `p0_global` as a fallback in case a warm start drifts too
+    # far and a later window fit fails -- on failure we fall back to the
+    # global p0 for the *next* attempt rather than propagating bad state.
+    p0_warm = dict(p0_global)
     for w_idx, cur in enumerate(window_starts):
         # Report progress at the START of this window so the UI advances
         # as soon as work begins, not only after it finishes.  Each report
@@ -1867,7 +1876,7 @@ def compute_pvpro(df,
             I_w  = I_arr[idx_w]
             fit = _fit_window(
                 G_w, Tc_w, V_w, I_w,
-                p0=p0_global,
+                p0=p0_warm,
                 lower_bounds=lower_bounds,
                 upper_bounds=upper_bounds,
                 cells_in_series=cells_in_series,
@@ -1876,6 +1885,10 @@ def compute_pvpro(df,
                 dEgdT=dEgdT,
             )
             if fit is not None:
+                # Warm-start update: feed this fit's parameters to the
+                # next window's optimisation.  Only the 5 SDM params --
+                # don't carry over "loss" or anything else.
+                p0_warm = {k: fit[k] for k in _FIT_PARAMS}
                 # Reconstruct V_mp, I_mp, V_oc, I_sc at STC for this window.
                 IL, I0, Rs, Rsh, nNsVth = _calcparams_desoto_lite(
                     np.array([_G_REF]), np.array([25.0]),
@@ -1904,6 +1917,13 @@ def compute_pvpro(df,
                     "n_points": n_w,
                     **{k: fit[k] for k in _FIT_PARAMS},
                 })
+            else:
+                # Fit failed -- the warm-start p0 might have drifted far
+                # enough from this window's data that the optimiser can't
+                # find a basin.  Reset to the global p0 so the next
+                # window starts from a known-stable point instead of
+                # propagating the bad state forward.
+                p0_warm = dict(p0_global)
 
         # Yield the GIL so the polling HTTP callback in the main Dash thread
         # can be served between windows. Without this, scipy's L-BFGS-B holds
