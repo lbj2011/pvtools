@@ -52,6 +52,14 @@
 .pvcopilot-root div[id*='step-row']:hover {
     background: #f1f5f9 !important;
 }
+/* The AI chat row keeps its pink->blue gradient on hover (a slight lift only). */
+.pvcopilot-root .ai-chat-row,
+.pvcopilot-root .ai-chat-row:hover {
+    background: linear-gradient(135deg, #fce7f3 0%, #dbeafe 100%) !important;
+}
+.pvcopilot-root .ai-chat-row:hover {
+    filter: brightness(1.02);
+}
 
 /* Chat — typing animation */
 @keyframes pvcopilot-blink {
@@ -105,22 +113,20 @@
     border-color: #0064AB !important;
 }
 
-/* Chat — composer input bold (both typed text and placeholder) */
+/* Chat — composer input (both typed text and placeholder) */
 .pvcopilot-root #chat-composer,
 .pvcopilot-root #chat-composer::placeholder {
-    font-weight: 700 !important;
+    font-weight: 600 !important;
 }
-/* Chat — composer is on a blue background; make text + placeholder + caret white */
+/* Chat — composer sits on a light-gray background; dark text + placeholder. */
 .pvcopilot-root #chat-composer {
-    color: #ffffff !important;
-    caret-color: #ffffff !important;
-    /* Override the global input[type="text"] 14px rule below -- the chat
-       composer is the page's primary input and should read larger. */
-    font-size: 17px !important;
+    color: #0f172a !important;
+    caret-color: #0f172a !important;
+    font-size: 14px !important;
 }
 .pvcopilot-root #chat-composer::placeholder {
-    color: rgba(255, 255, 255, 0.7) !important;
-    font-size: 17px !important;
+    color: #64748b !important;
+    font-size: 14px !important;
 }
 
 /* <details>/<summary>: replace the default flush-against-text disclosure
@@ -327,4 +333,36 @@
         flex: 0 0 auto !important;
         height: 0 !important;
     }
+}
+
+/* =========================================================================
+   Mode switcher (Simple / Advanced) — compact segmented control.
+   The generic .pvcopilot-root button:hover lift looks wrong on flat pills,
+   so neutralize it here and use a soft background change instead.  We also
+   pin the active/idle backgrounds across hover/focus/active so a click (or
+   clicking elsewhere) can't leave the pill in a washed-out state.
+   ========================================================================= */
+.pvcopilot-root #mode-tabs button,
+.pvcopilot-root #mode-tabs button:hover:not(:disabled),
+.pvcopilot-root #mode-tabs button:focus,
+.pvcopilot-root #mode-tabs button:active:not(:disabled) {
+    transform: none !important;
+    filter: none !important;
+    box-shadow: none;
+    outline: none !important;
+}
+/* Idle pill: transparent, with a subtle slate wash on hover only. */
+.pvcopilot-root #mode-tabs button.mode-tab-idle {
+    background: transparent !important;
+}
+.pvcopilot-root #mode-tabs button.mode-tab-idle:hover:not(:disabled) {
+    background: #e2e8f0 !important;
+}
+/* Active pill: solid navy fill + soft shadow in EVERY state. */
+.pvcopilot-root #mode-tabs button.mode-tab-active,
+.pvcopilot-root #mode-tabs button.mode-tab-active:hover:not(:disabled),
+.pvcopilot-root #mode-tabs button.mode-tab-active:focus,
+.pvcopilot-root #mode-tabs button.mode-tab-active:active:not(:disabled) {
+    background: #0064AB !important;
+    box-shadow: 0 1px 3px rgba(0, 100, 171, 0.25) !important;
 }
