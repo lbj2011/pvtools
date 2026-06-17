@@ -3467,6 +3467,9 @@ layout = html.Div([
 
     # Hidden stores (unchanged)
     dcc.Store(id="mapped-vars-store",     data={}),
+    # Available column names of the currently-loaded dataset, used to
+    # populate the editable variable-mapping dropdowns in Advanced Step 1.
+    dcc.Store(id="data-columns-store",    data=[]),
     dcc.Store(id="dataframe-store",       data={}),
     dcc.Store(id="dataframe-filtered",    data={}),
     dcc.Store(id="code-read-store",       data={}),
@@ -5117,6 +5120,235 @@ app.clientside_callback(
 
 
 # =============================================================================
+# OVERVIEW FIGURES HELPER
+#
+# Builds the "raw data preview" figure stack from the CURRENT mapping. Used by
+# both the analyze callback and the Apply-mapping callback so that unselected
+# variables are never plotted. make_overview_figures already skips any metric
+# whose key is missing or not a real column, so passing a mapping without a
+# given key guarantees that variable is not drawn.
+# =============================================================================
+def _build_overview_figures_div(df, mapped_variables_dict):
+    try:
+        if df is not None and mapped_variables_dict:
+            figs, _err = make_overview_figures(df, mapped_variables_dict)
+            return html.Div(figs)
+    except Exception:
+        return html.Div("Figure generation failed.", style={"color": ACCENT})
+    return html.Div(
+        "No variables selected to plot.",
+        style={"color": INK_SOFT, "fontSize": "13px",
+               "fontFamily": "Arial, sans-serif"},
+    )
+
+
+
+# Renders the "Identified Variables" panel as an editable table: each metric
+# row carries a dropdown so the user can override what the LLM detected (or
+# fill it in when the LLM detected nothing). Defaults to the LLM result.
+#
+# The dropdowns use pattern-matching IDs {"type": "var-map-dd", "metric": m}
+# so a single callback (apply_variable_mapping_callback) can read them all.
+# =============================================================================
+
+# Metrics shown in the editable mapping table, in display order. "Time" is
+# handled specially because it is usually the DataFrame index ("__index__")
+# rather than a real column.
+_MAP_METRICS = [
+    "DC Power", "DC Voltage", "DC Current",
+    "Irradiance", "Module temperature", "Time",
+]
+
+# Metrics required for degradation analysis (used to flag missing selections).
+_REQUIRED_FOR_DEGRADATION = {"DC Power", "Time"}
+
+
+def build_variable_mapping_table(mapped_variables_dict, columns,
+                                 time_in_index=False, status_children=None):
+    """Build an editable variable-mapping table.
+
+    Args:
+        mapped_variables_dict: {metric: column_name} currently mapped (N/A omitted).
+        columns: list of available DataFrame column names.
+        time_in_index: whether the Time variable is the DataFrame index.
+        status_children: optional element rendered in the status slot (used by
+            the Apply callback to show the confirmation/warning after re-render).
+
+    Returns:
+        A Dash component (the editable table + apply button + status line).
+    """
+    mapped_variables_dict = mapped_variables_dict or {}
+    columns = list(columns or [])
+
+    header = html.Div([
+        html.Div("Metric", style={
+            "flex": "0 0 42%", "fontWeight": "700", "color": INK,
+            "fontFamily": "Arial, sans-serif", "fontSize": "14px",
+        }),
+        html.Div("Variable Name", style={
+            "flex": "1", "fontWeight": "700", "color": INK,
+            "fontFamily": "Arial, sans-serif", "fontSize": "14px",
+        }),
+    ], style={
+        "display": "flex", "alignItems": "center", "gap": "14px",
+        "padding": "8px 4px 12px 4px",
+        "borderBottom": f"2px solid {BORDER_STRONG}",
+    })
+
+    rows = []
+    for i, metric in enumerate(_MAP_METRICS):
+        current = mapped_variables_dict.get(metric)
+
+        # Time options: offer the index sentinel plus any real columns.
+        if metric == "Time":
+            opts = []
+            if time_in_index or current == "__index__":
+                opts.append({"label": "(use index / __index__)",
+                             "value": "__index__"})
+            opts += [{"label": c, "value": c} for c in columns]
+            # Make sure the current value is selectable even if odd.
+            if current and current not in [o["value"] for o in opts]:
+                opts.insert(0, {"label": current, "value": current})
+        else:
+            opts = [{"label": c, "value": c} for c in columns]
+            if current and current not in columns:
+                # LLM picked something not in the column list — keep it visible.
+                opts.insert(0, {"label": current, "value": current})
+
+        detected = bool(current)
+        dot_color = "#16a34a" if detected else "#d97706"   # green / amber
+        dot_title = "Detected by AI" if detected else "Not detected — please select"
+
+        row = html.Div([
+            html.Div([
+                html.Span(style={
+                    "display": "inline-block", "width": "8px", "height": "8px",
+                    "borderRadius": "50%", "background": dot_color,
+                    "marginRight": "8px", "flex": "0 0 auto",
+                }, title=dot_title),
+                html.Span(metric, style={
+                    "color": INK, "fontFamily": "Arial, sans-serif",
+                    "fontSize": "14px",
+                }),
+            ], style={"flex": "0 0 42%", "display": "flex",
+                      "alignItems": "center"}),
+            html.Div(
+                dcc.Dropdown(
+                    id={"type": "var-map-dd", "metric": metric},
+                    options=opts,
+                    value=current if current else None,
+                    placeholder="— select column —",
+                    clearable=True,
+                    style={"fontSize": "13px"},
+                ),
+                style={"flex": "1"},
+            ),
+        ], style={
+            "display": "flex", "alignItems": "center", "gap": "14px",
+            "padding": "8px 4px",
+            "background": "#ffffff" if i % 2 else "#f1f5f9",
+            "borderRadius": "6px",
+        })
+        rows.append(row)
+
+    return html.Div([
+        header,
+        html.Div(rows, style={"marginTop": "4px"}),
+        html.Div([
+            html.Button(
+                "Apply mapping",
+                id="var-map-apply-btn",
+                n_clicks=0,
+                style={
+                    "background": ACCENT, "color": "#ffffff", "border": "none",
+                    "padding": "8px 18px", "borderRadius": "8px",
+                    "fontSize": "13px", "fontWeight": "600", "cursor": "pointer",
+                    "fontFamily": "Arial, sans-serif",
+                },
+            ),
+            html.Span(
+                "Defaults to AI detection. Adjust any row and click Apply.",
+                style={"marginLeft": "12px", "fontSize": "12px",
+                       "color": INK_SOFT, "fontFamily": "Arial, sans-serif"},
+            ),
+        ], style={"marginTop": "14px", "display": "flex",
+                  "alignItems": "center"}),
+        html.Div(status_children if status_children is not None else "",
+                 id="var-map-status", style={"marginTop": "8px"}),
+    ])
+
+
+# =============================================================================
+# CALLBACK — APPLY USER-EDITED VARIABLE MAPPING
+#
+# Reads every var-map dropdown and rebuilds mapped-vars-store using ONLY the
+# variables the user actually selected. Unselected variables are dropped from
+# the mapping, so they are neither plotted (make_overview_figures skips absent
+# keys) nor used in any subsequent analysis (every downstream step reads
+# mapped-vars-store). The mapping panel is re-rendered so the detected/
+# undetected dots reflect the applied state, and the figures are redrawn to
+# remove any de-selected variable.
+# =============================================================================
+@app.callback(
+    Output("mapped-vars-store", "data",     allow_duplicate=True),
+    Output("var-map-panel",     "children"),
+    Output("var-map-figures",   "children"),
+    Input("var-map-apply-btn",  "n_clicks"),
+    State({"type": "var-map-dd", "metric": ALL}, "value"),
+    State({"type": "var-map-dd", "metric": ALL}, "id"),
+    State("dataframe-store",    "data"),
+    State("data-columns-store", "data"),
+    prevent_initial_call=True,
+)
+def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    # Rebuild the mapping dict, keeping ONLY non-empty selections.
+    new_mapping = {}
+    for val, id_obj in zip(values, ids):
+        metric = id_obj.get("metric")
+        if val:
+            new_mapping[metric] = val
+
+    # Flag any required variables that are still unset.
+    missing = [m for m in _MAP_METRICS
+               if m in _REQUIRED_FOR_DEGRADATION and not new_mapping.get(m)]
+
+    if missing:
+        status = html.Div(
+            "Mapping applied. Still missing for degradation analysis: "
+            + ", ".join(missing) + ".",
+            className="alert alert-warning",
+            style={"marginBottom": "0", "fontSize": "13px"},
+        )
+    else:
+        applied = ", ".join(f"{m} → {new_mapping[m]}" for m in _MAP_METRICS
+                            if new_mapping.get(m))
+        status = html.Div(
+            "✓ Mapping applied. " + applied,
+            className="alert alert-success",
+            style={"marginBottom": "0", "fontSize": "13px"},
+        )
+
+    # Rebuild the mapping panel so the dots match the applied state.
+    time_in_index = new_mapping.get("Time") == "__index__"
+    panel = build_variable_mapping_table(
+        new_mapping, data_columns or [],
+        time_in_index=time_in_index, status_children=status,
+    )
+
+    # Redraw figures from the new mapping — unselected variables are not drawn.
+    try:
+        df = _df_from_store(df_json) if df_json else None
+    except Exception:
+        df = None
+    figures = _build_overview_figures_div(df, new_mapping)
+
+    return new_mapping, panel, figures
+
+
+# =============================================================================
 # CALLBACK — DATA UPLOAD & PARSE  (UNCHANGED logic, restyled output)
 # =============================================================================
 @app.callback(
@@ -5129,6 +5361,7 @@ app.clientside_callback(
     Output("data-source-store",    "data",      allow_duplicate=True),
     Output("upload-status-output", "children",  allow_duplicate=True),
     Output("stored-data-file-name","data",      allow_duplicate=True),
+    Output("data-columns-store",   "data",      allow_duplicate=True),
     Input("analyze-btn",          "n_clicks"),
     Input("load-example-btn-1",   "n_clicks"),
     Input("load-example-btn-2",   "n_clicks"),
@@ -5160,41 +5393,49 @@ def analyze_uploaded_data_callback(
             output_msg = _success_banner(f"{example_filename} loaded")
         except Exception as e:
             return (html.Div(f"Error loading example: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", example_filename)
+                    {}, None, "", False, "Run prescreening", None, "", example_filename, [])
         return (html.Div("", className="text-muted"),
-                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename)
+                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename, [])
 
     # Analyze clicked
     if trigger == "analyze-btn":
         if data_source == "upload" and contents is not None:
             df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
             if df is None:
-                return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name
+                return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
         elif data_source == "example" and stored_df_json is not None:
             try:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
             except Exception as e:
                 return (html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
-                        {}, None, "", False, "Run prescreening", None, "", stored_file_name)
+                        {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
         else:
             return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                    {}, None, "", False, "Run prescreening", None, "", filename)
+                    {}, None, "", False, "Run prescreening", None, "", filename, [])
 
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name)
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
 
-        # Figures
-        figures_output = html.Div()
-        try:
-            if df is not None and mapped_variables_dict:
-                figures_output, err = make_overview_figures(df, mapped_variables_dict)
-                figures_output = html.Div(figures_output)
-        except Exception:
-            figures_output = html.Div("Figure generation failed.", style={"color": ACCENT})
+        # Available columns for the editable mapping dropdowns, and whether
+        # the Time variable lives in the index.
+        data_columns = [str(c) for c in df.columns.tolist()]
+        time_in_index = (
+            isinstance(df.index, pd.DatetimeIndex)
+            or mapped_variables_dict.get("Time") == "__index__"
+        )
+
+        # Only plot variables that are actually mapped to a real column.
+        figures_output = _build_overview_figures_div(df, mapped_variables_dict)
+
+        # Editable variable-mapping table (defaults to LLM detection; user can
+        # override any row, or fill in rows the LLM missed).
+        editable_mapping = build_variable_mapping_table(
+            mapped_variables_dict, data_columns, time_in_index=time_in_index,
+        )
 
         combined_output = html.Div([
             html.Div([
@@ -5203,7 +5444,10 @@ def analyze_uploaded_data_callback(
                     "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
                     "fontFamily": "Arial, sans-serif",
                 }),
-                html.Div(summary_table, style={"fontSize": "14px"}),
+                # Stable container so the Apply callback can re-render the
+                # mapping table (refreshing the detected/undetected dots).
+                html.Div(editable_mapping, id="var-map-panel",
+                         style={"fontSize": "14px"}),
             ], style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
@@ -5217,7 +5461,9 @@ def analyze_uploaded_data_callback(
                     "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
                     "fontFamily": "Arial, sans-serif",
                 }),
-                figures_output,
+                # Stable container so the Apply callback can redraw figures,
+                # dropping any variable the user de-selected.
+                html.Div(figures_output, id="var-map-figures"),
             ], style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
@@ -5227,9 +5473,9 @@ def analyze_uploaded_data_callback(
         ], className="slide-in-up")
 
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
-                "Run prescreening", None, "", stored_file_name)
+                "Run prescreening", None, "", stored_file_name, data_columns)
 
-    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name)
+    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
 
 
 # =============================================================================
