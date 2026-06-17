@@ -19,14 +19,19 @@ import time
 cborg_API_KEY = os.getenv("cborg_api_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# client = openai.OpenAI(
-#     api_key=cborg_API_KEY,
-#     base_url="https://api.cborg.lbl.gov"
-# )
+# Provider toggle: set LLM_PROVIDER in .env to "cborg" (LBL gateway) or "openai".
+# Switching providers also swaps the model name (CBORG prefixes it with "openai/").
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "cborg").lower()
 
-client = openai.OpenAI(
-    api_key= OPENAI_API_KEY
-)
+if LLM_PROVIDER == "openai":
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    LLM_MODEL = "gpt-5.4-nano"
+else:  # cborg
+    client = openai.OpenAI(
+        api_key=cborg_API_KEY,
+        base_url="https://api.cborg.lbl.gov",
+    )
+    LLM_MODEL = "openai/gpt-5.4-nano"
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 COLUMN_INFO_PATH = os.path.join(BASE_DIR, "data", "data_column_info.json")
@@ -176,7 +181,7 @@ def get_filter_from_llm(question):
     start_time = time.time()  # start timer
 
     response = client.chat.completions.create(
-        model="gpt-5.4-nano",
+        model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )

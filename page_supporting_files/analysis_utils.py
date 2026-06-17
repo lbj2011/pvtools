@@ -26,19 +26,19 @@ load_dotenv(override=True)
 cborg_API_KEY = os.getenv("cborg_api_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# --- Configuration (from your prompt) ---
-# client = openai.OpenAI(
-#     api_key=cborg_API_KEY,
-#     base_url="https://api.cborg.lbl.gov"
-# )
+# Provider toggle: set LLM_PROVIDER in .env to "cborg" (LBL gateway) or "openai".
+# Switching providers also swaps the model name (CBORG prefixes it with "openai/").
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "cborg").lower()
 
-# client_gpt = openai.OpenAI(
-#     api_key= OPENAI_API_KEY
-# )
-
-client = openai.OpenAI(
-    api_key= OPENAI_API_KEY
-)
+if LLM_PROVIDER == "openai":
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    LLM_MODEL = "gpt-5.4-nano"
+else:  # cborg
+    client = openai.OpenAI(
+        api_key=cborg_API_KEY,
+        base_url="https://api.cborg.lbl.gov",
+    )
+    LLM_MODEL = "openai/gpt-5.4-nano"
 
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
@@ -102,8 +102,13 @@ def parse_contents(contents=None, filename=None, df=None):
 
     if isinstance(df.index, pd.DatetimeIndex):
         time_in_index = True
-    else:
-        # Try converting index to datetime (non-destructive check)
+    elif not pd.api.types.is_numeric_dtype(df.index):
+        # Try converting index to datetime (non-destructive check).
+        # Guard: only attempt this for a NON-numeric index. A plain integer
+        # RangeIndex (0,1,2,...) -- which pd.read_csv produces for every
+        # uploaded CSV whose time lives in a column -- would otherwise be
+        # parsed by pd.to_datetime as nanoseconds-since-epoch, collapsing every
+        # row onto 1970-01-01 and discarding the real time column.
         try:
             converted_index = pd.to_datetime(df.index, errors='coerce')
             if converted_index.notna().sum() > 0.9 * len(df):
@@ -268,8 +273,7 @@ def parse_contents(contents=None, filename=None, df=None):
     try:
         # Call LLM
         response = client.chat.completions.create(
-            # model="openai/gpt-5.4-nano",
-            model = "gpt-5.4-nano",
+            model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             # max_tokens=500,
         )
@@ -406,6 +410,28 @@ def parse_contents(contents=None, filename=None, df=None):
             for _, row in mapping_df.iterrows()
             if row["Variable Name"] != "N/A"
         }
+
+        # If the timestamp lives in a column (not already the index), promote
+        # it to a DatetimeIndex. All downstream filtering and aggregation
+        # operate on df.index as datetime (df.index.date, df.index.hour, ...),
+        # so an uploaded CSV -- whose time is a column with a plain integer
+        # index -- only analyzes correctly once that column becomes the index.
+        if not time_in_index:
+            tcol = mapped_variables_dict.get("Time")
+            if tcol and tcol in df.columns:
+                df[tcol] = pd.to_datetime(df[tcol], errors="coerce")
+                df = df.dropna(subset=[tcol]).set_index(tcol)
+
+        # If DC Power wasn't identified but DC Voltage and DC Current were,
+        # compute power = V * I so the downstream analyses can still run.
+        if "DC Power" not in mapped_variables_dict:
+            v_col = mapped_variables_dict.get("DC Voltage")
+            i_col = mapped_variables_dict.get("DC Current")
+            if v_col and i_col and v_col in df.columns and i_col in df.columns:
+                df["computed_dc_power"] = df[v_col] * df[i_col]
+                mapped_variables_dict["DC Power"] = "computed_dc_power"
+                mapping_df.loc[mapping_df["Metric"] == "DC Power",
+                               "Variable Name"] = "computed_dc_power"
 
         # The "Identified Variables" eyebrow is rendered by the consumer
         # (pvcopilot.py wraps this table in a card with its own heading), so
@@ -682,15 +708,27 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 # NORMALIZATION
 # ================================
 def normalize(df, mapped_variables_dict, gamma=-0.004):
+    # Adaptive normalization based on which columns are available:
+    #   power + irradiance + temp -> full temperature-corrected normalization
+    #   power + irradiance         -> irradiance-only normalization
+    #   power alone                -> raw power (no normalization possible)
+    power_key  = mapped_variables_dict.get("DC Power")
+    irr_key    = mapped_variables_dict.get("Irradiance")
+    temp_C_key = mapped_variables_dict.get("Module temperature")
 
-    irr_key = mapped_variables_dict["Irradiance"]
-    power_key = mapped_variables_dict["DC Power"]
-    temp_C_key = mapped_variables_dict["Module temperature"]
+    has_irr  = bool(irr_key) and irr_key in df.columns
+    has_temp = bool(temp_C_key) and temp_C_key in df.columns
 
-    df['norm'] = df[power_key] / (
-        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
-
-    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    if has_irr and has_temp:
+        df['norm'] = df[power_key] / (
+            df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+        df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    elif has_irr:
+        df['norm'] = df[power_key] / df[irr_key] * 1000
+        df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    else:
+        # No irradiance: trend the raw power directly (un-normalized).
+        df['norm'] = df[power_key]
 
     return df
 
@@ -725,13 +763,24 @@ def low_irra_power_filter(df, mapped_variables_dict,
 # ================================
 # DAILY AGGREGATION
 # ================================
-def aggregate_daily(df_f, irradiance_col):
-    daily = (
-        df_f[['norm', irradiance_col]]
-        .dropna()
-        .groupby(df_f.index.date)
-        .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
-    )
+def aggregate_daily(df_f, irradiance_col=None):
+    # Group by the post-dropna frame's OWN index. Grouping by df_f.index.date
+    # (the full, original-length index) breaks with "Grouper and axis must be
+    # same length" whenever dropna() removes rows -- which happens on any real
+    # data that has gaps/NaNs.
+    #
+    # When irradiance is available, weight the daily 'norm' by irradiance;
+    # otherwise (power-only data) fall back to a simple daily mean of 'norm'.
+    if irradiance_col and irradiance_col in df_f.columns:
+        sub = df_f[['norm', irradiance_col]].dropna()
+        daily = (
+            sub
+            .groupby(sub.index.date)
+            .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
+        )
+    else:
+        sub = df_f[['norm']].dropna()
+        daily = sub.groupby(sub.index.date)['norm'].mean()
 
     daily.index = pd.to_datetime(daily.index)
 
@@ -740,24 +789,35 @@ def aggregate_daily(df_f, irradiance_col):
 # ================================
 # YoY
 # ================================
-def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
-    series = series.dropna()
+def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
+                tolerance_days=15):
+    series = series.dropna().sort_index()
     yoy = []
 
-    for t in series.index:
-        t_prev = t - pd.DateOffset(years=1)
+    # Pair each point with the value closest to exactly one year earlier,
+    # accepting any match within +/- tolerance_days rather than requiring the
+    # exact same calendar date. This makes YoY robust to irregular/sparse daily
+    # sampling, where the identical calendar date rarely recurs across years.
+    targets = series.index - pd.DateOffset(years=1)
+    nearest_pos = series.index.get_indexer(
+        targets, method="nearest", tolerance=pd.Timedelta(days=tolerance_days)
+    )
 
-        if t_prev in series.index:
-            prev = series.loc[t_prev]
-            curr = series.loc[t]
+    for i in range(len(series)):
+        j = nearest_pos[i]
+        if j == -1:
+            continue  # no data point within tolerance of one year earlier
 
-            if prev < eps:
-                continue
+        prev = series.iloc[j]
+        curr = series.iloc[i]
 
-            ratio = curr / prev - 1
+        if prev < eps:
+            continue
 
-            if np.isfinite(ratio):
-                yoy.append(ratio)
+        ratio = curr / prev - 1
+
+        if np.isfinite(ratio):
+            yoy.append(ratio)
 
     yoy = np.array(yoy)
 

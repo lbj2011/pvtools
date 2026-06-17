@@ -5,6 +5,11 @@ Lazy layout loading while keeping callbacks registered.
 Works with Dash + Gunicorn + Heroku.
 """
 
+from dotenv import load_dotenv
+# override=True so values in .env win over any stale variables already set in
+# the shell environment (e.g. an old/blocked cborg_api_key export).
+load_dotenv(override=True)  # Load .env before any page imports read their API keys
+
 from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
 import time
