@@ -17,7 +17,6 @@ PVTools provides interactive tools and datasets to support **PV system design, d
 
 - [Cite our work](#cite-our-work)
 - [Applications](#applications)
-- [Running Locally](#running-locally)
 - [Repository Structure](#repository-structure)
 - [Logging and Privacy](#logging-and-privacy)
 - [Contributors](#contributors)
@@ -115,28 +114,6 @@ Includes:
 - Reliability stress mapping
 
 ---
-
-# Running Locally
-
-The pinned dependencies (notably `numpy==1.26.4` and `pvlib==0.9.5`) require
-**Python 3.11** — they are **not** compatible with Python 3.13 / NumPy 2.x.
-Running the app with a newer interpreter raises errors such as
-``AttributeError: `np.Inf` was removed in the NumPy 2.0 release``.
-
-Create and activate a matching environment, then install dependencies:
-
-```bash
-# Using conda (recommended)
-conda create -n pvtools python=3.11
-conda activate pvtools
-pip install -r requirements.txt
-
-# Run the app
-python index.py
-```
-
-In **VS Code**, make sure the `pvtools` interpreter is selected:
-Command Palette → **Python: Select Interpreter** → choose the `pvtools` environment.
 
 # Repository Structure
 
