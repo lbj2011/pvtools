@@ -69,3 +69,6 @@ htmlcov/
 
 # ppt files
 .pptx
+
+# Generated PVcopilot pipeline reports
+reports/

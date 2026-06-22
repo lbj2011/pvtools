@@ -23,6 +23,33 @@ import threading
 import uuid
 import copy
 import collections
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+# =============================================================================
+# TIMEOUT GUARD FOR SYNCHRONOUS STEPS
+#
+# Analyze, Apply Filters, and the fast degradation methods (YoY/LR/HW/ARIMA/CSD)
+# all run synchronously inside their Dash callbacks. A malformed dataset can
+# make them run effectively forever and hang the UI. We cap them at 10 s by
+# running the pure computation in a worker and waiting on its result; if it
+# overruns, the callback aborts and surfaces a "something wrong with your data"
+# error instead of leaving the user staring at a spinner.
+#
+# Note: PVPRO is deliberately NOT guarded here — it has its own background-job
+# infrastructure below and legitimately takes 1–3 minutes.
+#
+# Caveat: a timed-out worker keeps running to completion in the background
+# (Python can't force-kill a thread). That's acceptable — the only requirement
+# is that the *UI* stops waiting and reports the problem.
+# =============================================================================
+_TIMEOUT_POOL = ThreadPoolExecutor(max_workers=4)
+STEP_TIMEOUT_S = 10
+
+
+def _run_with_timeout(fn, *args, timeout=STEP_TIMEOUT_S, **kwargs):
+    """Run fn(*args, **kwargs) but raise FutureTimeout if it exceeds `timeout` s."""
+    fut = _TIMEOUT_POOL.submit(fn, *args, **kwargs)
+    return fut.result(timeout=timeout)
 
 # =============================================================================
 # PVPRO BACKGROUND-JOB INFRASTRUCTURE
@@ -343,6 +370,95 @@ def _no_data_alert(message):
             "borderRadius": "10px",
             "fontFamily": "Arial, sans-serif",
         }
+    )
+
+
+def _duration_years(df):
+    """Time span of a datetime-indexed frame, in years. Returns None if it
+    can't be determined (non-datetime index, empty frame, etc.)."""
+    try:
+        idx = pd.to_datetime(df.index)
+        return (idx.max() - idx.min()).days / 365.25
+    except Exception:
+        return None
+
+
+def _data_quality_notes(df, mapping):
+    """Build a single collapsed disclosure listing missing-data items and what
+    each implies for the degradation result.
+
+    Returns (n_notes, component). Component is None when there's nothing to
+    flag, so the caller can skip rendering entirely.
+    """
+    mapping = mapping or {}
+    notes = []
+
+    if mapping.get("DC Power") == "computed_dc_power":
+        notes.append("No direct power channel — power computed as DC Voltage × DC Current.")
+
+    irra_key = mapping.get("Irradiance")
+    has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
+    if not has_irr:
+        notes.append("No irradiance column — power is NOT irradiance-normalized, so the "
+                     "degradation rate is not weather-corrected and is less reliable.")
+
+    temp_key = mapping.get("Module temperature")
+    has_temp = bool(temp_key) and (df is None or temp_key in getattr(df, "columns", []))
+    if has_irr and not has_temp:
+        notes.append("No module-temperature column — normalization uses irradiance only, "
+                     "with no temperature correction.")
+
+    if not notes:
+        return 0, None
+
+    n = len(notes)
+    component = html.Details(
+        [
+            html.Summary(
+                f"⚠️ {n} data-quality note{'s' if n != 1 else ''} — click to expand",
+                style={"cursor": "pointer", "color": "#92400e", "fontSize": "14px",
+                       "fontWeight": "600", "fontFamily": "Arial, sans-serif"},
+            ),
+            html.Ul(
+                [html.Li(t, style={"fontSize": "13px", "color": "#92400e",
+                                   "marginBottom": "4px", "lineHeight": "1.5"})
+                 for t in notes],
+                style={"marginTop": "8px", "marginBottom": "0", "paddingLeft": "18px"},
+            ),
+        ],
+        style={
+            "padding": "12px 14px",
+            "background": "#fffbeb",
+            "border": "1px solid #fde68a",
+            "borderRadius": "10px",
+            "marginBottom": "16px",
+        },
+    )
+    return n, component
+
+
+def _duration_block_banner(duration_years):
+    """Prominent (non-collapsed) red banner shown in the Analyze output when the
+    dataset spans less than a year, warning that Calculate Degradation is blocked."""
+    months = int(round((duration_years or 0) * 12))
+    return html.Div(
+        [
+            html.B("Not enough data for degradation analysis. "),
+            f"This dataset spans only about {months} month{'s' if months != 1 else ''} "
+            "(less than 1 year). Degradation analysis needs at least 1 year of data, so "
+            "the Calculate Degradation step is disabled for this dataset.",
+        ],
+        style={
+            "padding": "12px 14px",
+            "background": "#fef2f2",
+            "border": "1px solid #fecaca",
+            "borderRadius": "10px",
+            "color": "#991b1b",
+            "fontSize": "14px",
+            "lineHeight": "1.5",
+            "fontFamily": "Arial, sans-serif",
+            "marginBottom": "16px",
+        },
     )
 
 
@@ -2274,6 +2390,22 @@ stat_metric_options  = [o for o in metric_options if o["value"] != "PVPRO"]
 pvpro_metric_options = [o for o in metric_options if o["value"] == "PVPRO"]
 
 
+def build_stat_metric_options(disable_yoy=False):
+    """Return the statistical-method radio options, optionally greying out YoY.
+
+    YoY compares each day against the same day one year earlier, so it needs at
+    least two years of data to produce any comparison. For shorter datasets we
+    disable the option (and the gating callback falls the selection back to LR).
+    """
+    opts = []
+    for o in stat_metric_options:
+        if disable_yoy and o["value"] == "YOY":
+            opts.append({**o, "disabled": True})
+        else:
+            opts.append(o)
+    return opts
+
+
 def _metric_category_heading(text):
     """Small uppercase, letter-spaced heading used to introduce each category
     of degradation method in the radio group."""
@@ -2308,7 +2440,7 @@ calc_agent_body = html.Div([
         dcc.RadioItems(
             id="metric-stat-radio",
             value="YOY",
-            options=stat_metric_options,
+            options=build_stat_metric_options(disable_yoy=False),
             labelStyle={"display": "block", "marginBottom": "10px",
                         "cursor": "pointer", "color": "inherit"},
             labelClassName="metric-radio-label",
@@ -2316,6 +2448,8 @@ calc_agent_body = html.Div([
                         "accentColor": NAVY},
             style={"marginBottom": "0"},
         ),
+        # Shown by gate_yoy_by_duration() when the dataset is under 2 years.
+        html.Div(id="yoy-disabled-note", style={"display": "none"}),
 
         # Visual separator between the two categories.  Stepped up from
         # the BORDER token (#e2e8f0) to slate-400 because lighter shades
@@ -2904,6 +3038,11 @@ layout = html.Div([
     # NEW: holds the computed degradation rate & method so the chat can reference it
     dcc.Store(id="degradation-result-store", data={}),
 
+    # Time span (in years) of the most recently analyzed dataset. Computed once
+    # at Analyze time and reused to (a) hard-block degradation for <1yr data and
+    # (b) disable the YoY method for <2yr data. None until a dataset is analyzed.
+    dcc.Store(id="data-duration-store", data=None),
+
     # NEW: track which steps are complete
     dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
 
@@ -3044,6 +3183,41 @@ app.clientside_callback(
 
 
 # =============================================================================
+# CALLBACK — DISABLE YoY FOR DATASETS UNDER 2 YEARS
+#
+# YoY pairs each day with the same calendar day one year earlier, so it needs
+# at least two years of data to yield a single comparison. When the analyzed
+# dataset is shorter, grey out the YoY option and, if it was selected, fall the
+# selection back to LR (the clientside sync above then mirrors it into the
+# hidden master radio). Fires whenever a new dataset is analyzed (the duration
+# store changes), which also resets the embedded per-method param inputs to
+# their defaults — consistent with the existing reset-on-new-data behavior.
+# =============================================================================
+@app.callback(
+    Output("metric-stat-radio", "options", allow_duplicate=True),
+    Output("metric-stat-radio", "value",   allow_duplicate=True),
+    Output("yoy-disabled-note", "children"),
+    Output("yoy-disabled-note", "style"),
+    Input("data-duration-store", "data"),
+    State("metric-stat-radio",   "value"),
+    prevent_initial_call=True,
+)
+def gate_yoy_by_duration(duration_years, current_value):
+    disable_yoy = duration_years is not None and duration_years < 2.0
+    options = build_stat_metric_options(disable_yoy=disable_yoy)
+    if disable_yoy:
+        new_value = "LR" if current_value == "YOY" else dash.no_update
+        note = "YoY needs at least 2 years of data; it's disabled for this dataset."
+        note_style = {"fontSize": "12px", "color": "#92400e", "fontStyle": "italic",
+                      "marginTop": "8px", "fontFamily": "Arial, sans-serif"}
+    else:
+        new_value = dash.no_update
+        note = ""
+        note_style = {"display": "none"}
+    return options, new_value, note, note_style
+
+
+# =============================================================================
 # CALLBACK — UPLOAD STATUS  (UNCHANGED LOGIC, restyled output)
 # =============================================================================
 @app.callback(
@@ -3142,66 +3316,76 @@ def run_filter(filter_clicks, upload_clicks,
     norm_lower     = norm_lower if norm_lower is not None else 0.01
     norm_upper_pct = norm_upper_pct if norm_upper_pct is not None else 99
 
-    # Basic value filter
-    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
-    df = df.loc[bv_normal].copy()
+    # The filtering pipeline (clear-sky, low-irradiance, IQR, normalization) is
+    # the heavy part of this step; cap it so a pathological dataset can't hang
+    # the UI. Figure assembly below is cheap and stays outside the timed region.
+    def _do_filter():
+        # Basic value filter
+        bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
+        _df = df.loc[bv_normal].copy()
 
-    clearsky_mask = pd.Series(True, index=df.index)
-    if "clearsky" in selected_filters and has_irr:
-        cs_smooth = cs_smooth if cs_smooth is not None else 0.3
-        cs_energy = cs_energy if cs_energy is not None else 0.5
-        normal_idx, outlier_idx = clear_sky_filter(df, irra_key,
-                                                    smoothness_threshold=cs_smooth,
-                                                    energy_threshold=cs_energy)
-        clearsky_mask = df.index.isin(normal_idx)
+        clearsky_mask = pd.Series(True, index=_df.index)
+        if "clearsky" in selected_filters and has_irr:
+            _cs_smooth = cs_smooth if cs_smooth is not None else 0.3
+            _cs_energy = cs_energy if cs_energy is not None else 0.5
+            normal_idx, outlier_idx = clear_sky_filter(_df, irra_key,
+                                                        smoothness_threshold=_cs_smooth,
+                                                        energy_threshold=_cs_energy)
+            clearsky_mask = _df.index.isin(normal_idx)
 
-    df_filtered = normalize(df, mapped_variables_dict, gamma=gamma)
-    current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
-    filter_stats = []
+        _df_filtered = normalize(_df, mapped_variables_dict, gamma=gamma)
+        _current_mask = pd.Series(clearsky_mask, index=_df_filtered.index)
+        _filter_stats = []
 
-    # Data-availability notices (analysis still proceeds with what's present).
-    if mapped_variables_dict.get("DC Power") == "computed_dc_power":
-        filter_stats.append("ℹ️ No power column found — using power computed as Voltage × Current.")
-    if not has_irr:
-        filter_stats.append("⚠️ No irradiance column — power is NOT normalized, so degradation results are less accurate.")
-    elif not has_temp:
-        filter_stats.append("⚠️ No module-temperature column — irradiance-only normalization (no temperature correction).")
+        # Data-availability notices (missing power/irradiance/temperature) are now
+        # consolidated into the collapsible "data-quality notes" toggle shown right
+        # after Analyze — see _data_quality_notes(). Only filter-action stats
+        # (what each selected filter actually did) are reported here.
 
-    if "timezone" in selected_filters:
-        try:
-            df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
-            filter_stats.append("Timezone corrected (UTC → US/Pacific)")
-        except Exception:
-            filter_stats.append("⚠️ Timezone correction failed")
+        if "timezone" in selected_filters:
+            try:
+                _df_filtered.index = pd.to_datetime(_df_filtered.index)
+                _df_filtered.index = _df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
+                _filter_stats.append("Timezone corrected (UTC → US/Pacific)")
+            except Exception:
+                _filter_stats.append("⚠️ Timezone correction failed")
 
-    if "clearsky" in selected_filters:
-        if has_irr:
-            removed = (~clearsky_mask).sum()
-            filter_stats.append(f"Clear-sky filter removed {removed} points")
-        else:
-            filter_stats.append("⚠️ Clear-sky filter skipped — requires irradiance.")
+        if "clearsky" in selected_filters:
+            if has_irr:
+                removed = (~clearsky_mask).sum()
+                _filter_stats.append(f"Clear-sky filter removed {removed} points")
+            else:
+                _filter_stats.append("⚠️ Clear-sky filter skipped — requires irradiance.")
 
-    if "low-irra-power" in selected_filters and has_irr:
-        normal_idx, outlier_idx = low_irra_power_filter(
-            df_filtered, mapped_variables_dict,
-            irr_thresh=irr_thresh, power_ratio=power_ratio,
-            norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
-        )
-        mask = df_filtered.index.isin(normal_idx)
-        removed = (~mask & current_mask).sum()
-        current_mask &= mask
-        filter_stats.append(f"Low irra-power filter removed {removed} points")
-    elif "low-irra-power" in selected_filters:
-        filter_stats.append("⚠️ Low-irradiance/power filter skipped — requires irradiance.")
+        if "low-irra-power" in selected_filters and has_irr:
+            normal_idx, outlier_idx = low_irra_power_filter(
+                _df_filtered, mapped_variables_dict,
+                irr_thresh=irr_thresh, power_ratio=power_ratio,
+                norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
+            )
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = (~mask & _current_mask).sum()
+            _current_mask &= mask
+            _filter_stats.append(f"Low irra-power filter removed {removed} points")
+        elif "low-irra-power" in selected_filters:
+            _filter_stats.append("⚠️ Low-irradiance/power filter skipped — requires irradiance.")
 
-    if "outlier" in selected_filters:
-        iqr_multiplier = iqr_multiplier if iqr_multiplier is not None else 1.5
-        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=iqr_multiplier)
-        mask = df_filtered.index.isin(normal_idx)
-        removed = (~mask & current_mask).sum()
-        current_mask &= mask
-        filter_stats.append(f"IQR outlier filter removed {removed} points")
+        if "outlier" in selected_filters:
+            _iqr = iqr_multiplier if iqr_multiplier is not None else 1.5
+            normal_idx, outlier_idx = identify_outliers_iqr(_df_filtered, "norm", iqr_multiplier=_iqr)
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = (~mask & _current_mask).sum()
+            _current_mask &= mask
+            _filter_stats.append(f"IQR outlier filter removed {removed} points")
+
+        return _df_filtered, _current_mask, _filter_stats
+
+    try:
+        df_filtered, current_mask, filter_stats = _run_with_timeout(_do_filter)
+    except FutureTimeout:
+        return [_no_data_alert("Filtering is taking longer than expected — something may be wrong "
+                               "with your data. Check the file's formatting and columns, then try again."),
+                None]
 
     normal_indices  = df_filtered.index[current_mask]
     outlier_indices = df_filtered.index[~current_mask]
@@ -3407,6 +3591,17 @@ def analyze_uploaded_data_callback(
         return [_no_data_alert("Cannot run degradation: no DC Power (and no Voltage + Current to compute it)."),
                 "", False, "Calculate Degradation", {}, {}, True]
 
+    # Hard block: degradation analysis is meaningless on under a year of data.
+    # The user is warned earlier in the Analyze output; this enforces it for
+    # every method (statistical and PVPRO alike).
+    _dur = _duration_years(df_filtered)
+    if _dur is not None and _dur < 1.0:
+        _months = int(round(_dur * 12))
+        return [_no_data_alert(f"This dataset spans only about {_months} month"
+                               f"{'s' if _months != 1 else ''} (less than 1 year). "
+                               "Degradation analysis needs at least 1 year of data."),
+                "", False, "Calculate Degradation", {}, {}, True]
+
     irra_key = mapped_variables_dict.get("Irradiance") if mapped_variables_dict else None
     if not irra_key or irra_key not in df_filtered.columns:
         irra_key = None   # aggregate_daily falls back to a simple daily mean
@@ -3484,26 +3679,37 @@ def analyze_uploaded_data_callback(
                 {}, {"job_id": job_id}, False]
 
     else:
-        daily_data = aggregate_daily(df_filtered, irra_key)
+        # Fast statistical methods run synchronously; cap them so a bad dataset
+        # can't hang the UI. (PVPRO, above, has its own background-job path and
+        # is deliberately not capped.)
+        def _compute_fast():
+            daily_data = aggregate_daily(df_filtered, irra_key)
+            if selected_metric == "YOY":
+                return compute_yoy(daily_data,
+                                   rolling_window=yoy_window if yoy_window else 30,
+                                   iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
+            elif selected_metric == "LR":
+                return compute_lr(daily_data)
+            elif selected_metric == "HW":
+                return compute_hw(daily_data, period=hw_period if hw_period else 12)
+            elif selected_metric == "ARIMA":
+                return compute_arima(daily_data,
+                                     p=arima_p if arima_p is not None else 1,
+                                     d=arima_d if arima_d is not None else 1,
+                                     q=arima_q if arima_q is not None else 0,
+                                     seasonal_period=arima_s if arima_s else 12)
+            elif selected_metric == "CSD":
+                return compute_csd(daily_data, period=csd_period if csd_period else 12)
+            else:
+                raise ValueError(f"Unknown metric: {selected_metric}")
 
-        if selected_metric == "YOY":
-            rd, fig = compute_yoy(daily_data,
-                                  rolling_window=yoy_window if yoy_window else 30,
-                                  iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
-        elif selected_metric == "LR":
-            rd, fig = compute_lr(daily_data)
-        elif selected_metric == "HW":
-            rd, fig = compute_hw(daily_data, period=hw_period if hw_period else 12)
-        elif selected_metric == "ARIMA":
-            rd, fig = compute_arima(daily_data,
-                                    p=arima_p if arima_p is not None else 1,
-                                    d=arima_d if arima_d is not None else 1,
-                                    q=arima_q if arima_q is not None else 0,
-                                    seasonal_period=arima_s if arima_s else 12)
-        elif selected_metric == "CSD":
-            rd, fig = compute_csd(daily_data, period=csd_period if csd_period else 12)
-        else:
-            raise ValueError(f"Unknown metric: {selected_metric}")
+        try:
+            rd, fig = _run_with_timeout(_compute_fast)
+        except FutureTimeout:
+            return [_no_data_alert("Calculating degradation is taking longer than expected — "
+                                   "something may be wrong with your data. Check the file's "
+                                   "formatting and columns, then try again."),
+                    "", False, "Calculate Degradation", {}, {}, True]
 
     # Restyle the figure
     if fig is not None:
@@ -3566,36 +3772,11 @@ def analyze_uploaded_data_callback(
         ], style={"fontFamily": "Arial, sans-serif"}),
     ])
 
-    # When no irradiance was available, the trend is built from raw power
-    # instead of irradiance-normalized power. Flag that next to the result so
-    # the user knows how to read the number.
-    no_irr_banner = html.Div()
-    if irra_key is None:
-        no_irr_banner = html.Div(
-            [
-                html.B("Calculated without irradiance. "),
-                "⚠️ No irradiance data was provided, so this rate is based on raw power "
-                "output rather than irradiance-normalized power. It is therefore not "
-                "adjusted for day-to-day differences in sunlight, which makes it more "
-                "sensitive to weather and seasonal variation — read it as an approximate "
-                "estimate. Add an irradiance column (and module temperature) for a "
-                "sunlight-corrected, more reliable degradation rate.",
-            ],
-            style={
-                "padding": "12px 14px",
-                "background": "#fffbeb",
-                "border": "1px solid #fde68a",
-                "borderRadius": "8px",
-                "color": "#92400e",
-                "fontSize": "13px",
-                "lineHeight": "1.5",
-                "fontFamily": "Arial, sans-serif",
-                "marginBottom": "16px",
-            },
-        )
+    # The "no irradiance → un-normalized, less reliable" caveat is now shown in
+    # the consolidated data-quality notes toggle right after Analyze (see
+    # _data_quality_notes()), so it's no longer repeated next to the result.
 
     degradation_layout = html.Div([
-        no_irr_banner,
         html.Div(summary_block, style={"marginBottom": "20px"}),
         html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})),
     ], className="slide-in-up", style={
@@ -4241,6 +4422,7 @@ app.clientside_callback(
     Output("data-source-store",    "data",      allow_duplicate=True),
     Output("upload-status-output", "children",  allow_duplicate=True),
     Output("stored-data-file-name","data",      allow_duplicate=True),
+    Output("data-duration-store",  "data",      allow_duplicate=True),
     Input("analyze-btn",          "n_clicks"),
     Input("load-example-btn-1",   "n_clicks"),
     Input("load-example-btn-2",   "n_clicks"),
@@ -4280,43 +4462,70 @@ def analyze_uploaded_data_callback(
             )
         except Exception as e:
             return (html.Div(f"Error loading example: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", example_filename)
+                    {}, None, "", False, "Analyze Data", None, "", example_filename, None)
+        # Duration is (re)computed when the user clicks Analyze; reset it here so a
+        # freshly loaded example can't be gated by the previous dataset's span.
         return (html.Div("", className="text-muted"),
-                {}, df_json, "", False, "Analyze Data", "example", output_msg, example_filename)
+                {}, df_json, "", False, "Analyze Data", "example", output_msg, example_filename, None)
 
     # Analyze clicked
     if trigger == "analyze-btn":
-        if data_source == "upload" and contents is not None:
-            df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
-            if df is None:
-                return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name
-        elif data_source == "example" and stored_df_json is not None:
-            try:
+        # Parsing (which includes an LLM column-identification call) is capped at
+        # STEP_TIMEOUT_S so a malformed file can't hang the UI indefinitely.
+        try:
+            if data_source == "upload" and contents is not None:
+                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
+                    parse_contents, contents, filename)
+                if df is None:
+                    return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name, None
+            elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
-                df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
-            except Exception as e:
-                return (html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
-                        {}, None, "", False, "Analyze Data", None, "", stored_file_name)
-        else:
-            return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                    {}, None, "", False, "Analyze Data", None, "", filename)
+                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
+                    parse_contents, df=df)
+            else:
+                return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
+                        {}, None, "", False, "Analyze Data", None, "", filename, None)
+        except FutureTimeout:
+            return (_no_data_alert("This is taking longer than expected — something may be wrong "
+                                   "with your data. Check the file's formatting and columns, then try again."),
+                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None)
+        except Exception as e:
+            return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
+                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None)
 
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name)
+                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None)
 
-        # Figures
+        # Dataset time span — drives the <1yr block (below) and the <2yr YoY disable.
+        duration_years = _duration_years(df)
+        duration_store = round(duration_years, 3) if duration_years is not None else None
+
+        # Figures (also capped — large frames can make plotting slow).
         figures_output = html.Div()
         try:
             if df is not None and mapped_variables_dict:
-                figures_output, err = make_overview_figures(df, mapped_variables_dict)
+                figures_output, err = _run_with_timeout(
+                    make_overview_figures, df, mapped_variables_dict)
                 figures_output = html.Div(figures_output)
+        except FutureTimeout:
+            figures_output = html.Div("Preview figures took too long to render and were skipped.",
+                                      style={"color": ACCENT})
         except Exception:
             figures_output = html.Div("Figure generation failed.", style={"color": ACCENT})
 
-        combined_output = html.Div([
+        # Consolidated, collapsible data-quality notes + (if <1yr) a hard-block banner,
+        # surfaced right after analysis so the user sees implications before calculating.
+        _n_notes, notes_component = _data_quality_notes(df, mapped_variables_dict)
+        pre_blocks = []
+        if duration_years is not None and duration_years < 1.0:
+            pre_blocks.append(_duration_block_banner(duration_years))
+        if notes_component is not None:
+            pre_blocks.append(notes_component)
+
+        combined_output = html.Div(pre_blocks + [
             html.Div([
                 html.Div("identified variables", style={
                     "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
@@ -4347,9 +4556,9 @@ def analyze_uploaded_data_callback(
         ], className="slide-in-up")
 
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
-                "Analyze Data", None, "", stored_file_name)
+                "Analyze Data", None, "", stored_file_name, duration_store)
 
-    return ("", {}, None, "", False, "Analyze Data", None, "", stored_file_name)
+    return ("", {}, None, "", False, "Analyze Data", None, "", stored_file_name, None)
 
 
 # =============================================================================

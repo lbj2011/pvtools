@@ -1,0 +1,4 @@
+# Development / test-only dependencies (NOT needed to run or deploy the app).
+# Install into the pvtools env:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0
