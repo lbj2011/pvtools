@@ -23,33 +23,6 @@ import threading
 import uuid
 import copy
 import collections
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
-
-# =============================================================================
-# TIMEOUT GUARD FOR SYNCHRONOUS STEPS
-#
-# Analyze, Apply Filters, and the fast degradation methods (YoY/LR/HW/ARIMA/CSD)
-# all run synchronously inside their Dash callbacks. A malformed dataset can
-# make them run effectively forever and hang the UI. We cap them at 10 s by
-# running the pure computation in a worker and waiting on its result; if it
-# overruns, the callback aborts and surfaces a "something wrong with your data"
-# error instead of leaving the user staring at a spinner.
-#
-# Note: PVPRO is deliberately NOT guarded here — it has its own background-job
-# infrastructure below and legitimately takes 1–3 minutes.
-#
-# Caveat: a timed-out worker keeps running to completion in the background
-# (Python can't force-kill a thread). That's acceptable — the only requirement
-# is that the *UI* stops waiting and reports the problem.
-# =============================================================================
-_TIMEOUT_POOL = ThreadPoolExecutor(max_workers=4)
-STEP_TIMEOUT_S = 10
-
-
-def _run_with_timeout(fn, *args, timeout=STEP_TIMEOUT_S, **kwargs):
-    """Run fn(*args, **kwargs) but raise FutureTimeout if it exceeds `timeout` s."""
-    fut = _TIMEOUT_POOL.submit(fn, *args, **kwargs)
-    return fut.result(timeout=timeout)
 
 # =============================================================================
 # PVPRO BACKGROUND-JOB INFRASTRUCTURE
@@ -370,95 +343,6 @@ def _no_data_alert(message):
             "borderRadius": "10px",
             "fontFamily": "Arial, sans-serif",
         }
-    )
-
-
-def _duration_years(df):
-    """Time span of a datetime-indexed frame, in years. Returns None if it
-    can't be determined (non-datetime index, empty frame, etc.)."""
-    try:
-        idx = pd.to_datetime(df.index)
-        return (idx.max() - idx.min()).days / 365.25
-    except Exception:
-        return None
-
-
-def _data_quality_notes(df, mapping):
-    """Build a single collapsed disclosure listing missing-data items and what
-    each implies for the degradation result.
-
-    Returns (n_notes, component). Component is None when there's nothing to
-    flag, so the caller can skip rendering entirely.
-    """
-    mapping = mapping or {}
-    notes = []
-
-    if mapping.get("DC Power") == "computed_dc_power":
-        notes.append("No direct power channel — power computed as DC Voltage × DC Current.")
-
-    irra_key = mapping.get("Irradiance")
-    has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
-    if not has_irr:
-        notes.append("No irradiance column — power is NOT irradiance-normalized, so the "
-                     "degradation rate is not weather-corrected and is less reliable.")
-
-    temp_key = mapping.get("Module temperature")
-    has_temp = bool(temp_key) and (df is None or temp_key in getattr(df, "columns", []))
-    if has_irr and not has_temp:
-        notes.append("No module-temperature column — normalization uses irradiance only, "
-                     "with no temperature correction.")
-
-    if not notes:
-        return 0, None
-
-    n = len(notes)
-    component = html.Details(
-        [
-            html.Summary(
-                f"⚠️ {n} data-quality note{'s' if n != 1 else ''} — click to expand",
-                style={"cursor": "pointer", "color": "#92400e", "fontSize": "14px",
-                       "fontWeight": "600", "fontFamily": "Arial, sans-serif"},
-            ),
-            html.Ul(
-                [html.Li(t, style={"fontSize": "13px", "color": "#92400e",
-                                   "marginBottom": "4px", "lineHeight": "1.5"})
-                 for t in notes],
-                style={"marginTop": "8px", "marginBottom": "0", "paddingLeft": "18px"},
-            ),
-        ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fffbeb",
-            "border": "1px solid #fde68a",
-            "borderRadius": "10px",
-            "marginBottom": "16px",
-        },
-    )
-    return n, component
-
-
-def _duration_block_banner(duration_years):
-    """Prominent (non-collapsed) red banner shown in the Analyze output when the
-    dataset spans less than a year, warning that Calculate Degradation is blocked."""
-    months = int(round((duration_years or 0) * 12))
-    return html.Div(
-        [
-            html.B("Not enough data for degradation analysis. "),
-            f"This dataset spans only about {months} month{'s' if months != 1 else ''} "
-            "(less than 1 year). Degradation analysis needs at least 1 year of data, so "
-            "the Calculate Degradation step is disabled for this dataset.",
-        ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fef2f2",
-            "border": "1px solid #fecaca",
-            "borderRadius": "10px",
-            "color": "#991b1b",
-            "fontSize": "14px",
-            "lineHeight": "1.5",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        },
     )
 
 
@@ -1713,14 +1597,11 @@ sidebar = build_sidebar()
 # CHAT — AGENT 1 · DATA
 # =============================================================================
 data_agent_body = html.Div([
-    # The upload box, example chips and data-requirements now live in the
-    # shared upload header above the mode tabs (so both modes share one
-    # data source).  This agent runs DETECTION on that already-loaded data.
     html.Div(
         [
-            "Using the data you loaded above. Click ",
-            html.B("Analyze Data"),
-            " and I'll detect your columns and preview the raw signal.",
+            "Welcome — let's analyze some PV data. Drop a ",
+            html.B("CSV, Excel, or Parquet"),
+            " file below, or try one of the example datasets. I'll detect your columns and preview the raw signal.",
         ],
         style={
             "fontSize": "16px",
@@ -1729,6 +1610,174 @@ data_agent_body = html.Div([
             "fontFamily": "Arial, sans-serif",
             "marginBottom": "18px",
         }
+    ),
+
+    # Requirements -- the IMPORTANT badge sits inside the summary, just
+    # after the CSS-generated triangle.  The whole summary line is bold.
+    html.Details(
+        [
+            html.Summary(
+                [
+                    html.Span("IMPORTANT", className="important-badge", style={
+                        "fontSize": "10px",
+                        "fontWeight": "700",
+                        "color": "white",
+                        "background": NAVY,
+                        "padding": "2px 8px",
+                        "borderRadius": "999px",
+                        "letterSpacing": "0.06em",
+                        "marginRight": "10px",
+                        "verticalAlign": "middle",
+                    }),
+                    html.Span("Click to see data requirements"),
+                ],
+                style={
+                    "cursor": "pointer",
+                    "fontSize": "14px",
+                    "color": INK,
+                    "fontFamily": "Arial, sans-serif",
+                    "fontWeight": "700",
+                    "marginBottom": "8px",
+                }
+            ),
+            html.Ul(
+                [
+                    html.Li([html.Span("Columns: ", style={"color": INK_SOFT}), html.B("time, power, irradiance, temperature")]),
+                    html.Li([html.Span("Duration: ", style={"color": INK_SOFT}), html.B("≥ 2 years"), " for reliable degradation"]),
+                    html.Li([html.Span("Resolution: ", style={"color": INK_SOFT}), html.B("1–6 hours")]),
+                ],
+                style={
+                    "fontSize": "14px",
+                    "color": INK,
+                    "paddingLeft": "18px",
+                    "lineHeight": "1.7",
+                    "marginBottom": "0",
+                    "marginTop": "10px",
+                    "padding": "12px 14px 12px 32px",
+                    "background": "#eff6ff",
+                    "border": "1px solid #bfdbfe",
+                    "borderRadius": "10px",
+                    "fontFamily": "Arial, sans-serif",
+                }
+            ),
+        ],
+        style={"marginBottom": "16px"}
+    ),
+
+    # Upload zone.  Padding intentionally compact -- the box was twice
+    # this tall and users found it visually dominant relative to the
+    # other Step-1 elements (example chips, Analyze button).  16px of
+    # vertical padding fits the icon + two lines of text without
+    # crowding, and matches the visual weight of the rest of the panel.
+    dcc.Upload(
+        id="upload-data",
+        accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .parquet",
+        children=html.Div(
+            [
+                html.Div(
+                    "↑",
+                    style={
+                        "fontSize": "20px",
+                        "color": INK_SOFT,
+                        "marginBottom": "2px",
+                        "fontWeight": "300",
+                        "lineHeight": "1",
+                    }
+                ),
+                html.Div(
+                    [
+                        "Drag a file here, or ",
+                        html.Span("browse", style={"color": ACCENT, "textDecoration": "underline", "fontWeight": "500"}),
+                    ],
+                    style={"fontSize": "14px", "color": INK, "fontFamily": "Arial, sans-serif"}
+                ),
+                html.Div(".csv  ·  .xlsx  ·  .parquet", style={
+                    "fontSize": "12px",
+                    "color": INK_SOFT,
+                    "marginTop": "2px",
+                    "fontFamily": "Arial, sans-serif",
+                }),
+            ],
+            style={"textAlign": "center"}
+        ),
+        style={
+            "width": "100%",
+            "padding": "14px 16px",
+            "border": f"1.5px dashed {BORDER_STRONG}",
+            "borderRadius": "10px",
+            "backgroundColor": "#f8fafc",
+            "cursor": "pointer",
+            "transition": "all 0.15s ease",
+        }
+    ),
+
+    html.Div(id="upload-status-output", style={"marginTop": "10px"}),
+
+    # Example buttons
+    html.Div(
+        [
+            html.Div("Or try an example:", style={
+                "fontSize": "14px",
+                "color": INK_SOFT,
+                "marginBottom": "8px",
+                "fontFamily": "Arial, sans-serif",
+            }),
+            html.Div(
+                [
+                    html.Button(
+                        ["⬢  ", "Example 1"],
+                        id="load-example-btn-1",
+                        n_clicks=0,
+                        style={
+                            "padding": "8px 14px",
+                            "background": "transparent",
+                            "border": f"1px solid {BORDER_STRONG}",
+                            "borderRadius": "8px",
+                            "fontSize": "14px",
+                            "color": INK,
+                            "cursor": "pointer",
+                            "marginRight": "8px",
+                            "fontFamily": "Arial, sans-serif",
+                            "fontWeight": "500",
+                        }
+                    ),
+                    html.Button(
+                        ["⬢  ", "Example 2"],
+                        id="load-example-btn-2",
+                        n_clicks=0,
+                        style={
+                            "padding": "8px 14px",
+                            "background": "transparent",
+                            "border": f"1px solid {BORDER_STRONG}",
+                            "borderRadius": "8px",
+                            "fontSize": "14px",
+                            "color": INK,
+                            "cursor": "pointer",
+                            "marginRight": "8px",
+                            "fontFamily": "Arial, sans-serif",
+                            "fontWeight": "500",
+                        }
+                    ),
+                    html.Button(
+                        ["⬢  ", "Example 3"],
+                        id="load-example-btn-3",
+                        n_clicks=0,
+                        style={
+                            "padding": "8px 14px",
+                            "background": "transparent",
+                            "border": f"1px solid {BORDER_STRONG}",
+                            "borderRadius": "8px",
+                            "fontSize": "14px",
+                            "color": INK,
+                            "cursor": "pointer",
+                            "fontFamily": "Arial, sans-serif",
+                            "fontWeight": "500",
+                        }
+                    ),
+                ],
+            ),
+        ],
+        style={"marginTop": "18px"}
     ),
 
     # Analyze button — the action that triggers analysis
@@ -2225,22 +2274,6 @@ stat_metric_options  = [o for o in metric_options if o["value"] != "PVPRO"]
 pvpro_metric_options = [o for o in metric_options if o["value"] == "PVPRO"]
 
 
-def build_stat_metric_options(disable_yoy=False):
-    """Return the statistical-method radio options, optionally greying out YoY.
-
-    YoY compares each day against the same day one year earlier, so it needs at
-    least two years of data to produce any comparison. For shorter datasets we
-    disable the option (and the gating callback falls the selection back to LR).
-    """
-    opts = []
-    for o in stat_metric_options:
-        if disable_yoy and o["value"] == "YOY":
-            opts.append({**o, "disabled": True})
-        else:
-            opts.append(o)
-    return opts
-
-
 def _metric_category_heading(text):
     """Small uppercase, letter-spaced heading used to introduce each category
     of degradation method in the radio group."""
@@ -2275,7 +2308,7 @@ calc_agent_body = html.Div([
         dcc.RadioItems(
             id="metric-stat-radio",
             value="YOY",
-            options=build_stat_metric_options(disable_yoy=False),
+            options=stat_metric_options,
             labelStyle={"display": "block", "marginBottom": "10px",
                         "cursor": "pointer", "color": "inherit"},
             labelClassName="metric-radio-label",
@@ -2283,8 +2316,6 @@ calc_agent_body = html.Div([
                         "accentColor": NAVY},
             style={"marginBottom": "0"},
         ),
-        # Shown by gate_yoy_by_duration() when the dataset is under 2 years.
-        html.Div(id="yoy-disabled-note", style={"display": "none"}),
 
         # Visual separator between the two categories.  Stepped up from
         # the BORDER token (#e2e8f0) to slate-400 because lighter shades
@@ -2855,1444 +2886,10 @@ chat_stream = html.Div(
 # =============================================================================
 # FULL LAYOUT
 # =============================================================================
-
-# =============================================================================
-# ADVANCED/SIMPLE MODE SYSTEM  (merged in from pvcopilotMaster)
-#   Shared upload header, common header, mode-switcher tabs, and the
-#   entire Simple-mode panel + helpers.  None of the original Advanced
-#   workflow above was removed; this only ADDS the second mode.
-# =============================================================================
-
-def _success_banner(message, prefix="Note:"):
-    """Light-green success banner used by both modes.  `message` is the text
-    after the bold prefix (e.g. 'example data 2 uploaded')."""
-    return html.Div(
-        [
-            html.B(f"{prefix} ", style={"color": "#15803d"}),
-            html.Span(message, style={"color": "#15803d"}),
-        ],
-        style={
-            "padding": "12px 16px",
-            "background": "#ecfdf5",          # light green
-            "border": "1px solid #86efac",    # green border
-            "borderRadius": "10px",
-            "fontSize": "15px",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "8px",
-        },
-        className="slide-in-top",
-    )
-
-
-def _working_banner(message):
-    """Blue 'in progress' banner used during the Simple-mode staged reveal."""
-    return html.Div(
-        [
-            html.Span("⏳", style={"marginRight": "8px"}),
-            html.Span(message,
-                      style={"fontFamily": "Arial, sans-serif", "fontSize": "14px",
-                             "color": INK, "fontWeight": "600"}),
-        ],
-        style={"padding": "12px 16px", "background": "#eff6ff",
-               "border": "1px solid #bfdbfe", "borderRadius": "10px",
-               "fontSize": "14px", "marginBottom": "8px"},
-    )
-
-
-def _shared_example_btn(btn_id, label):
-    return html.Button(
-        ["⬢  ", label],
-        id=btn_id,
-        n_clicks=0,
-        style={
-            "padding": "8px 14px",
-            "background": "transparent",
-            "border": f"1px solid {BORDER_STRONG}",
-            "borderRadius": "8px",
-            "fontSize": "14px",
-            "color": INK,
-            "cursor": "pointer",
-            "marginRight": "8px",
-            "fontFamily": "Arial, sans-serif",
-            "fontWeight": "500",
-        }
-    )
-
-
-shared_upload_header = html.Div(
-    [
-        html.Div("LOAD YOUR DATA", style={
-            "fontSize": "15px", "color": ACCENT, "fontWeight": "800",
-            "fontFamily": "Arial, sans-serif", "textTransform": "uppercase",
-            "letterSpacing": "0.12em", "marginBottom": "10px",
-        }),
-        html.Div(
-            [
-                "Drop a ",
-                html.B("CSV, Excel, or Parquet"),
-                " file, or try an example dataset. Then pick a mode below.",
-            ],
-            style={
-                "fontSize": "16px", "color": INK, "lineHeight": "1.6",
-                "fontFamily": "Arial, sans-serif", "marginBottom": "16px",
-            }
-        ),
-
-        # Data requirements disclosure
-        html.Details(
-            [
-                html.Summary(
-                    [
-                        html.Span("IMPORTANT", className="important-badge", style={
-                            "fontSize": "10px", "fontWeight": "700", "color": "white",
-                            "background": NAVY, "padding": "2px 8px",
-                            "borderRadius": "999px", "letterSpacing": "0.06em",
-                            "marginRight": "10px", "verticalAlign": "middle",
-                        }),
-                        html.Span("Click to see data requirements"),
-                    ],
-                    style={
-                        "cursor": "pointer", "fontSize": "14px", "color": INK,
-                        "fontFamily": "Arial, sans-serif", "fontWeight": "700",
-                        "marginBottom": "8px",
-                    }
-                ),
-                html.Ul(
-                    [
-                        html.Li([html.Span("Columns: ", style={"color": INK_SOFT}), html.B("time, power, irradiance, temperature")]),
-                        html.Li([html.Span("Duration: ", style={"color": INK_SOFT}), html.B("≥ 2 years"), " for reliable degradation"]),
-                        html.Li([html.Span("Resolution: ", style={"color": INK_SOFT}), html.B("1–6 hours")]),
-                    ],
-                    style={
-                        "fontSize": "14px", "color": INK, "paddingLeft": "18px",
-                        "lineHeight": "1.7", "marginBottom": "0", "marginTop": "10px",
-                        "padding": "12px 14px 12px 32px", "background": "#eff6ff",
-                        "border": "1px solid #bfdbfe", "borderRadius": "10px",
-                        "fontFamily": "Arial, sans-serif",
-                    }
-                ),
-            ],
-            style={"marginBottom": "16px"}
-        ),
-
-        # Upload box
-        dcc.Upload(
-            id="upload-data",
-            accept=".csv, text/csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .parquet",
-            children=html.Div(
-                [
-                    "Drag a file here, or ",
-                    html.Span("browse", style={"color": ACCENT, "textDecoration": "underline", "fontWeight": "500"}),
-                    html.Span("  ·  .csv / .xlsx / .parquet", style={
-                        "fontSize": "12px", "color": INK_SOFT, "marginLeft": "6px",
-                    }),
-                ],
-                style={"textAlign": "center", "fontSize": "14px", "color": INK,
-                       "fontFamily": "Arial, sans-serif"}
-            ),
-            style={
-                "width": "100%", "padding": "14px 16px",
-                "border": f"1.5px dashed {BORDER_STRONG}", "borderRadius": "10px",
-                "backgroundColor": "#f8fafc", "cursor": "pointer",
-                "transition": "all 0.15s ease",
-            }
-        ),
-
-        html.Div(id="upload-status-output", style={"marginTop": "10px"}),
-
-        # Example buttons
-        html.Div(
-            [
-                html.Div("Or try an example:", style={
-                    "fontSize": "14px", "color": INK_SOFT, "marginBottom": "8px",
-                    "fontFamily": "Arial, sans-serif",
-                }),
-                html.Div(
-                    [
-                        _shared_example_btn("load-example-btn-1", "Example 1"),
-                        _shared_example_btn("load-example-btn-2", "Example 2"),
-                        _shared_example_btn("load-example-btn-3", "Example 3"),
-                    ],
-                ),
-            ],
-            style={"marginTop": "14px"}
-        ),
-    ],
-    style={
-        "padding": "32px 64px 36px",
-        "background": PAPER_RAISED,
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
-        "marginBottom": "16px",
-    }
-)
-
-
-# =============================================================================
-# CHAT — AGENT 2 · FILTER
-# =============================================================================
-_common_hero_bullets = html.Ul(
-    [
-        html.Li([html.B("Agentic analysis"), " — drop raw data, the agent runs the full pipeline for you."]),
-        html.Li([html.B("Two modes"), " — a fast degradation result, or deep diagnostic insight."]),
-    ],
-    style={
-        "fontSize": "16px",
-        "color": INK_SOFT,
-        "lineHeight": "1.7",
-        "fontFamily": "Arial, sans-serif",
-        "maxWidth": "680px",
-        "paddingLeft": "20px",
-        "marginBottom": "0",
-    }
-)
-
-# The common header (eyebrow + big title + bullets + dev note), shown ONCE
-# above the shared data-upload area, boxed in the same card style as the
-# mode panels below.
-common_header = html.Div(
-    html.Div(
-        [
-            html.Div("AGENTIC PV DEGRADATION ANALYSIS", style={
-                "fontSize": "15px",
-                "color": ACCENT,
-                "fontFamily": "Arial, sans-serif",
-                "fontWeight": "600",
-                "textTransform": "uppercase",
-                "letterSpacing": "0.12em",
-                "marginBottom": "12px",
-            }),
-            html.H1("Drop your data, get the degradation rate.", style={
-                "fontSize": "40px",
-                "fontFamily": "Arial, sans-serif",
-                "fontWeight": "700",
-                "color": INK,
-                "lineHeight": "1.05",
-                "margin": "0 0 16px",
-            }),
-            html.Div(_common_hero_bullets),
-            soft_blue_callout(
-                [
-                    html.B("Note: "),
-                    "This tool is currently under active development. ",
-                    html.B("We don't store your data"),
-                    ", and online usage doesn't require "
-                    "a user API key. If you encounter issues, please ",
-                    html.A(
-                        "contact us",
-                        href="mailto:baojieli@lbl.gov",
-                        style={"color": "#0c4a6e",
-                               "textDecoration": "underline",
-                               "fontWeight": "600"},
-                    ),
-                    ".",
-                ],
-                margin_top="20px",
-                margin_bottom="0",
-            ),
-        ],
-        style={"padding": "32px 64px 36px"},
-    ),
-    style={
-        "background": PAPER_RAISED,
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
-        "marginBottom": "16px",
-    }
-)
-
-
-# Advanced-mode hero middle content — the four-agent bullet list.
-def _mode_tab(label, sub, mode_key, active):
-    """One pill in the mode switcher — capsule-shaped, single line."""
-    return html.Button(
-        [
-            html.Span(label, style={
-                "fontSize": "14px",
-                "fontWeight": "700",
-                "fontFamily": "Arial, sans-serif",
-                "color": "#ffffff" if active else INK,
-                "marginRight": "9px",
-            }),
-            html.Span(sub, style={
-                "fontSize": "12px",
-                "fontWeight": "500",
-                "fontFamily": "Arial, sans-serif",
-                "color": "rgba(255,255,255,0.85)" if active else "#94a3b8",
-            }),
-        ],
-        id={"type": "mode-tab", "mode": mode_key},
-        className="mode-tab-active" if active else "mode-tab-idle",
-        n_clicks=0,
-        style={
-            "display": "flex",
-            "alignItems": "center",
-            "flexWrap": "wrap",
-            "flex": "0 1 auto",
-            "minWidth": "0",
-            "justifyContent": "center",
-            "padding": "11px 22px",
-            "border": "none",
-            "borderRadius": "999px",   # full capsule
-            "cursor": "pointer",
-            "background": NAVY if active else "transparent",
-            "boxShadow": "0 1px 3px rgba(0,100,171,0.25)" if active else "none",
-            "transition": "all 0.15s ease",
-        },
-    )
-
-
-def build_mode_tabs(mode="simple"):
-    return html.Div(
-        [
-            _mode_tab("Simple mode", "Drop data, get the rate", "simple",
-                      active=(mode == "simple")),
-            _mode_tab("Advanced mode", "Control every step", "advanced",
-                      active=(mode == "advanced")),
-        ],
-        id="mode-tabs",
-        style={
-            # Flex that wraps so both pills stay visible (and the sub-captions
-            # aren't cut off) on narrow screens.
-            "display": "flex",
-            "flexWrap": "wrap",
-            "gap": "8px",
-            "padding": "6px",
-            "background": "#f1f5f9",
-            "border": f"1px solid {BORDER}",
-            "borderRadius": "18px",   # softer corners when wrapped to 2 rows
-            "marginBottom": "4px",
-            "maxWidth": "100%",
-            "boxSizing": "border-box",
-        },
-    )
-
-
-# -----------------------------------------------------------------------------
-# SIMPLE-MODE PANEL
-# -----------------------------------------------------------------------------
-# Uses the SHARED upload area above; the panel itself just has a single
-# "Analyze" button that runs the whole default pipeline and drops the result
-# into `simple-result`.
-# -----------------------------------------------------------------------------
-
-
-
-
-def _simple_analyze_style(disabled):
-    base = {
-        "padding": "13px 32px",
-        "border": "none",
-        "borderRadius": "999px",
-        "fontSize": "14px",          # matches the mode-tab label size
-        "fontWeight": "700",
-        "fontFamily": "Arial, sans-serif",
-        "letterSpacing": "0.01em",
-        "whiteSpace": "nowrap",
-    }
-    if disabled:
-        base.update({"background": "#cbd5e1", "color": "#ffffff",
-                     "cursor": "not-allowed"})
-    else:
-        base.update({"background": INK, "color": PAPER, "cursor": "pointer"})
-    return base
-
-
-def _explainer_bullets(items):
-    """Bulleted list with a bold lead-in per item (image-2 style).
-    `items` is a list of (bold, rest) tuples."""
-    return html.Ul(
-        [html.Li([html.B(bold), rest], style={"marginBottom": "8px"})
-         for bold, rest in items],
-        style={
-            "margin": "0", "paddingLeft": "22px",
-            "fontSize": "15px", "color": INK_SOFT, "lineHeight": "1.6",
-            "fontFamily": "Arial, sans-serif",
-        },
-    )
-
-
-_SIMPLE_EXPLAINER_BULLETS = [
-    ("Fully automatic", " — runs the full default pipeline (prescreen → filter → degradation)."),
-    ("Preset parameters & metric", " — defaults chosen for you; use Advanced mode to tune them."),
-]
-
-def _simple_pvpro_btn_style(disabled):
-    """Pill button for the Simple-mode PVPRO box (matches Analyze button)."""
-    base = {
-        "padding": "13px 32px",
-        "border": "none",
-        "borderRadius": "999px",
-        "fontSize": "14px",
-        "fontWeight": "700",
-        "fontFamily": "Arial, sans-serif",
-        "letterSpacing": "0.01em",
-        "whiteSpace": "nowrap",
-    }
-    if disabled:
-        base.update({"background": "#cbd5e1", "color": "#ffffff",
-                     "cursor": "not-allowed"})
-    else:
-        base.update({"background": INK, "color": PAPER, "cursor": "pointer"})
-    return base
-
-
-def _simple_pvpro_params_block():
-    """Collapsible module/array parameters for the Simple-mode PVPRO box.
-    Identical fields to the Advanced-mode PVPRO metric, but with distinct
-    `simple-param-pvpro-*` ids so the two never collide."""
-    return html.Details(
-        [
-            html.Summary(
-                [
-                    html.Span("IMPORTANT", className="important-badge", style={
-                        "fontSize": "10px", "fontWeight": "700", "color": "white",
-                        "background": NAVY, "padding": "2px 8px",
-                        "borderRadius": "999px", "letterSpacing": "0.06em",
-                        "marginRight": "10px", "verticalAlign": "middle",
-                    }),
-                    html.Span("Provide module & array parameters for PVPRO"),
-                ],
-                style={"cursor": "pointer", "fontSize": "13px", "color": INK,
-                       "fontWeight": "700", "fontFamily": "Arial, sans-serif",
-                       "marginTop": "4px"},
-            ),
-            html.Div([
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap", "marginBottom": "8px"},
-                         children=[
-                    html.Div([
-                        html.Div("Cells in series (per module)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-cells", type="number",
-                                  value=60, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Modules per string", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-mps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Parallel strings", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-ps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                ]),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap", "marginBottom": "8px"},
-                         children=[
-                    html.Div([
-                        html.Div("alpha_isc (A/°C)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-alphaisc", type="number",
-                                  value=0.0046, step=0.0001, min=0,
-                                  style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Technology", style=_label_style),
-                        dcc.Dropdown(
-                            id="simple-param-pvpro-tech",
-                            options=[
-                                {"label": "mono-c-Si", "value": "mono-c-Si"},
-                                {"label": "multi-c-Si", "value": "multi-c-Si"},
-                                {"label": "GaAs", "value": "GaAs"},
-                                {"label": "CIGS", "value": "CIGS"},
-                                {"label": "CdTe", "value": "CdTe"},
-                            ],
-                            value="mono-c-Si", clearable=False,
-                            style={"fontSize": "13px"},
-                        ),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                ]),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap"}, children=[
-                    html.Div([
-                        html.Div("Days per run", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-days", type="number",
-                                  value=14, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Iterations per year", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-iters", type="number",
-                                  value=12, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                ]),
-            ], style={"marginTop": "6px", "padding": "12px 14px",
-                      "background": "#f1f5f9", "borderRadius": "8px",
-                      "border": f"1px solid {BORDER}",
-                      "boxSizing": "border-box"}),
-        ],
-        open=False,
-        style={"marginTop": "12px"},
-    )
-
-
-def _simple_method_radio():
-    """Method chooser for Simple mode: YoY vs PVPRO.  Both are always
-    selectable; if PVPRO is chosen but the data has no DC voltage/current,
-    Stage 1 surfaces an error and points the user back to YoY."""
-    pvpro_label = html.Span(
-        [
-            html.Span([
-                html.B("PVPRO", style={"fontFamily": "Arial, sans-serif"}),
-                html.Span(" — reveals single-diode-model parameter trends "
-                          "(Pmp, Voc, Isc, etc.) (~1–3 min)",
-                          style={"color": INK_SOFT, "fontSize": "13px"}),
-            ], style={"flex": "1", "minWidth": "0"}),
-            # PVPRO logo (links to the upstream repo), mirroring Advanced mode.
-            html.A(
-                html.Img(
-                    src=app.get_asset_url("pvpro_logo.png"), alt="PVPRO",
-                    style={"height": "28px", "width": "auto", "display": "block"},
-                ),
-                href="https://github.com/DuraMAT/pvpro", target="_blank",
-                title="PVPRO on GitHub",
-                style={"marginLeft": "10px", "flexShrink": "0",
-                       "display": "inline-block", "textDecoration": "none"},
-            ),
-        ],
-        style={"display": "flex", "alignItems": "center", "flex": "1",
-               "minWidth": "0"},
-    )
-    return dcc.RadioItems(
-        id="simple-method-radio",
-        options=[
-            {"label": html.Span([
-                html.B("YoY", style={"fontFamily": "Arial, sans-serif"}),
-                html.Span(" — year-on-year statistical degradation (fast)",
-                          style={"color": INK_SOFT, "fontSize": "13px"}),
-            ]), "value": "YOY"},
-            {"label": pvpro_label, "value": "PVPRO"},
-        ],
-        value="YOY",
-        labelStyle={"display": "flex", "alignItems": "center", "gap": "8px",
-                    "marginBottom": "8px", "fontSize": "15px",
-                    "fontFamily": "Arial, sans-serif", "color": INK},
-        inputStyle={"marginRight": "6px"},
-        style={"marginTop": "4px"},
-    )
-
-
-def _simple_pvpro_about():
-    """Collapsible 'learn more' detail for the PVPRO method, folded by default.
-    Explains what the single-diode-model fit produces and its requirements."""
-    return html.Details(
-        [
-            html.Summary(
-                "About PVPRO",
-                style={"cursor": "pointer", "fontSize": "13px",
-                       "fontWeight": "600", "color": ACCENT,
-                       "fontFamily": "Arial, sans-serif"},
-            ),
-            html.Div(
-                [
-                    html.P(
-                        "PVPRO fits the single-diode model (SDM) to your "
-                        "measured operating points in successive time windows, "
-                        "then tracks how the reference-condition (STC) "
-                        "parameters drift over time.",
-                        style={"margin": "0 0 8px"},
-                    ),
-                    html.P("It reports an annual degradation rate for each of:",
-                           style={"margin": "0 0 4px"}),
-                    html.Ul(
-                        [
-                            html.Li([html.B("Pmp"), " — maximum-power-point power"]),
-                            html.Li([html.B("Vmp"), " — maximum-power-point voltage"]),
-                            html.Li([html.B("Imp"), " — maximum-power-point current"]),
-                            html.Li([html.B("Voc"), " — open-circuit voltage"]),
-                            html.Li([html.B("Isc"), " — short-circuit current"]),
-                        ],
-                        style={"margin": "0 0 8px", "paddingLeft": "20px"},
-                    ),
-                    html.P(
-                        "Separating voltage- and current-side trends helps "
-                        "attribute loss to specific physical mechanisms — "
-                        "something power-only methods like YoY can't do.",
-                        style={"margin": "0 0 8px"},
-                    ),
-                    html.P(
-                        [
-                            html.B("Requires "),
-                            "DC voltage and DC current columns. ",
-                            html.B("Runtime "),
-                            "is typically 1–3 minutes.",
-                        ],
-                        style={"margin": "0"},
-                    ),
-                ],
-                style={"fontSize": "13px", "color": INK_SOFT,
-                       "lineHeight": "1.6", "fontFamily": "Arial, sans-serif",
-                       "marginTop": "8px", "padding": "10px 12px",
-                       "background": "rgba(241, 245, 249, 0.6)",
-                       "border": f"1px solid {BORDER}", "borderRadius": "8px"},
-            ),
-        ],
-        open=False,
-        style={"marginTop": "8px"},
-    )
-
-
-simple_mode_panel = html.Div(
-    [
-        # Single box: bullets + method radio (+ PVPRO params) + Analyze button.
-        html.Div(
-            [
-                _explainer_bullets(_SIMPLE_EXPLAINER_BULLETS),
-
-                # Method chooser (YoY vs PVPRO).  Rebuilt on data load so the
-                # PVPRO option enables only when DC V & I are present.
-                html.Div("method", style={
-                    "fontSize": "12px", "color": INK_SOFT,
-                    "textTransform": "uppercase", "letterSpacing": "0.1em",
-                    "fontWeight": "600", "marginTop": "16px",
-                    "marginBottom": "8px", "fontFamily": "Arial, sans-serif",
-                }),
-                html.Div(id="simple-method-wrap",
-                         children=_simple_method_radio()),
-
-                # Folded-by-default 'learn more' for PVPRO — only shown when
-                # PVPRO is the selected method.
-                html.Div(id="simple-pvpro-about-wrap",
-                         children=_simple_pvpro_about(),
-                         style={"display": "none"}),
-
-                # PVPRO module/array params — only relevant when PVPRO is the
-                # chosen method.  Hidden by default; revealed by a callback.
-                html.Div(id="simple-pvpro-params-wrap",
-                         children=_simple_pvpro_params_block(),
-                         style={"display": "none"}),
-
-                html.Div(
-                    html.Button(
-                        "Click to run the analysis",
-                        id="simple-analyze-btn",
-                        n_clicks=0,
-                        disabled=True,
-                        style=_simple_analyze_style(disabled=True),
-                    ),
-                    style={"marginTop": "16px"},
-                ),
-            ],
-            style={
-                "padding": "18px 20px",
-                "background": "rgba(241, 245, 249, 0.5)",
-                "border": f"1px dashed {BORDER_STRONG}",
-                "borderRadius": "10px",
-            },
-        ),
-
-        # Status + result (shared by both methods).
-        html.Div(id="simple-status", style={"marginTop": "16px"}),
-        html.Div(id="simple-result", style={"marginTop": "8px"}),
-        # PVPRO long-running progress renders here while a fit is in flight.
-        html.Div(id="simple-pvpro-progress-output", style={"marginTop": "16px"}),
-    ],
-    id="simple-mode-panel",
-    style={}
-)
-
-
-# =============================================================================
-# FULL LAYOUT
-# =============================================================================
-def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
-                         duration_years, elapsed):
-    rates = rates or {}
-    figs = figs or {}
-    rate_pct = rd / 100 if (rd is not None and np.isfinite(rd)) else 0.0
-    rate_color = VALUE_MAJOR
-
-    QUANT_LABELS = [
-        ("p_mp_ref", "Pmp", "max power point power"),
-        ("v_mp_ref", "Vmp", "max power point voltage"),
-        ("i_mp_ref", "Imp", "max power point current"),
-        ("v_oc_ref", "Voc", "open-circuit voltage"),
-        ("i_sc_ref", "Isc", "short-circuit current"),
-    ]
-    rates_rows = []
-    for key, short, descr in QUANT_LABELS:
-        r = rates.get(key, float("nan"))
-        r_str = "n/a" if not np.isfinite(r) else f"{r:+.2f}%/yr"
-        label_cell = html.Td(
-            [html.B(short, style={"fontFamily": "Arial, sans-serif"}),
-             html.Span(" (ref)", style={
-                 "color": INK_SOFT, "fontSize": "13px",
-                 "fontFamily": "Arial, sans-serif",
-             })],
-            style={"padding": "4px 12px 4px 0", "whiteSpace": "nowrap"},
-        )
-        rates_rows.append(html.Tr([
-            label_cell,
-            html.Td(descr, style={"padding": "4px 12px 4px 0",
-                                  "color": INK_SOFT, "fontSize": "13px",
-                                  "fontFamily": "Arial, sans-serif"}),
-            html.Td(r_str, style={"padding": "4px 0", "color": VALUE_DETAIL,
-                                  "fontWeight": "700", "textAlign": "right",
-                                  "fontFamily": "Arial, sans-serif"}),
-        ]))
-    rates_table = html.Details(
-        [
-            html.Summary(
-                "parameter degradation rates",
-                style={
-                    "fontSize": "12px", "color": INK_SOFT,
-                    "textTransform": "uppercase", "letterSpacing": "0.1em",
-                    "fontWeight": "600", "fontFamily": "Arial, sans-serif",
-                    "cursor": "pointer",
-                },
-            ),
-            html.Table(html.Tbody(rates_rows), style={
-                "width": "100%", "fontSize": "14px", "borderCollapse": "collapse",
-                "marginTop": "10px",
-            }),
-        ],
-        open=False,
-        style={"marginTop": "14px", "marginBottom": "16px"},
-    )
-
-    summary_block = html.Div([
-        html.Div("annual degradation rate (Pmp, ref)", style={
-            "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-            "fontFamily": "Arial, sans-serif",
-        }),
-        html.Div([
-            html.Span(f"{rate_pct:.2%}", style={
-                "fontSize": "56px", "fontFamily": "Arial, sans-serif",
-                "fontWeight": "700", "color": rate_color, "lineHeight": "1",
-            }),
-            html.Span("/year", style={
-                "fontSize": "20px", "color": INK_SOFT, "marginLeft": "8px",
-                "fontFamily": "Arial, sans-serif", "fontStyle": "italic",
-            }),
-        ], style={"marginBottom": "10px"}),
-        html.Div([
-            html.Div([html.Span("Method: ", style={"color": INK_SOFT}),
-                      html.B("PVPRO", style={"color": VALUE_DETAIL})],
-                     style={"fontSize": "14px", "marginBottom": "3px"}),
-            # Window + duration on a single line: window first, then duration.
-            html.Div([html.Span("Window: ", style={"color": INK_SOFT}),
-                      html.B(f"{start_str}  →  {end_str}",
-                             style={"fontFamily": "Arial, sans-serif",
-                                    "fontSize": "13px", "color": VALUE_DETAIL}),
-                      html.Span(f"  ({duration_years:.1f} years)",
-                                style={"color": INK_SOFT, "fontSize": "13px"})],
-                     style={"fontSize": "14px"}),
-        ], style={"fontFamily": "Arial, sans-serif"}),
-        rates_table,
-    ])
-
-    card_style = {
-        "background": "#ffffff",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
-        "padding": "8px 10px",
-        "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.04)",
-        "minWidth": "0",          # allow the card to shrink inside the grid
-        "overflow": "hidden",     # keep the plot from spilling past the card
-    }
-
-    def _fig_card(key, span_cols=False):
-        f = figs.get(key)
-        if f is None:
-            return html.Div()
-        style = dict(card_style)
-        if span_cols:
-            # Pmp spans the full row on wider screens; harmless at 1 column.
-            style["gridColumn"] = "1 / -1"
-        return html.Div(
-            dcc.Graph(
-                figure=f,
-                config={"displayModeBar": False, "responsive": True},
-                style={"width": "100%"},
-            ),
-            style=style,
-        )
-
-    # Responsive grid: as many ~360px columns as fit, collapsing to a single
-    # full-width column (one figure per row) on narrow screens.
-    fig_grid = html.Div(
-        [
-            _fig_card("p_mp_ref", span_cols=True),
-            _fig_card("v_mp_ref"),
-            _fig_card("i_mp_ref"),
-            _fig_card("v_oc_ref"),
-            _fig_card("i_sc_ref"),
-        ],
-        style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
-            "gap": "10px",
-            "marginTop": "8px",
-        },
-    )
-
-    fig_grid_heading = html.Div("pvpro-lite degradation trends", style={
-        "fontSize": "12px", "color": INK_SOFT,
-        "textTransform": "uppercase", "letterSpacing": "0.1em",
-        "fontWeight": "600", "marginBottom": "6px", "marginTop": "8px",
-        "fontFamily": "Arial, sans-serif",
-    })
-
-    return html.Div([
-        html.Div(summary_block, style={"marginBottom": "20px"}),
-        fig_grid_heading,
-        fig_grid,
-    ], className="slide-in-up", style={
-        "padding": "20px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
-        "marginTop": "16px",
-    })
-
-
-# =============================================================================
-# SIMPLE-MODE METHOD CHOOSER + PVPRO HELPERS
-#
-# The Simple-mode box offers a YoY / PVPRO radio.  Both are always selectable.
-# If PVPRO is chosen but parse_contents (Stage 1) finds no DC Voltage / DC
-# Current, Stage 1 surfaces an error pointing the user back to YoY.
-# =============================================================================
-def _simple_has_dc_vi(mapped):
-    """True iff the mapping has usable DC Voltage AND DC Current columns."""
-    if not mapped:
-        return False
-    v = mapped.get("DC Voltage")
-    i = mapped.get("DC Current")
-    def _ok(x):
-        return bool(x) and str(x).strip().upper() not in ("", "N/A", "NA", "NONE")
-    return _ok(v) and _ok(i)
-
-
-# ---- Show PVPRO about + params only when PVPRO is the chosen method ----------
-_METRIC_LABELS = {
-    "YOY":   "YoY (Year-over-Year)",
-    "LR":    "LR (Linear Regression)",
-    "HW":    "HW (Holt-Winters)",
-    "ARIMA": "ARIMA",
-    "CSD":   "CSD (Classical Seasonal Decomposition)",
-    "PVPRO": "PVPRO (physics-based)",
-}
-
-
-def _metric_label(metric):
-    """Human-readable metric name for the diagnostic, e.g. 'YOY' -> 'YoY
-    (Year-over-Year)'.  Falls back to the raw code if unrecognized."""
-    if not metric:
-        return None
-    return _METRIC_LABELS.get(str(metric).upper(), str(metric))
-
-
-def _summarize_daily_series(series, metric_label=None):
-    """Build a compact, LLM-readable description of the power trend.
-
-    The summary gives the model:
-      * the underlying degradation rate's direction/slope,
-      * the monthly mean power as a short dated series,
-      * whether the POWER DATA shows a clear repeating seasonal cycle (computed
-        from the data itself, by calendar month across years), and
-      * any genuinely anomalous period -- detected AFTER removing the seasonal
-        cycle, so the normal winter trough of a seasonal site is NOT mistaken
-        for a fault.
-
-    Input is the DAILY-AGGREGATED power series (the dots in the plot), NOT the
-    smoothed trend line. Built from the real date-indexed pandas Series."""
-    try:
-        import numpy as np
-        import pandas as pd
-
-        s = series.dropna()
-        if len(s) < 3:
-            return "Trend series too short to summarize."
-
-        if not isinstance(s.index, pd.DatetimeIndex):
-            try:
-                s.index = pd.to_datetime(s.index)
-            except Exception:
-                pass
-
-        y_all = s.values.astype("float64")
-        n = y_all.size
-        mean_all = float(np.mean(y_all))
-
-        # Overall linear trend (just for direction/magnitude context).
-        x = np.arange(n)
-        slope_day, intercept = np.polyfit(x, y_all, 1)
-        slope_year = slope_day * 365.25
-        fit_start = float(intercept)
-        fit_pct = (slope_day * (n - 1) / fit_start * 100) if abs(fit_start) > 1e-9 else 0.0
-
-        metric_txt = f" Metric: {metric_label}." if metric_label else ""
-        lines = [
-            f"Input = daily-aggregated power, {n} days, mean ~{mean_all:.0f} W, "
-            f"overall linear trend ~{slope_year:+.0f} W/year "
-            f"({fit_pct:+.1f}% across the window).{metric_txt}"
-        ]
-
-        # --- Monthly means -------------------------------------------------
-        monthly = None
-        if isinstance(s.index, pd.DatetimeIndex):
-            monthly = s.resample("MS").mean().dropna()
-            monthly_full = monthly.copy()
-            if len(monthly) > 30:
-                step = int(np.ceil(len(monthly) / 30))
-                monthly = monthly.iloc[::step]
-
-        if monthly is None or len(monthly) < 4:
-            lines.append(f"Approximate linear slope ~{slope_day:.3f} W/day.")
-            return " ".join(lines)
-
-        pairs = ", ".join(
-            f"{idx.strftime('%Y-%m')}:{val:.0f}" for idx, val in monthly.items()
-        )
-        lines.append(
-            "Monthly mean power (W) — these are monthly samples of the SAME "
-            "daily/30-day-rolling trend the user sees on the chart, given here "
-            "compactly for analysis: " + pairs + "."
-        )
-
-        # --- Seasonality detection (from the data, by calendar month) ------
-        # A clear seasonal cycle = a repeating annual pattern whose amplitude
-        # is large relative to the residual scatter. We measure it via the
-        # month-of-year profile and how much variance it explains.
-        seasonal_strength = 0.0
-        season_amp_pct = 0.0
-        hi_month = lo_month = None
-        deseasonalized = None
-        try:
-            if isinstance(s.index, pd.DatetimeIndex) and (s.index.max() - s.index.min()).days > 400:
-                m_idx = s.index.month
-                month_profile = s.groupby(m_idx).mean()
-                if len(month_profile) >= 8:
-                    season_amp = float(month_profile.max() - month_profile.min())
-                    season_amp_pct = season_amp / mean_all * 100 if mean_all else 0.0
-                    # Strength: amplitude vs. within-month spread.
-                    centered = s - s.index.map(lambda d: month_profile.get(d.month, mean_all))
-                    resid_std = float(np.std(centered.values))
-                    seasonal_strength = season_amp / (resid_std + 1e-9)
-                    hi_month = int(month_profile.idxmax())
-                    lo_month = int(month_profile.idxmin())
-                    # Deseasonalize the daily series for honest anomaly checks.
-                    deseasonalized = centered + mean_all
-        except Exception:
-            deseasonalized = None
-
-        # "Clear" seasonality: amplitude at least ~8% of the mean AND large
-        # relative to scatter.
-        clear_seasonal = (season_amp_pct >= 8.0 and seasonal_strength >= 1.5)
-        if clear_seasonal:
-            _mn = ("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split())
-            lines.append(
-                f"A CLEAR repeating seasonal cycle is present in the power data "
-                f"(~{season_amp_pct:.0f}% swing, peaks ~{_mn[hi_month-1]}, "
-                f"troughs ~{_mn[lo_month-1]}); the regular dips are seasonal, "
-                f"NOT degradation."
-            )
-        else:
-            lines.append("No clear repeating seasonal cycle in the power data.")
-
-        # --- Recent-status check on the DESEASONALIZED series --------------
-        # We care about the CURRENT health of the array, not historical blips.
-        # So instead of hunting the worst window anywhere in the record, we ask:
-        # is the MOST RECENT stretch sitting materially below where the trend
-        # says it should be, AND has it failed to recover by the end? Only then
-        # do we flag a period worth inspecting. Old, already-recovered dips are
-        # intentionally ignored.
-        try:
-            base = deseasonalized if (clear_seasonal and deseasonalized is not None) else s
-            base_monthly = base.resample("MS").mean().dropna()
-            m = len(base_monthly)
-            if m >= 6:
-                bvals = base_monthly.values.astype("float64")
-                bx = np.arange(m)
-                # Fit the trend on the EARLIER portion only, then see whether
-                # the recent months fall below that expectation (a drop the
-                # long-run trend doesn't explain).
-                hist_n = max(4, m - 3)
-                bslope, bint = np.polyfit(bx[:hist_n], bvals[:hist_n], 1)
-                expected = bslope * bx + bint
-                resid = bvals - expected
-                hist_std = float(np.std(resid[:hist_n])) + 1e-9
-
-                recent_k = 3 if m >= 9 else max(2, m // 3)
-                recent_resid = float(np.mean(resid[-recent_k:]))
-                end_resid = float(resid[-1])
-
-                # Conditions for flagging a CURRENT problem:
-                #  (a) recent stretch is materially low vs. expectation
-                #      (> ~2.5% of mean below, and > 2 sigma of historical scatter)
-                #  (b) it has NOT recovered: the very last point is still low.
-                recent_low = (recent_resid < -0.025 * mean_all
-                              and recent_resid < -2.0 * hist_std)
-                not_recovered = end_resid < -0.015 * mean_all
-                if recent_low and not_recovered:
-                    w_from = base_monthly.index[m - recent_k].strftime("%Y-%m")
-                    w_to = base_monthly.index[-1].strftime("%Y-%m")
-                    qualifier = "season-adjusted " if clear_seasonal else ""
-                    lines.append(
-                        f"RECENT STATUS: the most recent period ({w_from} to "
-                        f"{w_to}) sits materially below the {qualifier}trend and "
-                        f"has not recovered — worth inspecting."
-                    )
-                else:
-                    lines.append(
-                        "RECENT STATUS: the latest period is in line with the "
-                        "overall trend; no current drop or unrecovered dip. Do "
-                        "NOT call out any specific period."
-                    )
-            else:
-                lines.append(
-                    "RECENT STATUS: window too short to assess a recent-only "
-                    "anomaly; do not call out a specific period."
-                )
-        except Exception:
-            pass
-
-        return " ".join(lines)
-    except Exception as e:
-        return f"(trend summary unavailable: {e})"
-
-
-def _summarize_raw_data(df, mapping):
-    """Scan the RAW input channels (power, irradiance, temperature, DC voltage,
-    DC current) for data-quality issues the AI diagnostic should surface in
-    Advanced mode:
-      * coverage gaps -- long stretches with no data, and the overall span,
-      * abrupt level shifts -- e.g. a temperature channel that jumps by a
-        constant offset/scale (a classic Fahrenheit<->Celsius unit switch),
-      * downsampled monthly values per channel so the model can see each
-        channel's shape and judge whether a normalized-power trend might be
-        driven by irradiance/temperature data rather than the array itself.
-
-    Returns a compact text block. Built from the real (pre-normalization)
-    dataframe and the variable mapping."""
-    try:
-        import numpy as np
-        import pandas as pd
-
-        if df is None or mapping is None or len(df) == 0:
-            return "Raw-data summary unavailable."
-
-        # Resolve column names from the canonical mapping keys.
-        chans = [
-            ("Power", mapping.get("DC Power"), "W"),
-            ("Irradiance", mapping.get("Irradiance"), "W/m^2"),
-            ("Temperature", mapping.get("Module temperature"), "deg"),
-            ("DC Voltage", mapping.get("DC Voltage"), "V"),
-            ("DC Current", mapping.get("DC Current"), "A"),
-        ]
-
-        # Ensure a usable datetime index for gap analysis.
-        idx = df.index
-        if not isinstance(idx, pd.DatetimeIndex):
-            time_col = mapping.get("Time")
-            if time_col and time_col in df.columns:
-                try:
-                    idx = pd.to_datetime(df[time_col])
-                except Exception:
-                    idx = None
-            else:
-                idx = None
-
-        lines = []
-
-        # --- Overall coverage + gaps (using whichever index we have) --------
-        if idx is not None and len(idx) > 2:
-            try:
-                tt = pd.Series(pd.to_datetime(idx)).sort_values().reset_index(drop=True)
-                span_from = tt.iloc[0].strftime("%Y-%m")
-                span_to = tt.iloc[-1].strftime("%Y-%m")
-                gaps = tt.diff().dt.days.dropna()
-                # A "gap" = a break much larger than the typical cadence.
-                typical = float(gaps.median()) if len(gaps) else 1.0
-                big = gaps[gaps > max(30, typical * 20)]
-                gap_txt = ""
-                if len(big) > 0:
-                    # Report up to 2 largest gaps with their dates.
-                    order = big.sort_values(ascending=False).index[:2]
-                    parts = []
-                    for j in order:
-                        start = tt.iloc[j - 1].strftime("%Y-%m")
-                        end = tt.iloc[j].strftime("%Y-%m")
-                        parts.append(f"{start}->{end} (~{int(big[j])} days)")
-                    gap_txt = " Notable coverage gaps: " + "; ".join(parts) + "."
-                lines.append(
-                    f"Coverage: {span_from} to {span_to}.{gap_txt}"
-                )
-            except Exception:
-                pass
-
-        # --- Per-channel: presence, monthly shape, abrupt shifts ------------
-        for label, col, unit in chans:
-            if not col or col not in df.columns:
-                lines.append(f"{label}: MISSING (no column mapped).")
-                continue
-            ser = pd.to_numeric(df[col], errors="coerce").dropna()
-            if len(ser) < 3:
-                lines.append(f"{label}: present but almost no valid values.")
-                continue
-
-            # Monthly means (downsampled) if we can index by time.
-            monthly_txt = ""
-            shift_txt = ""
-            try:
-                if idx is not None:
-                    tser = pd.Series(ser.values, index=pd.to_datetime(idx)[:len(df)][ser.index]
-                                     if len(idx) == len(df) else pd.to_datetime(idx))
-                    tser = tser.dropna()
-                    mser = tser.resample("MS").mean().dropna()
-                    if len(mser) > 24:
-                        step = int(np.ceil(len(mser) / 24))
-                        mser = mser.iloc[::step]
-                    if len(mser) >= 3:
-                        monthly_txt = " monthly: " + ", ".join(
-                            f"{i.strftime('%Y-%m')}:{v:.0f}" for i, v in mser.items()
-                        )
-                        # Abrupt level shift: largest month-to-month jump vs.
-                        # the channel's own spread (unit change / step).
-                        mv = mser.values.astype("float64")
-                        d = np.abs(np.diff(mv))
-                        spread = float(np.std(mv)) + 1e-9
-                        if len(d) and d.max() > 4 * spread and d.max() > 0.4 * (abs(float(np.mean(mv))) + 1e-9):
-                            k = int(np.argmax(d))
-                            when = mser.index[k + 1].strftime("%Y-%m")
-                            before = float(mv[k]); after = float(mv[k + 1])
-                            hint = ""
-                            if label == "Temperature":
-                                ratio = (after / before) if abs(before) > 1e-6 else 0
-                                if 1.5 < ratio < 2.2 or 0.45 < ratio < 0.7:
-                                    hint = " (possible F<->C unit change)"
-                            shift_txt = (f" ABRUPT SHIFT around {when}: "
-                                         f"~{before:.0f}->{after:.0f} {unit}{hint}.")
-            except Exception:
-                pass
-
-            rng = f"min {float(ser.min()):.0f}, max {float(ser.max()):.0f}, mean {float(ser.mean()):.0f}"
-
-            # Extra unit-change check for temperature: a regime shift between
-            # the early and late halves whose ratio looks like F<->C, or a
-            # physically implausible spread spanning typical C and F values.
-            if label == "Temperature" and not shift_txt:
-                try:
-                    vals = ser.values.astype("float64")
-                    full_range = float(np.nanmax(vals)) - float(np.nanmin(vals))
-                    half = len(vals) // 2
-                    looks_fc = False
-                    early_m = late_m = float(np.mean(vals))
-                    if half > 30:
-                        early_m = float(np.mean(vals[:half]))
-                        late_m = float(np.mean(vals[half:]))
-                        ratio = (late_m / early_m) if abs(early_m) > 1e-6 else 1.0
-                        looks_fc = (1.5 < ratio < 2.3) or (0.40 < ratio < 0.67)
-                    # A module-temp channel spanning >80 deg almost always
-                    # means C and F values are mixed in one column.
-                    wide_range = full_range > 80
-                    if looks_fc or wide_range:
-                        shift_txt = (
-                            f" POSSIBLE UNIT CHANGE: temperature spans an "
-                            f"implausibly wide range (~{float(np.nanmin(vals)):.0f} "
-                            f"to ~{float(np.nanmax(vals)):.0f}); the early vs late "
-                            f"halves differ (~{early_m:.0f} vs ~{late_m:.0f}) — "
-                            f"check for a Fahrenheit/Celsius mix."
-                        )
-                except Exception:
-                    pass
-
-            lines.append(f"{label} ({unit}): {rng}.{monthly_txt}{shift_txt}")
-
-        return " ".join(lines)
-    except Exception as e:
-        return f"(raw-data summary unavailable: {e})"
-
-
-# -----------------------------------------------------------------------------
-# Enable the Simple-mode Analyze button only once data has been loaded in the
-# shared upload area (an upload or an example).
-# -----------------------------------------------------------------------------
-_EXAMPLE_FRIENDLY = {
-    "sys_1278_downsampled_with_VI.parquet": "Example data 1",
-    "sys_1403_part1_downsampled_with_VI.parquet": "Example data 2",
-    "sys_1422_downsampled.parquet": "Example data 3",
-}
-
-
-def _simple_fail(alert):
-    """Common failure return for the data stage (6 outputs)."""
-    _none = {"started": True, "data": False, "filter": False,
-             "calc": False, "code": False}
-    # simple-pipe-data, simple-status, simple-result, simple-stash, step-progress
-    return {}, alert, "", {}, _none
-
-
-# ---- STAGE 1 : load the dataframe + identify variables ----------------------
-def _simple_result_layout(stash):
-    import plotly.io as pio
-    fig = pio.from_json(stash["fig"]) if stash.get("fig") else None
-    rate_pct = stash["rate_pct"]
-    duration_years = stash["duration_years"]
-    start = stash["start"]
-    end = stash["end"]
-    n_raw = stash.get("n_raw", 0)
-    n_kept = stash.get("n_kept", 0)
-    pct_kept = stash.get("pct_kept", 0.0)
-
-    def _detail_row(label, value_node):
-        return html.Div(
-            [html.Span(f"{label}: ", style={"color": INK_SOFT}), value_node],
-            style={"fontSize": "16px", "marginBottom": "5px",
-                   "fontFamily": "Arial, sans-serif"},
-        )
-
-    summary_block = html.Div([
-        html.Div("annual degradation rate", style={
-            "fontSize": "15px", "color": INK_SOFT, "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-            "fontFamily": "Arial, sans-serif",
-        }),
-        html.Div([
-            html.Span(f"{rate_pct:.2%}", style={
-                "fontSize": "62px", "fontFamily": "Arial, sans-serif",
-                "fontWeight": "700", "color": INK, "lineHeight": "1",
-            }),
-            html.Span("/year", style={
-                "fontSize": "22px", "color": INK_SOFT, "marginLeft": "8px",
-                "fontFamily": "Arial, sans-serif", "fontStyle": "italic",
-            }),
-        ], style={"marginBottom": "18px"}),
-        html.Div([
-            _detail_row("Method", html.B("YoY", style={"color": VALUE_DETAIL})),
-            _detail_row("Duration", html.B(f"{duration_years:.1f} years", style={"color": VALUE_DETAIL})),
-            _detail_row("Window", html.B(f"{start}  →  {end}",
-                        style={"fontFamily": "Arial, sans-serif", "color": VALUE_DETAIL})),
-            _detail_row("Data used", html.Span([
-                html.B(f"{n_kept:,}", style={"color": VALUE_DETAIL}),
-                html.Span(f" of {n_raw:,} points kept after filtering "
-                          f"({pct_kept:.0f}%)", style={"color": INK}),
-            ])),
-        ], style={"fontFamily": "Arial, sans-serif"}),
-        html.Div(
-            [
-                html.B("Note: "),
-                "Default pipeline (YoY). Switch to ",
-                html.B("Advanced mode"),
-                " to tune any step.",
-            ],
-            style={"fontSize": "13px", "color": INK_SOFT, "marginTop": "16px",
-                   "fontStyle": "italic", "fontFamily": "Arial, sans-serif"},
-        ),
-    ])
-
-    return html.Div([
-        html.Div(summary_block, style={"marginBottom": "20px"}),
-        html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})
-                 if fig is not None else html.Div()),
-    ], className="slide-in-up", style={
-        "padding": "26px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "12px",
-        "marginTop": "8px",
-    })
-
-
-# -----------------------------------------------------------------------------
-# Status labels for each Simple-mode pipeline stage (shown while it runs).
-# -----------------------------------------------------------------------------
-_SIMPLE_STEP_LABELS = {
-    1: "Inspecting data & identifying variables…",
-    2: "Applying default filters…",
-    3: "Estimating degradation…",
-}
-
-
-# =============================================================================
-# CALLBACK — AI QUICK DIAGNOSTIC (Simple mode)
-#
-# Feeds the degradation result + a numeric summary of the power-trend figure to
-# the LLM and asks for a few short bullet points.  We summarize the figure's
-# trend series numerically (start/end level, slope, noise, min/max) rather than
-# shipping the image, because the shared client is a text chat client — the
-# numbers are what carry the diagnostic signal anyway.
-# =============================================================================
-
-
-# =============================================================================
-# VARIABLE SELECTION  (editable variable-mapping table, ported verbatim from
-# pvcopilotMaster).  Lets the user override the LLM-detected column mapping in
-# Advanced Step 1; the Apply callback (appended at end) rebuilds the mapping
-# and redraws the overview figures.
-# =============================================================================
-
-def _build_overview_figures_div(df, mapped_variables_dict):
-    try:
-        if df is not None and mapped_variables_dict:
-            figs, _err = make_overview_figures(df, mapped_variables_dict)
-            return html.Div(figs)
-    except Exception:
-        return html.Div("Figure generation failed.", style={"color": ACCENT})
-    return html.Div(
-        "No variables selected to plot.",
-        style={"color": INK_SOFT, "fontSize": "13px",
-               "fontFamily": "Arial, sans-serif"},
-    )
-
-
-
-# Renders the "Identified Variables" panel as an editable table: each metric
-# row carries a dropdown so the user can override what the LLM detected (or
-# fill it in when the LLM detected nothing). Defaults to the LLM result.
-#
-# The dropdowns use pattern-matching IDs {"type": "var-map-dd", "metric": m}
-# so a single callback (apply_variable_mapping_callback) can read them all.
-# =============================================================================
-
-# Metrics shown in the editable mapping table, in display order. "Time" is
-# handled specially because it is usually the DataFrame index ("__index__")
-# rather than a real column.
-_MAP_METRICS = [
-    "DC Power", "DC Voltage", "DC Current",
-    "Irradiance", "Module temperature", "Time",
-]
-
-# Metrics required for degradation analysis (used to flag missing selections).
-_REQUIRED_FOR_DEGRADATION = {"DC Power", "Time"}
-
-
-def build_variable_mapping_table(mapped_variables_dict, columns,
-                                 time_in_index=False, status_children=None):
-    """Build an editable variable-mapping table.
-
-    Args:
-        mapped_variables_dict: {metric: column_name} currently mapped (N/A omitted).
-        columns: list of available DataFrame column names.
-        time_in_index: whether the Time variable is the DataFrame index.
-        status_children: optional element rendered in the status slot (used by
-            the Apply callback to show the confirmation/warning after re-render).
-
-    Returns:
-        A Dash component (the editable table + apply button + status line).
-    """
-    mapped_variables_dict = mapped_variables_dict or {}
-    columns = list(columns or [])
-
-    header = html.Div([
-        html.Div("Metric", style={
-            "flex": "0 0 42%", "fontWeight": "700", "color": INK,
-            "fontFamily": "Arial, sans-serif", "fontSize": "14px",
-        }),
-        html.Div("Variable Name", style={
-            "flex": "1", "fontWeight": "700", "color": INK,
-            "fontFamily": "Arial, sans-serif", "fontSize": "14px",
-        }),
-    ], style={
-        "display": "flex", "alignItems": "center", "gap": "14px",
-        "padding": "8px 4px 12px 4px",
-        "borderBottom": f"2px solid {BORDER_STRONG}",
-    })
-
-    rows = []
-    for i, metric in enumerate(_MAP_METRICS):
-        current = mapped_variables_dict.get(metric)
-
-        # Time options: offer the index sentinel plus any real columns.
-        if metric == "Time":
-            opts = []
-            if time_in_index or current == "__index__":
-                opts.append({"label": "(use index / __index__)",
-                             "value": "__index__"})
-            opts += [{"label": c, "value": c} for c in columns]
-            # Make sure the current value is selectable even if odd.
-            if current and current not in [o["value"] for o in opts]:
-                opts.insert(0, {"label": current, "value": current})
-        else:
-            opts = [{"label": c, "value": c} for c in columns]
-            if current and current not in columns:
-                # LLM picked something not in the column list — keep it visible.
-                opts.insert(0, {"label": current, "value": current})
-
-        detected = bool(current)
-        dot_color = "#16a34a" if detected else "#d97706"   # green / amber
-        dot_title = "Detected by AI" if detected else "Not detected — please select"
-
-        row = html.Div([
-            html.Div([
-                html.Span(style={
-                    "display": "inline-block", "width": "8px", "height": "8px",
-                    "borderRadius": "50%", "background": dot_color,
-                    "marginRight": "8px", "flex": "0 0 auto",
-                }, title=dot_title),
-                html.Span(metric, style={
-                    "color": INK, "fontFamily": "Arial, sans-serif",
-                    "fontSize": "14px",
-                }),
-            ], style={"flex": "0 0 42%", "display": "flex",
-                      "alignItems": "center"}),
-            html.Div(
-                dcc.Dropdown(
-                    id={"type": "var-map-dd", "metric": metric},
-                    options=opts,
-                    value=current if current else None,
-                    placeholder="— select column —",
-                    clearable=True,
-                    style={"fontSize": "13px"},
-                ),
-                style={"flex": "1"},
-            ),
-        ], style={
-            "display": "flex", "alignItems": "center", "gap": "14px",
-            "padding": "8px 4px",
-            "background": "#ffffff" if i % 2 else "#f1f5f9",
-            "borderRadius": "6px",
-        })
-        rows.append(row)
-
-    return html.Div([
-        header,
-        html.Div(rows, style={"marginTop": "4px"}),
-        html.Div([
-            html.Button(
-                "Apply mapping",
-                id="var-map-apply-btn",
-                n_clicks=0,
-                style={
-                    "background": ACCENT, "color": "#ffffff", "border": "none",
-                    "padding": "8px 18px", "borderRadius": "8px",
-                    "fontSize": "13px", "fontWeight": "600", "cursor": "pointer",
-                    "fontFamily": "Arial, sans-serif",
-                },
-            ),
-            html.Span(
-                "Defaults to AI detection. Adjust any row and click Apply.",
-                style={"marginLeft": "12px", "fontSize": "12px",
-                       "color": INK_SOFT, "fontFamily": "Arial, sans-serif"},
-            ),
-        ], style={"marginTop": "14px", "display": "flex",
-                  "alignItems": "center"}),
-        html.Div(status_children if status_children is not None else "",
-                 id="var-map-status", style={"marginTop": "8px"}),
-    ])
-
-
-# =============================================================================
-# CALLBACK — APPLY USER-EDITED VARIABLE MAPPING
-#
-# Reads every var-map dropdown and rebuilds mapped-vars-store using ONLY the
-# variables the user actually selected. Unselected variables are dropped from
-# the mapping, so they are neither plotted (make_overview_figures skips absent
-# keys) nor used in any subsequent analysis (every downstream step reads
-# mapped-vars-store). The mapping panel is re-rendered so the detected/
-# undetected dots reflect the applied state, and the figures are redrawn to
-# remove any de-selected variable.
-# =============================================================================
-
-
 layout = html.Div([
 
     # Hidden stores (unchanged)
     dcc.Store(id="mapped-vars-store",     data={}),
-    # Available DataFrame columns, used to populate the editable
-    # variable-mapping dropdowns in Advanced Step 1.
-    dcc.Store(id="data-columns-store",    data=[]),
     dcc.Store(id="dataframe-store",       data={}),
     dcc.Store(id="dataframe-filtered",    data={}),
     dcc.Store(id="code-read-store",       data={}),
@@ -4306,11 +2903,6 @@ layout = html.Div([
     dcc.Store(id="selected-example-store", data=None),
     # NEW: holds the computed degradation rate & method so the chat can reference it
     dcc.Store(id="degradation-result-store", data={}),
-
-    # Time span (in years) of the most recently analyzed dataset. Computed once
-    # at Analyze time and reused to (a) hard-block degradation for <1yr data and
-    # (b) disable the YoY method for <2yr data. None until a dataset is analyzed.
-    dcc.Store(id="data-duration-store", data=None),
 
     # NEW: track which steps are complete
     dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
@@ -4336,114 +2928,14 @@ layout = html.Div([
 
     # Main container — sidebar + chat side-by-side, BOTH inside dbc.Container so
     # their edges line up with the LBNL/DuraMAT logos in the global header.
-
-    # ── NEW: stores/intervals for the mode system + Simple-mode pipeline ──
-    # Active analysis mode: "simple" (default) or "advanced".
-    dcc.Store(id="ui-mode", data="simple"),
-    # Simple-mode staged reveal + chained-pipeline intermediates.
-    dcc.Store(id="simple-stash", data={}),
-    dcc.Store(id="simple-pipe-data", data={}),
-    dcc.Store(id="simple-pipe-filtered", data={}),
-    dcc.Store(id="simple-run-trigger", data={}),
-    # Simple-mode PVPRO: its own job tracker + poll interval, separate from
-    # the Advanced-mode ones above so the two can never collide.
-    dcc.Store(id="simple-pvpro-job", data={}),
-    dcc.Interval(id="simple-pvpro-poll-interval", interval=1000,
-                 n_intervals=0, disabled=True),
-
-    # Main container — sidebar (left) always visible; the right column holds
-    # the shared upload header, the Simple/Advanced tab switcher, and whichever
-    # mode's content is active.
     dbc.Container(
         [
             html.Div(
                 [
-                    # LEFT — progress panel / sidebar (always visible in both modes)
+                    # Sidebar — sticky inside the flex shell
                     html.Div(id="sidebar-render", children=sidebar),
-
-                    # RIGHT — fixed-height scroll column.
-                    html.Div(
-                        [
-                            html.Div(
-                                [
-                                    # Shared editorial header (above the tabs).
-                                    common_header,
-
-                                    # Shared data-upload area — common to both modes.
-                                    shared_upload_header,
-
-                                    # ── ANALYZE card: title + mode tabs + active panel ──
-                                    html.Div(
-                                        [
-                                            html.Div("ANALYZE", style={
-                                                "fontSize": "15px", "color": ACCENT,
-                                                "fontWeight": "800", "fontFamily": "Arial, sans-serif",
-                                                "textTransform": "uppercase", "letterSpacing": "0.12em",
-                                                "marginBottom": "14px",
-                                            }),
-                                            html.Div(
-                                                "Pick a mode, then run the analysis on "
-                                                "the data you loaded above.",
-                                                style={"fontSize": "15px", "color": INK_SOFT,
-                                                       "fontFamily": "Arial, sans-serif",
-                                                       "marginBottom": "16px"},
-                                            ),
-
-                                            # Mode switcher — sticky inside this card.
-                                            html.Div(
-                                                html.Div(id="mode-tabs-render",
-                                                         children=build_mode_tabs("simple")),
-                                                style={
-                                                    "position": "sticky",
-                                                    "top": "0",
-                                                    "zIndex": "20",
-                                                    "background": PAPER_RAISED,
-                                                    "padding": "6px 0",
-                                                    "marginBottom": "4px",
-                                                },
-                                            ),
-
-                                            # SIMPLE-MODE PANEL — visible by default.
-                                            html.Div(
-                                                simple_mode_panel,
-                                                id="simple-mode-wrap",
-                                                style={},
-                                            ),
-
-                                            # ADVANCED-MODE content — the original
-                                            # four-agent chat_stream, hidden until switch.
-                                            html.Div(
-                                                chat_stream,
-                                                id="advanced-mode-wrap",
-                                                style={"display": "none"},
-                                            ),
-                                        ],
-                                        style={
-                                            "padding": "32px 64px 36px",
-                                            "background": PAPER_RAISED,
-                                            "border": f"1px solid {BORDER}",
-                                            "borderRadius": "10px",
-                                            "marginBottom": "16px",
-                                        },
-                                    ),
-                                ],
-                                style={
-                                    "flex": "1",
-                                    "minHeight": "0",
-                                    "overflowY": "auto",
-                                    "paddingRight": "4px",
-                                    "paddingBottom": "4px",
-                                },
-                            ),
-                        ],
-                        style={
-                            "flex": "1",
-                            "minWidth": "0",
-                            "display": "flex",
-                            "flexDirection": "column",
-                            "height": "calc(100vh - 110px)",
-                        },
-                    ),
+                    # Chat panel
+                    chat_stream,
                 ],
                 className="pvcopilot-shell",
                 style={
@@ -4552,41 +3044,6 @@ app.clientside_callback(
 
 
 # =============================================================================
-# CALLBACK — DISABLE YoY FOR DATASETS UNDER 2 YEARS
-#
-# YoY pairs each day with the same calendar day one year earlier, so it needs
-# at least two years of data to yield a single comparison. When the analyzed
-# dataset is shorter, grey out the YoY option and, if it was selected, fall the
-# selection back to LR (the clientside sync above then mirrors it into the
-# hidden master radio). Fires whenever a new dataset is analyzed (the duration
-# store changes), which also resets the embedded per-method param inputs to
-# their defaults — consistent with the existing reset-on-new-data behavior.
-# =============================================================================
-@app.callback(
-    Output("metric-stat-radio", "options", allow_duplicate=True),
-    Output("metric-stat-radio", "value",   allow_duplicate=True),
-    Output("yoy-disabled-note", "children"),
-    Output("yoy-disabled-note", "style"),
-    Input("data-duration-store", "data"),
-    State("metric-stat-radio",   "value"),
-    prevent_initial_call=True,
-)
-def gate_yoy_by_duration(duration_years, current_value):
-    disable_yoy = duration_years is not None and duration_years < 2.0
-    options = build_stat_metric_options(disable_yoy=disable_yoy)
-    if disable_yoy:
-        new_value = "LR" if current_value == "YOY" else dash.no_update
-        note = "YoY needs at least 2 years of data; it's disabled for this dataset."
-        note_style = {"fontSize": "12px", "color": "#92400e", "fontStyle": "italic",
-                      "marginTop": "8px", "fontFamily": "Arial, sans-serif"}
-    else:
-        new_value = dash.no_update
-        note = ""
-        note_style = {"display": "none"}
-    return options, new_value, note, note_style
-
-
-# =============================================================================
 # CALLBACK — UPLOAD STATUS  (UNCHANGED LOGIC, restyled output)
 # =============================================================================
 @app.callback(
@@ -4666,18 +3123,9 @@ def run_filter(filter_clicks, upload_clicks,
         return ["", None]
 
     df = _df_from_store(df_json)
-
-    # Power is the minimum requirement. parse_contents already computed
-    # power = V * I when only voltage+current were present, so by here a
-    # missing DC Power means we genuinely cannot analyze.
-    power_key = mapped_variables_dict.get("DC Power") if mapped_variables_dict else None
-    if not power_key or power_key not in df.columns:
-        return [_no_data_alert("Cannot analyze: no DC Power column found, and no Voltage + Current to compute it from. Provide power, or voltage and current."), None]
-
-    irra_key = mapped_variables_dict.get("Irradiance") if mapped_variables_dict else None
-    has_irr  = bool(irra_key) and irra_key in df.columns
-    temp_key = mapped_variables_dict.get("Module temperature") if mapped_variables_dict else None
-    has_temp = bool(temp_key) and temp_key in df.columns
+    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
+    if irra_key is None or irra_key not in df.columns:
+        return ["❌ Irradiance column not found.", None]
 
     gamma          = gamma if gamma is not None else -0.004
     irr_thresh     = irr_thresh if irr_thresh is not None else 300
@@ -4685,76 +3133,53 @@ def run_filter(filter_clicks, upload_clicks,
     norm_lower     = norm_lower if norm_lower is not None else 0.01
     norm_upper_pct = norm_upper_pct if norm_upper_pct is not None else 99
 
-    # The filtering pipeline (clear-sky, low-irradiance, IQR, normalization) is
-    # the heavy part of this step; cap it so a pathological dataset can't hang
-    # the UI. Figure assembly below is cheap and stays outside the timed region.
-    def _do_filter():
-        # Basic value filter
-        bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
-        _df = df.loc[bv_normal].copy()
+    # Basic value filter
+    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
+    df = df.loc[bv_normal].copy()
 
-        clearsky_mask = pd.Series(True, index=_df.index)
-        if "clearsky" in selected_filters and has_irr:
-            _cs_smooth = cs_smooth if cs_smooth is not None else 0.3
-            _cs_energy = cs_energy if cs_energy is not None else 0.5
-            normal_idx, outlier_idx = clear_sky_filter(_df, irra_key,
-                                                        smoothness_threshold=_cs_smooth,
-                                                        energy_threshold=_cs_energy)
-            clearsky_mask = _df.index.isin(normal_idx)
+    clearsky_mask = pd.Series(True, index=df.index)
+    if "clearsky" in selected_filters:
+        cs_smooth = cs_smooth if cs_smooth is not None else 0.3
+        cs_energy = cs_energy if cs_energy is not None else 0.5
+        normal_idx, outlier_idx = clear_sky_filter(df, irra_key,
+                                                    smoothness_threshold=cs_smooth,
+                                                    energy_threshold=cs_energy)
+        clearsky_mask = df.index.isin(normal_idx)
 
-        _df_filtered = normalize(_df, mapped_variables_dict, gamma=gamma)
-        _current_mask = pd.Series(clearsky_mask, index=_df_filtered.index)
-        _filter_stats = []
+    df_filtered = normalize(df, mapped_variables_dict, gamma=gamma)
+    current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
+    filter_stats = []
 
-        # Data-availability notices (missing power/irradiance/temperature) are now
-        # consolidated into the collapsible "data-quality notes" toggle shown right
-        # after Analyze — see _data_quality_notes(). Only filter-action stats
-        # (what each selected filter actually did) are reported here.
+    if "timezone" in selected_filters:
+        try:
+            df_filtered.index = pd.to_datetime(df_filtered.index)
+            df_filtered.index = df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
+            filter_stats.append("Timezone corrected (UTC → US/Pacific)")
+        except Exception:
+            filter_stats.append("⚠️ Timezone correction failed")
 
-        if "timezone" in selected_filters:
-            try:
-                _df_filtered.index = pd.to_datetime(_df_filtered.index)
-                _df_filtered.index = _df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
-                _filter_stats.append("Timezone corrected (UTC → US/Pacific)")
-            except Exception:
-                _filter_stats.append("⚠️ Timezone correction failed")
+    if "clearsky" in selected_filters:
+        removed = (~clearsky_mask).sum()
+        filter_stats.append(f"Clear-sky filter removed {removed} points")
 
-        if "clearsky" in selected_filters:
-            if has_irr:
-                removed = (~clearsky_mask).sum()
-                _filter_stats.append(f"Clear-sky filter removed {removed} points")
-            else:
-                _filter_stats.append("⚠️ Clear-sky filter skipped — requires irradiance.")
+    if "low-irra-power" in selected_filters:
+        normal_idx, outlier_idx = low_irra_power_filter(
+            df_filtered, mapped_variables_dict,
+            irr_thresh=irr_thresh, power_ratio=power_ratio,
+            norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
+        )
+        mask = df_filtered.index.isin(normal_idx)
+        removed = (~mask & current_mask).sum()
+        current_mask &= mask
+        filter_stats.append(f"Low irra-power filter removed {removed} points")
 
-        if "low-irra-power" in selected_filters and has_irr:
-            normal_idx, outlier_idx = low_irra_power_filter(
-                _df_filtered, mapped_variables_dict,
-                irr_thresh=irr_thresh, power_ratio=power_ratio,
-                norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
-            )
-            mask = _df_filtered.index.isin(normal_idx)
-            removed = (~mask & _current_mask).sum()
-            _current_mask &= mask
-            _filter_stats.append(f"Low irra-power filter removed {removed} points")
-        elif "low-irra-power" in selected_filters:
-            _filter_stats.append("⚠️ Low-irradiance/power filter skipped — requires irradiance.")
-
-        if "outlier" in selected_filters:
-            _iqr = iqr_multiplier if iqr_multiplier is not None else 1.5
-            normal_idx, outlier_idx = identify_outliers_iqr(_df_filtered, "norm", iqr_multiplier=_iqr)
-            mask = _df_filtered.index.isin(normal_idx)
-            removed = (~mask & _current_mask).sum()
-            _current_mask &= mask
-            _filter_stats.append(f"IQR outlier filter removed {removed} points")
-
-        return _df_filtered, _current_mask, _filter_stats
-
-    try:
-        df_filtered, current_mask, filter_stats = _run_with_timeout(_do_filter)
-    except FutureTimeout:
-        return [_no_data_alert("Filtering is taking longer than expected — something may be wrong "
-                               "with your data. Check the file's formatting and columns, then try again."),
-                None]
+    if "outlier" in selected_filters:
+        iqr_multiplier = iqr_multiplier if iqr_multiplier is not None else 1.5
+        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=iqr_multiplier)
+        mask = df_filtered.index.isin(normal_idx)
+        removed = (~mask & current_mask).sum()
+        current_mask &= mask
+        filter_stats.append(f"IQR outlier filter removed {removed} points")
 
     normal_indices  = df_filtered.index[current_mask]
     outlier_indices = df_filtered.index[~current_mask]
@@ -4953,41 +3378,13 @@ def analyze_uploaded_data_callback(
         return ["", "", False, "Calculate Degradation", {}, {}, True]
 
     df_filtered = _df_from_store(df_filtered_json)
-
-    # Power is required; irradiance is optional (un-normalized if absent).
-    power_key = mapped_variables_dict.get("DC Power") if mapped_variables_dict else None
-    if not power_key or power_key not in df_filtered.columns:
-        return [_no_data_alert("Cannot run degradation: no DC Power (and no Voltage + Current to compute it)."),
-                "", False, "Calculate Degradation", {}, {}, True]
-
-    # Hard block: degradation analysis is meaningless on under a year of data.
-    # The user is warned earlier in the Analyze output; this enforces it for
-    # every method (statistical and PVPRO alike).
-    _dur = _duration_years(df_filtered)
-    if _dur is not None and _dur < 1.0:
-        _months = int(round(_dur * 12))
-        return [_no_data_alert(f"This dataset spans only about {_months} month"
-                               f"{'s' if _months != 1 else ''} (less than 1 year). "
-                               "Degradation analysis needs at least 1 year of data."),
-                "", False, "Calculate Degradation", {}, {}, True]
-
-    irra_key = mapped_variables_dict.get("Irradiance") if mapped_variables_dict else None
-    if not irra_key or irra_key not in df_filtered.columns:
-        irra_key = None   # aggregate_daily falls back to a simple daily mean
+    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
+    if irra_key is None or irra_key not in df_filtered.columns:
+        return ["❌ Irradiance column not found.", "", False, "Calculate Degradation", {}, {}, True]
 
     # ---------- PVPRO: long-running, so launch in a thread and let a polling
     # ---------- callback render the result when it's ready.
     if selected_metric == "PVPRO":
-        # PVPRO needs the full physical input set; warn (don't crash) if short.
-        _missing = []
-        for _label in ("DC Voltage", "DC Current", "Irradiance", "Module temperature"):
-            _col = mapped_variables_dict.get(_label) if mapped_variables_dict else None
-            if not _col or _col not in df_filtered.columns:
-                _missing.append(_label)
-        if _missing:
-            return [_no_data_alert("PVPRO needs " + ", ".join(_missing)
-                                   + ". Use a statistical method (YoY / LR / HW / ARIMA / CSD) instead."),
-                    "", False, "Calculate Degradation", {}, {}, True]
         # Snapshot all the user-controlled params into kwargs.
         pvpro_kwargs = dict(
             cells_in_series   = pvpro_cells     if pvpro_cells     else 60,
@@ -5048,37 +3445,26 @@ def analyze_uploaded_data_callback(
                 {}, {"job_id": job_id}, False]
 
     else:
-        # Fast statistical methods run synchronously; cap them so a bad dataset
-        # can't hang the UI. (PVPRO, above, has its own background-job path and
-        # is deliberately not capped.)
-        def _compute_fast():
-            daily_data = aggregate_daily(df_filtered, irra_key)
-            if selected_metric == "YOY":
-                return compute_yoy(daily_data,
-                                   rolling_window=yoy_window if yoy_window else 30,
-                                   iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
-            elif selected_metric == "LR":
-                return compute_lr(daily_data)
-            elif selected_metric == "HW":
-                return compute_hw(daily_data, period=hw_period if hw_period else 12)
-            elif selected_metric == "ARIMA":
-                return compute_arima(daily_data,
-                                     p=arima_p if arima_p is not None else 1,
-                                     d=arima_d if arima_d is not None else 1,
-                                     q=arima_q if arima_q is not None else 0,
-                                     seasonal_period=arima_s if arima_s else 12)
-            elif selected_metric == "CSD":
-                return compute_csd(daily_data, period=csd_period if csd_period else 12)
-            else:
-                raise ValueError(f"Unknown metric: {selected_metric}")
+        daily_data = aggregate_daily(df_filtered, irra_key)
 
-        try:
-            rd, fig = _run_with_timeout(_compute_fast)
-        except FutureTimeout:
-            return [_no_data_alert("Calculating degradation is taking longer than expected — "
-                                   "something may be wrong with your data. Check the file's "
-                                   "formatting and columns, then try again."),
-                    "", False, "Calculate Degradation", {}, {}, True]
+        if selected_metric == "YOY":
+            rd, fig = compute_yoy(daily_data,
+                                  rolling_window=yoy_window if yoy_window else 30,
+                                  iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
+        elif selected_metric == "LR":
+            rd, fig = compute_lr(daily_data)
+        elif selected_metric == "HW":
+            rd, fig = compute_hw(daily_data, period=hw_period if hw_period else 12)
+        elif selected_metric == "ARIMA":
+            rd, fig = compute_arima(daily_data,
+                                    p=arima_p if arima_p is not None else 1,
+                                    d=arima_d if arima_d is not None else 1,
+                                    q=arima_q if arima_q is not None else 0,
+                                    seasonal_period=arima_s if arima_s else 12)
+        elif selected_metric == "CSD":
+            rd, fig = compute_csd(daily_data, period=csd_period if csd_period else 12)
+        else:
+            raise ValueError(f"Unknown metric: {selected_metric}")
 
     # Restyle the figure
     if fig is not None:
@@ -5140,10 +3526,6 @@ def analyze_uploaded_data_callback(
                      style={"fontSize": "14px"}),
         ], style={"fontFamily": "Arial, sans-serif"}),
     ])
-
-    # The "no irradiance → un-normalized, less reliable" caveat is now shown in
-    # the consolidated data-quality notes toggle right after Analyze (see
-    # _data_quality_notes()), so it's no longer repeated next to the result.
 
     degradation_layout = html.Div([
         html.Div(summary_block, style={"marginBottom": "20px"}),
@@ -5791,8 +4173,6 @@ app.clientside_callback(
     Output("data-source-store",    "data",      allow_duplicate=True),
     Output("upload-status-output", "children",  allow_duplicate=True),
     Output("stored-data-file-name","data",      allow_duplicate=True),
-    Output("data-duration-store",  "data",      allow_duplicate=True),
-    Output("data-columns-store",   "data",      allow_duplicate=True),
     Input("analyze-btn",          "n_clicks"),
     Input("load-example-btn-1",   "n_clicks"),
     Input("load-example-btn-2",   "n_clicks"),
@@ -5832,91 +4212,50 @@ def analyze_uploaded_data_callback(
             )
         except Exception as e:
             return (html.Div(f"Error loading example: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", example_filename, None, [])
-        # Duration is (re)computed when the user clicks Analyze; reset it here so a
-        # freshly loaded example can't be gated by the previous dataset's span.
+                    {}, None, "", False, "Analyze Data", None, "", example_filename)
         return (html.Div("", className="text-muted"),
-                {}, df_json, "", False, "Analyze Data", "example", output_msg, example_filename, None, [])
+                {}, df_json, "", False, "Analyze Data", "example", output_msg, example_filename)
 
     # Analyze clicked
     if trigger == "analyze-btn":
-        # Parsing (which includes an LLM column-identification call) is capped at
-        # STEP_TIMEOUT_S so a malformed file can't hang the UI indefinitely.
-        try:
-            if data_source == "upload" and contents is not None:
-                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
-                    parse_contents, contents, filename)
-                if df is None:
-                    return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, []
-            elif data_source == "example" and stored_df_json is not None:
+        if data_source == "upload" and contents is not None:
+            df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
+            if df is None:
+                return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name
+        elif data_source == "example" and stored_df_json is not None:
+            try:
                 df = _df_from_store(stored_df_json)
-                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
-                    parse_contents, df=df)
-            else:
-                return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                        {}, None, "", False, "Analyze Data", None, "", filename, None, [])
-        except FutureTimeout:
-            return (_no_data_alert("This is taking longer than expected — something may be wrong "
-                                   "with your data. Check the file's formatting and columns, then try again."),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
-        except Exception as e:
-            return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+                df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
+            except Exception as e:
+                return (html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
+                        {}, None, "", False, "Analyze Data", None, "", stored_file_name)
+        else:
+            return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
+                    {}, None, "", False, "Analyze Data", None, "", filename)
 
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+                    {}, None, "", False, "Analyze Data", None, "", stored_file_name)
 
-        # Dataset time span — drives the <1yr block (below) and the <2yr YoY disable.
-        duration_years = _duration_years(df)
-        duration_store = round(duration_years, 3) if duration_years is not None else None
-
-        # Figures (also capped — large frames can make plotting slow).
+        # Figures
         figures_output = html.Div()
         try:
             if df is not None and mapped_variables_dict:
-                figures_output, err = _run_with_timeout(
-                    make_overview_figures, df, mapped_variables_dict)
+                figures_output, err = make_overview_figures(df, mapped_variables_dict)
                 figures_output = html.Div(figures_output)
-        except FutureTimeout:
-            figures_output = html.Div("Preview figures took too long to render and were skipped.",
-                                      style={"color": ACCENT})
         except Exception:
             figures_output = html.Div("Figure generation failed.", style={"color": ACCENT})
 
-        # Consolidated, collapsible data-quality notes + (if <1yr) a hard-block banner,
-        # surfaced right after analysis so the user sees implications before calculating.
-        _n_notes, notes_component = _data_quality_notes(df, mapped_variables_dict)
-        pre_blocks = []
-        if duration_years is not None and duration_years < 1.0:
-            pre_blocks.append(_duration_block_banner(duration_years))
-        if notes_component is not None:
-            pre_blocks.append(notes_component)
-
-        # Available columns + Time-in-index flag for the editable mapping table.
-        data_columns = [str(c) for c in df.columns.tolist()]
-        time_in_index = (
-            isinstance(df.index, pd.DatetimeIndex)
-            or (mapped_variables_dict or {}).get("Time") == "__index__"
-        )
-        # Editable variable-mapping table (defaults to the LLM detection;
-        # the user can override any row or fill in ones the LLM missed).
-        editable_mapping = build_variable_mapping_table(
-            mapped_variables_dict, data_columns, time_in_index=time_in_index,
-        )
-
-        combined_output = html.Div(pre_blocks + [
+        combined_output = html.Div([
             html.Div([
                 html.Div("identified variables", style={
                     "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
                     "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
                     "fontFamily": "Arial, sans-serif",
                 }),
-                # Editable mapping table — replaces the old read-only list.
-                html.Div(editable_mapping, id="var-map-panel",
-                         style={"fontSize": "14px"}),
+                html.Div(summary_table, style={"fontSize": "14px"}),
             ], style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
@@ -5930,7 +4269,7 @@ def analyze_uploaded_data_callback(
                     "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
                     "fontFamily": "Arial, sans-serif",
                 }),
-                html.Div(figures_output, id="var-map-figures"),
+                figures_output,
             ], style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
@@ -5940,9 +4279,9 @@ def analyze_uploaded_data_callback(
         ], className="slide-in-up")
 
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
-                "Analyze Data", None, "", stored_file_name, duration_store, data_columns)
+                "Analyze Data", None, "", stored_file_name)
 
-    return ("", {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+    return ("", {}, None, "", False, "Analyze Data", None, "", stored_file_name)
 
 
 # =============================================================================
@@ -6847,677 +5186,3 @@ app.clientside_callback(
 
 if __name__ == "__main__":
     app.run_server(debug=True, host="0.0.0.0", port=8050)
-
-
-# =============================================================================
-# CALLBACKS FOR THE MODE SYSTEM + SIMPLE-MODE PIPELINE  (merged from Master)
-# =============================================================================
-
-@app.callback(
-    Output("simple-pvpro-params-wrap", "style"),
-    Output("simple-pvpro-about-wrap",  "style"),
-    Input("simple-method-radio", "value"),
-    prevent_initial_call=True,
-)
-def simple_toggle_pvpro_params(method):
-    if method == "PVPRO":
-        return ({"display": "block", "marginTop": "8px"},
-                {"display": "block"})
-    return ({"display": "none"}, {"display": "none"})
-
-
-# =============================================================================
-# CALLBACK — SIMPLE-MODE PVPRO: poll the background job and render the result
-# into `simple-result` (the shared result area).  The job is launched from the
-# shared Stage-3 pipeline callback when the chosen method is PVPRO.
-# =============================================================================
-@app.callback(
-    Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
-    Output("simple-result",                "children", allow_duplicate=True),
-    Output("simple-status",                "children", allow_duplicate=True),
-    Output("simple-pvpro-job",             "data",     allow_duplicate=True),
-    Output("simple-pvpro-poll-interval",   "disabled", allow_duplicate=True),
-    Output("step-progress",                "data",     allow_duplicate=True),
-    Output("simple-stash",                 "data",     allow_duplicate=True),
-    Input("simple-pvpro-poll-interval", "n_intervals"),
-    State("simple-pvpro-job", "data"),
-    State("simple-pipe-filtered", "data"),
-    prevent_initial_call=True,
-)
-def simple_pvpro_poll(_n, job_store, pfiltered):
-    from dash import no_update
-
-    job_id = (job_store or {}).get("job_id")
-    if not job_id:
-        return [no_update] * 7
-
-    job = _pvpro_read_job(job_id)
-    if job is None:
-        return [no_update] * 7
-
-    phase = job.get("phase", "")
-    elapsed = max(0.0, time.time() - job.get("started_at", time.time()))
-
-    # Still working.
-    if phase not in ("done", "error", "rendered"):
-        ui = _pvpro_progress_ui(
-            phase=phase, current=job.get("current", 0),
-            total=job.get("total", 1), message=job.get("message", ""),
-            elapsed_s=elapsed,
-        )
-        return [ui, no_update, no_update, job_store, False, no_update, no_update]
-
-    # Failed.
-    if phase == "error":
-        _pvpro_update_job(job_id, phase="rendered")
-        none = {"started": True, "data": True, "filter": True,
-                "calc": False, "code": False}
-        return ["", _no_data_alert(
-            f"PVPRO failed: {job.get('error', 'unknown error')}"),
-            "", {}, True, none, {}]
-
-    # Done / already-rendered.
-    render_lock = _pvpro_get_render_lock(job_id)
-    if not render_lock.acquire(blocking=False):
-        return [no_update] * 7
-    try:
-        job = _pvpro_read_job(job_id)
-        if job is None or job.get("phase") == "rendered":
-            return [no_update] * 7
-
-        result = job.get("result") or {}
-        rd = result.get("rd", float("nan"))
-        figs = result.get("figs") or {}
-        rates = result.get("rates", {}) or {}
-
-        src_name = (pfiltered or {}).get("source_name", "Your data")
-        try:
-            df_f = _df_from_store((pfiltered or {}).get("df_good"))
-            start_date = df_f.index.min()
-            end_date = df_f.index.max()
-            duration_years = (end_date - start_date).days / 365.25
-            start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
-            end_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
-        except Exception:
-            start_str = end_str = "\u2014"
-            duration_years = 0.0
-
-        layout_div = _render_pvpro_layout(
-            rd, figs, rates, start_str, end_str, duration_years, elapsed)
-
-        # Build a diagnostic-friendly stash so the AI assistant works for the
-        # PVPRO result too (mirrors the Advanced-mode PVPRO summary).
-        rate_pct = (rd / 100) if (rd is not None and np.isfinite(rd)) else 0.0
-        _QUANT = [("p_mp_ref", "Pmp"), ("v_mp_ref", "Vmp"), ("i_mp_ref", "Imp"),
-                  ("v_oc_ref", "Voc"), ("i_sc_ref", "Isc")]
-        if np.isfinite(rate_pct):
-            _parts = [f"PVPRO-fitted reference-condition degradation. "
-                      f"Pmp(ref): {rate_pct*100:+.2f}%/yr over {duration_years:.1f} years."]
-            _bits = [f"{s}(ref) {rates[k]:+.2f}%/yr" for k, s in _QUANT
-                     if np.isfinite(rates.get(k, float('nan')))]
-            if _bits:
-                _parts.append("Per-parameter rates: " + ", ".join(_bits) + ".")
-            trend_summary = " ".join(_parts)
-        else:
-            trend_summary = "PVPRO fit did not return a finite Pmp rate."
-
-        # Per-parameter reference rates the PVPRO diagnostic branch consumes.
-        rates_per_quantity = {k: round(float(v), 4)
-                              for k, v in (rates or {}).items()
-                              if v is not None and np.isfinite(v)}
-
-        # Raw-channel data-quality scan (same as Advanced mode) so the
-        # diagnostic's data-findings bullet has something to work with.
-        try:
-            raw_summary = _summarize_raw_data(
-                _df_from_store((pfiltered or {}).get("df_good")),
-                (pfiltered or {}).get("mapped") or {},
-            )
-        except Exception as _e:
-            raw_summary = f"(raw-data summary unavailable: {_e})"
-
-        stash = {
-            "rate_pct": float(rate_pct) if np.isfinite(rate_pct) else 0.0,
-            "method": "PVPRO",
-            "duration_years": float(duration_years),
-            "start": start_str,
-            "end": end_str,
-            "source_name": src_name,
-            "n_raw": 0, "n_kept": 0, "n_removed": 0, "pct_kept": 100.0,
-            "rates_per_quantity": rates_per_quantity,
-            "raw_summary": raw_summary,
-            "trend_summary": trend_summary,
-            "fig": None,
-        }
-
-        done_status = _success_banner(f"{src_name} analysis complete (PVPRO)")
-        progress = {"started": True, "data": True, "filter": True,
-                    "calc": True, "code": False}
-        _pvpro_update_job(job_id, phase="rendered")
-        return ["", layout_div, done_status, {}, True, progress, stash]
-    finally:
-        render_lock.release()
-
-
-# =============================================================================
-# CALLBACKS — Example chip "selected" highlight
-#
-# When the user clicks one of the three example chips, we want the
-# clicked chip to gain a blue ring and keep it until the user either
-# (a) clicks a DIFFERENT example chip (ring moves to the new one) or
-# (b) uploads a file of their own (rings clear from all chips).
-#
-# Two callbacks:
-#   1. selected-example-store gets written whenever an example chip is
-#      clicked (set to that chip's id) or an upload arrives (set to
-#      None).
-#   2. A single clientside callback reads selected-example-store and
-#      rewrites all three chips' style objects, applying the active
-#      style to the matching chip and the resting style to the others.
-# =============================================================================
-
-@app.callback(
-    Output("step-progress", "data", allow_duplicate=True),
-    Input("analyze-btn", "n_clicks"),
-    State("step-progress", "data"),
-    prevent_initial_call=True,
-)
-def mark_started_advanced(n_clicks, prev):
-    if not n_clicks:
-        return dash.no_update
-    prog = dict(prev or {})
-    prog["started"] = True
-    return prog
-
-
-# =============================================================================
-# CALLBACK — SHOW / HIDE AGENT MESSAGES BASED ON PROGRESS
-# Each subsequent agent becomes visible only when the previous step is done.
-# =============================================================================
-@app.callback(
-    Output("ui-mode", "data"),
-    Input({"type": "mode-tab", "mode": ALL}, "n_clicks"),
-    State("ui-mode", "data"),
-    prevent_initial_call=True,
-)
-def set_ui_mode(_clicks, current):
-    trigger = ctx.triggered_id
-    if not trigger or not isinstance(trigger, dict):
-        return current or "simple"
-    # Ignore the spurious initial 0-click fire.
-    if not ctx.triggered or not ctx.triggered[0].get("value"):
-        return current or "simple"
-    return trigger.get("mode", current or "simple")
-
-
-@app.callback(
-    Output("simple-mode-wrap",   "style"),
-    Output("advanced-mode-wrap", "style"),
-    Output("mode-tabs-render",   "children"),
-    Input("ui-mode", "data"),
-)
-def render_mode(mode):
-    mode = mode or "simple"
-    simple_style   = {} if mode == "simple" else {"display": "none"}
-    advanced_style = {} if mode == "advanced" else {"display": "none"}
-    return simple_style, advanced_style, build_mode_tabs(mode)
-
-
-# =============================================================================
-# CALLBACK — SIMPLE-MODE END-TO-END PIPELINE
-#
-# When a file is dropped (or an example chip clicked) in Simple mode, run the
-# entire pipeline with default settings and show ONLY the degradation rate +
-# figure.  Reuses the exact same compute functions as Advanced mode, so the
-# numbers match Advanced-with-defaults.
-#
-#   parse_contents -> basic_value_filter -> normalize -> default filters
-#                  -> aggregate_daily -> compute_yoy
-# =============================================================================
-
-
-@app.callback(
-    Output("simple-analyze-btn", "disabled"),
-    Output("simple-analyze-btn", "style"),
-    Input("data-source-store", "data"),
-    Input("dataframe-store",   "data"),
-    Input("upload-data",       "contents"),
-    Input("mapped-vars-store", "data"),
-    Input("ui-mode",           "data"),
-)
-def toggle_simple_analyze(data_source, df_store, upload_contents, mapped_vars, mode):
-    # Ready whenever data is loaded in the shared area — an uploaded file
-    # (contents present), an example (df in store), or anything Advanced mode
-    # has already parsed (mapped vars present).  Re-checked on mode switch so
-    # returning to Simple after using Advanced leaves the button enabled.
-    ready = (
-        bool(upload_contents) or
-        (data_source == "example" and bool(df_store)) or
-        bool(df_store) or
-        bool(mapped_vars)
-    )
-    return (not ready), _simple_analyze_style(disabled=not ready)
-
-
-# -----------------------------------------------------------------------------
-# Simple mode, STAGE A (instant): on Analyze click, immediately show a status
-# banner and write the run trigger.  Returns right away so the banner paints
-# with no perceptible delay; the heavy compute happens in Stage B below.
-# -----------------------------------------------------------------------------
-@app.callback(
-    Output("simple-status",       "children", allow_duplicate=True),
-    Output("simple-result",       "children", allow_duplicate=True),
-    Output("simple-run-trigger",  "data"),
-    Output("step-progress",       "data", allow_duplicate=True),
-    Input("simple-analyze-btn",   "n_clicks"),
-    State("simple-run-trigger",   "data"),
-    State("simple-method-radio",  "value"),
-    prevent_initial_call=True,
-)
-def simple_start(n_clicks, prev_trigger, method):
-    if not n_clicks:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
-    seq = ((prev_trigger or {}).get("seq", 0)) + 1
-    method = method or "YOY"
-    label = "Reading data…" if method == "YOY" else "Reading data for PVPRO…"
-    return (
-        _working_banner(label),
-        "",   # clear any prior result immediately
-        {"source": "simple-analyze-btn", "seq": seq, "method": method},
-        {"started": True, "data": False, "filter": False, "calc": False, "code": False},
-    )
-
-
-# =============================================================================
-# Simple-mode pipeline — THREE CHAINED STAGES.
-# Each stage runs one real part of the pipeline, then writes the store that
-# triggers the next stage.  After each stage finishes it marks its sidebar
-# step "done" and the next step "active", so the sidebar advances exactly as
-# each real stage completes.
-# =============================================================================
-@app.callback(
-    Output("simple-pipe-data", "data"),
-    Output("simple-status",    "children", allow_duplicate=True),
-    Output("simple-result",    "children", allow_duplicate=True),
-    Output("simple-stash",     "data", allow_duplicate=True),
-    Output("step-progress",    "data", allow_duplicate=True),
-    Input("simple-run-trigger",   "data"),
-    State("upload-data",          "contents"),
-    State("upload-data",          "filename"),
-    State("dataframe-store",      "data"),
-    State("data-source-store",    "data"),
-    State("stored-data-file-name","data"),
-    prevent_initial_call=True,
-)
-def simple_stage_data(run_trigger, contents, filename, stored_df_json,
-                      data_source, stored_file_name):
-    if not (run_trigger or {}).get("source"):
-        return (dash.no_update,) * 5
-
-    # Load + identify variables.
-    try:
-        if data_source == "example" and stored_df_json:
-            df_raw = _df_from_store(stored_df_json)
-            df, summary_table, mapped, code_read = parse_contents(df=df_raw)
-            source_name = _EXAMPLE_FRIENDLY.get(stored_file_name, "Example data")
-        elif data_source == "upload" and contents is not None:
-            df, summary_table, mapped, code_read = parse_contents(contents, filename)
-            source_name = filename or "your file"
-        else:
-            return _simple_fail(_no_data_alert(
-                "Please upload a file or pick an example above first."))
-    except Exception as e:
-        return _simple_fail(_no_data_alert(f"Could not read the data: {e}"))
-
-    if df is None or not mapped:
-        return _simple_fail(_no_data_alert(
-            "Couldn't identify the required columns automatically. "
-            "Try Advanced mode to map variables manually."
-        ))
-
-    irra_key = mapped.get("Irradiance")
-    if irra_key is None or irra_key not in df.columns:
-        return _simple_fail(_no_data_alert(
-            "Irradiance column not found. Try Advanced mode to map it manually."
-        ))
-
-    # If PVPRO was chosen, it needs DC Voltage + DC Current.  Check right after
-    # identification (Step 1) and fail fast with a clear pointer back to YoY.
-    method = (run_trigger or {}).get("method", "YOY")
-    if method == "PVPRO" and not _simple_has_dc_vi(mapped):
-        return _simple_fail(_no_data_alert(
-            "PVPRO needs DC voltage and DC current columns, but they weren't "
-            "found in this dataset. Switch the method to YoY above, or try "
-            "Advanced mode to map the columns manually."
-        ))
-
-    # Success: Step 1 DONE, Step 2 ACTIVE.  Pass the loaded df + meta forward.
-    payload = {
-        "df": df.to_json(date_format="iso", orient="split"),
-        "mapped": mapped,
-        "irra_key": irra_key,
-        "source_name": source_name,
-        "n_raw": int(len(df)),
-        "seq": run_trigger.get("seq", 0),
-        "method": method,
-    }
-    progress = {"started": True, "data": True, "filter": False,
-                "calc": False, "code": False}
-    status = _working_banner(_SIMPLE_STEP_LABELS.get(2, "Applying default filters…"))
-    return payload, status, "", {}, progress
-
-
-# ---- STAGE 2 : default filtering -------------------------------------------
-@app.callback(
-    Output("simple-pipe-filtered", "data"),
-    Output("simple-status",        "children", allow_duplicate=True),
-    Output("step-progress",        "data", allow_duplicate=True),
-    Input("simple-pipe-data", "data"),
-    prevent_initial_call=True,
-)
-def simple_stage_filter(pdata):
-    if not pdata or "df" not in pdata:
-        return dash.no_update, dash.no_update, dash.no_update
-
-    # Brief pause so the "Applying default filters…" step is visible.
-    time.sleep(2)
-
-    def _fail(alert):
-        none = {"started": True, "data": True, "filter": False,
-                "calc": False, "code": False}
-        return {}, alert, none
-
-    try:
-        df = _df_from_store(pdata["df"])
-        mapped = pdata["mapped"]
-        irra_key = pdata["irra_key"]
-
-        bv_normal, _bv_outlier = basic_value_filter(df, mapped)
-        df = df.loc[bv_normal].copy()
-
-        clearsky_mask = pd.Series(True, index=df.index)
-        try:
-            cs_normal_idx, _ = clear_sky_filter(
-                df, irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
-            clearsky_mask = df.index.isin(cs_normal_idx)
-        except Exception:
-            clearsky_mask = pd.Series(True, index=df.index)
-
-        df_filtered = normalize(df, mapped, gamma=-0.004)
-        current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
-
-        try:
-            df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = (df_filtered.index
-                                 .tz_localize("UTC").tz_convert("US/Pacific"))
-        except Exception:
-            pass
-
-        normal_idx, _ = low_irra_power_filter(
-            df_filtered, mapped,
-            irr_thresh=300, power_ratio=0.02,
-            norm_lower=0.01, norm_upper_pct=99,
-        )
-        current_mask &= df_filtered.index.isin(normal_idx)
-
-        normal_idx, _ = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=1.5)
-        current_mask &= df_filtered.index.isin(normal_idx)
-
-        df_good = df_filtered.loc[df_filtered.index[current_mask]]
-    except Exception as e:
-        return _fail(_no_data_alert(f"Filtering step failed: {e}"))
-
-    if df_good.empty:
-        return _fail(_no_data_alert(
-            "No data points survived default filtering. "
-            "Try Advanced mode to loosen the filters."
-        ))
-
-    # Success: Step 2 DONE, Step 3 ACTIVE.  Pass the filtered df forward.
-    payload = {
-        "df_good": df_good.to_json(date_format="iso", orient="split"),
-        "irra_key": irra_key,
-        "source_name": pdata["source_name"],
-        "n_raw": pdata["n_raw"],
-        "n_kept": int(len(df_good)),
-        "method": pdata.get("method", "YOY"),
-        "mapped": mapped,
-    }
-    method = pdata.get("method", "YOY")
-    progress = {"started": True, "data": True, "filter": True,
-                "calc": False, "code": False}
-    step3_label = ("Fitting PVPRO (single-diode model)…" if method == "PVPRO"
-                   else _SIMPLE_STEP_LABELS.get(3, "Estimating degradation…"))
-    status = _working_banner(step3_label)
-    return payload, status, progress
-
-# ---- STAGE 3 : degradation — YoY (fast) OR PVPRO (background fit) -----------
-@app.callback(
-    Output("simple-stash",   "data", allow_duplicate=True),
-    Output("simple-status",  "children", allow_duplicate=True),
-    Output("simple-result",  "children", allow_duplicate=True),
-    Output("step-progress",  "data", allow_duplicate=True),
-    Output("simple-pvpro-job",           "data",     allow_duplicate=True),
-    Output("simple-pvpro-poll-interval", "disabled", allow_duplicate=True),
-    Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
-    Input("simple-pipe-filtered", "data"),
-    State("simple-param-pvpro-cells",    "value"),
-    State("simple-param-pvpro-mps",      "value"),
-    State("simple-param-pvpro-ps",       "value"),
-    State("simple-param-pvpro-alphaisc", "value"),
-    State("simple-param-pvpro-tech",     "value"),
-    State("simple-param-pvpro-days",     "value"),
-    State("simple-param-pvpro-iters",    "value"),
-    prevent_initial_call=True,
-)
-def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
-    if not pfiltered or "df_good" not in pfiltered:
-        return (dash.no_update,) * 7
-
-    method = pfiltered.get("method", "YOY")
-
-    # -------------------------------------------------------------------
-    # PVPRO branch: launch the long-running fit in a background thread and
-    # let `simple_pvpro_poll` render the result into `simple-result`.
-    # -------------------------------------------------------------------
-    if method == "PVPRO":
-        mapped = pfiltered.get("mapped") or {}
-        if not _simple_has_dc_vi(mapped):
-            none = {"started": True, "data": True, "filter": True,
-                    "calc": False, "code": False}
-            return ({}, _no_data_alert(
-                "PVPRO needs DC Voltage and DC Current columns, which weren't "
-                "identified in this dataset. Try Advanced mode to map them, or "
-                "use the YoY method."), "", none, {}, True, "")
-        try:
-            df_filtered = _df_from_store(pfiltered["df_good"])
-        except Exception as e:
-            none = {"started": True, "data": True, "filter": True,
-                    "calc": False, "code": False}
-            return ({}, _no_data_alert(f"Could not load data for PVPRO: {e}"),
-                    "", none, {}, True, "")
-
-        pvpro_kwargs = dict(
-            cells_in_series     = cells     if cells     else 60,
-            modules_per_string  = mps       if mps       else 1,
-            parallel_strings    = ps        if ps        else 1,
-            alpha_isc           = alphaisc  if alphaisc is not None else 0.0046,
-            technology          = tech      if tech      else "mono-c-Si",
-            days_per_run        = days      if days      else 14,
-            iterations_per_year = iters     if iters     else 12,
-        )
-        job_id = _pvpro_make_job()
-
-        def _progress_cb(stage, current, total, message, _jid=job_id):
-            _pvpro_update_job(_jid, phase=stage, current=current,
-                              total=total, message=message)
-
-        def _worker(_df=df_filtered, _mapping=mapped,
-                    _kwargs=pvpro_kwargs, _jid=job_id, _cb=_progress_cb):
-            try:
-                rd, figs, rates = compute_pvpro(_df, _mapping,
-                                                progress_callback=_cb, **_kwargs)
-                _pvpro_update_job(_jid, phase="finalising", message="Packing results…")
-                _pvpro_update_job(_jid, phase="done",
-                                  result={"rd": float(rd), "figs": figs,
-                                          "rates": rates},
-                                  message="Done")
-            except Exception as exc:
-                _pvpro_update_job(_jid, phase="error",
-                                  error=f"{type(exc).__name__}: {exc}",
-                                  message=str(exc))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-        initial_ui = _pvpro_progress_ui(
-            phase="starting", current=0, total=1,
-            message="Spinning up PVPRO worker…", elapsed_s=0,
-        )
-        # Keep Step 3 ACTIVE while the fit runs; the poll flips it DONE.
-        progress = {"started": True, "data": True, "filter": True,
-                    "calc": False, "code": False}
-        running_status = _working_banner("Fitting PVPRO (single-diode model)…")
-        return ({}, running_status, "", progress,
-                {"job_id": job_id}, False, initial_ui)
-
-    # -------------------------------------------------------------------
-    # YoY branch (default): fast synchronous estimate.
-    # -------------------------------------------------------------------
-    # Brief pause so the "Estimating degradation…" step is visible.
-    time.sleep(2)
-
-    def _fail(alert):
-        none = {"started": True, "data": True, "filter": True,
-                "calc": False, "code": False}
-        return (
-            {}, alert, "", none,
-            dash.no_update, dash.no_update, dash.no_update,
-        )
-
-    try:
-        df_good = _df_from_store(pfiltered["df_good"])
-        irra_key = pfiltered["irra_key"]
-        daily_data = aggregate_daily(df_good, irra_key)
-        rd, fig = compute_yoy(daily_data, rolling_window=30, iqr_multiplier=1.5)
-    except Exception as e:
-        return _fail(_no_data_alert(f"Degradation calculation failed: {e}"))
-
-    if fig is not None:
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Arial", color=INK),
-            margin=dict(l=50, r=20, t=50, b=60),
-            title=dict(font=dict(family="Arial", size=18, color=INK),
-                       x=0, xanchor="left"),
-            height=340,
-        )
-        fig.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
-        fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
-
-    start_date = df_good.index.min()
-    end_date   = df_good.index.max()
-    duration_years = (end_date - start_date).days / 365.25
-    rate_pct = rd / 100
-
-    n_raw = pfiltered["n_raw"]
-    n_kept = pfiltered["n_kept"]
-    n_removed = max(n_raw - n_kept, 0)
-    pct_kept = (n_kept / n_raw * 100) if n_raw else 0.0
-    trend_summary = _summarize_daily_series(daily_data, _metric_label("YOY"))
-    source_name = pfiltered["source_name"]
-
-    stash = {
-        "rate_pct": float(rate_pct),
-        "method": "YOY",
-        "duration_years": float(duration_years),
-        "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
-        "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
-        "source_name": source_name,
-        "n_raw": n_raw,
-        "n_kept": n_kept,
-        "n_removed": n_removed,
-        "pct_kept": float(pct_kept),
-        "trend_summary": trend_summary,
-        "fig": fig.to_json() if fig is not None else None,
-    }
-
-    # Success: Step 3 DONE.  Reveal the result.
-    progress = {"started": True, "data": True, "filter": True,
-                "calc": True, "code": False}
-    done_status = _success_banner(f"{source_name} analysis complete")
-    return (stash, done_status, _simple_result_layout(stash), progress,
-            dash.no_update, dash.no_update, dash.no_update)
-
-
-# -----------------------------------------------------------------------------
-# Rebuild the Simple-mode result layout from the stashed primitives.
-# -----------------------------------------------------------------------------
-
-
-# =============================================================================
-# CALLBACK — APPLY USER-EDITED VARIABLE MAPPING  (ported from pvcopilotMaster)
-# =============================================================================
-@app.callback(
-    Output("mapped-vars-store", "data",     allow_duplicate=True),
-    Output("var-map-panel",     "children"),
-    Output("var-map-figures",   "children"),
-    Input("var-map-apply-btn",  "n_clicks"),
-    State({"type": "var-map-dd", "metric": ALL}, "value"),
-    State({"type": "var-map-dd", "metric": ALL}, "id"),
-    State("dataframe-store",    "data"),
-    State("data-columns-store", "data"),
-    prevent_initial_call=True,
-)
-def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns):
-    if not n_clicks:
-        raise dash.exceptions.PreventUpdate
-
-    # Rebuild the mapping dict, keeping ONLY non-empty selections.
-    new_mapping = {}
-    for val, id_obj in zip(values, ids):
-        metric = id_obj.get("metric")
-        if val:
-            new_mapping[metric] = val
-
-    # Flag any required variables that are still unset.
-    missing = [m for m in _MAP_METRICS
-               if m in _REQUIRED_FOR_DEGRADATION and not new_mapping.get(m)]
-
-    if missing:
-        status = html.Div(
-            "Mapping applied. Still missing for degradation analysis: "
-            + ", ".join(missing) + ".",
-            className="alert alert-warning",
-            style={"marginBottom": "0", "fontSize": "13px"},
-        )
-    else:
-        applied = ", ".join(f"{m} → {new_mapping[m]}" for m in _MAP_METRICS
-                            if new_mapping.get(m))
-        status = html.Div(
-            "✓ Mapping applied. " + applied,
-            className="alert alert-success",
-            style={"marginBottom": "0", "fontSize": "13px"},
-        )
-
-    # Rebuild the mapping panel so the dots match the applied state.
-    time_in_index = new_mapping.get("Time") == "__index__"
-    panel = build_variable_mapping_table(
-        new_mapping, data_columns or [],
-        time_in_index=time_in_index, status_children=status,
-    )
-
-    # Redraw figures from the new mapping — unselected variables are not drawn.
-    try:
-        df = _df_from_store(df_json) if df_json else None
-    except Exception:
-        df = None
-    figures = _build_overview_figures_div(df, new_mapping)
-
-    return new_mapping, panel, figures
-
-
-# =============================================================================
-# CALLBACK — DATA UPLOAD & PARSE  (UNCHANGED logic, restyled output)
-# =============================================================================
-
