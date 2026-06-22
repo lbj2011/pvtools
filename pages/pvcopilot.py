@@ -4082,7 +4082,13 @@ def _simple_result_layout(stash):
         ),
     ])
 
-    return html.Div([
+    # Same consolidated data-quality notes toggle as Advanced mode (no
+    # irradiance / no temperature / computed power). Built from the detected
+    # mapping carried in the stash; collapsed by default so it stays neat.
+    _n_notes, notes_component = _data_quality_notes(None, stash.get("mapped"))
+    pre_blocks = [notes_component] if notes_component is not None else []
+
+    return html.Div(pre_blocks + [
         html.Div(summary_block, style={"marginBottom": "20px"}),
         html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})
                  if fig is not None else html.Div()),
@@ -7175,11 +7181,24 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
             "Try Advanced mode to map variables manually."
         ))
 
-    irra_key = mapped.get("Irradiance")
-    if irra_key is None or irra_key not in df.columns:
+    # Block under-a-year data up front, exactly like Advanced mode.
+    _dur = _duration_years(df)
+    if _dur is not None and _dur < 1.0:
+        return _simple_fail(_duration_block_banner(_dur))
+
+    # Power is REQUIRED; irradiance and temperature are OPTIONAL. Like Advanced
+    # mode, we proceed without them and surface a data-quality note (shown in the
+    # result) rather than refusing to run.
+    power_key = mapped.get("DC Power")
+    if not power_key or power_key not in df.columns:
         return _simple_fail(_no_data_alert(
-            "Irradiance column not found. Try Advanced mode to map it manually."
+            "No DC Power column found, and no Voltage + Current to compute it from. "
+            "Try Advanced mode to map variables manually."
         ))
+
+    irra_key = mapped.get("Irradiance")
+    if not irra_key or irra_key not in df.columns:
+        irra_key = None   # un-normalized; flagged in the data-quality notes
 
     # If PVPRO was chosen, it needs DC Voltage + DC Current.  Check right after
     # identification (Step 1) and fail fast with a clear pointer back to YoY.
@@ -7235,13 +7254,16 @@ def simple_stage_filter(pdata):
         bv_normal, _bv_outlier = basic_value_filter(df, mapped)
         df = df.loc[bv_normal].copy()
 
+        # Clear-sky and low-irradiance/power filters need irradiance; skip them
+        # when it's absent (matches Advanced mode), still doing value/IQR filters.
         clearsky_mask = pd.Series(True, index=df.index)
-        try:
-            cs_normal_idx, _ = clear_sky_filter(
-                df, irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
-            clearsky_mask = df.index.isin(cs_normal_idx)
-        except Exception:
-            clearsky_mask = pd.Series(True, index=df.index)
+        if irra_key:
+            try:
+                cs_normal_idx, _ = clear_sky_filter(
+                    df, irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
+                clearsky_mask = df.index.isin(cs_normal_idx)
+            except Exception:
+                clearsky_mask = pd.Series(True, index=df.index)
 
         df_filtered = normalize(df, mapped, gamma=-0.004)
         current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
@@ -7253,12 +7275,13 @@ def simple_stage_filter(pdata):
         except Exception:
             pass
 
-        normal_idx, _ = low_irra_power_filter(
-            df_filtered, mapped,
-            irr_thresh=300, power_ratio=0.02,
-            norm_lower=0.01, norm_upper_pct=99,
-        )
-        current_mask &= df_filtered.index.isin(normal_idx)
+        if irra_key:
+            normal_idx, _ = low_irra_power_filter(
+                df_filtered, mapped,
+                irr_thresh=300, power_ratio=0.02,
+                norm_lower=0.01, norm_upper_pct=99,
+            )
+            current_mask &= df_filtered.index.isin(normal_idx)
 
         normal_idx, _ = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=1.5)
         current_mask &= df_filtered.index.isin(normal_idx)
@@ -7440,6 +7463,9 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         "pct_kept": float(pct_kept),
         "trend_summary": trend_summary,
         "fig": fig.to_json() if fig is not None else None,
+        # Carry the detected mapping so the result can show the same
+        # data-quality notes toggle as Advanced mode.
+        "mapped": pfiltered.get("mapped") or {},
     }
 
     # Success: Step 3 DONE.  Reveal the result.

@@ -17,10 +17,14 @@ using the exact functions the app's callbacks call, and records, per dataset:
 Each run writes a timestamped, machine-readable report AND a human-readable PDF
 into ./reports/ , plus a "latest" copy that always points at the most recent run:
 
-    reports/pvcopilot_pipeline_report_<UTC-timestamp>.json   (full detail)
-    reports/pvcopilot_pipeline_report_<UTC-timestamp>.csv    (one row per dataset)
-    reports/pvcopilot_pipeline_report_<UTC-timestamp>.pdf    (visual summary)
-    reports/pvcopilot_pipeline_latest.json / .csv / .pdf
+Files are numbered per run (1, 2, 3, ...) so the HIGHEST number is the latest run:
+    reports/pvcopilot_pipeline_report_<N>.json   (full detail)
+    reports/pvcopilot_pipeline_report_<N>.csv    (one row per dataset, status/stage/reason)
+    reports/pvcopilot_results_<N>.csv            (focused results sheet)
+
+The focused results sheet has columns:
+    dataset | filtering_result | degradation_rate_pct_per_year | missing_maps |
+    statistical_trend_method | detected_or_created_columns | why_missing
 
 Usage (always with the pvtools env):
     conda activate pvtools
@@ -36,10 +40,12 @@ The classification mirrors the app's own gating:
 """
 
 import os
+import re
 import sys
 import csv
 import json
 import base64
+import fnmatch
 import argparse
 import textwrap
 import traceback
@@ -60,11 +66,6 @@ try:
 
     import numpy as np
     import pandas as pd
-
-    import matplotlib
-    matplotlib.use("Agg")  # headless: write to file, no display
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
 
     # The SAME functions PVcopilot's callbacks use.
     from page_supporting_files.analysis_utils import (
@@ -226,8 +227,9 @@ def run_one(path, forced_method=None):
     fname = os.path.basename(path)
     rec = {
         "file": fname, "status": "ERROR", "stage": "load", "reason": "",
-        "rows_raw": None, "rows_filtered": None, "duration_years": None,
-        "mapped": {}, "method": None, "rd_percent_per_year": None, "notes": [],
+        "rows_raw": None, "rows_filtered": None, "filtering_result": None,
+        "duration_years": None, "mapped": {}, "method": None,
+        "rd_percent_per_year": None, "notes": [],
     }
 
     # ---- Stage 1: ANALYZE (load + LLM column identification) ----
@@ -309,6 +311,12 @@ def run_one(path, forced_method=None):
         return rec
 
     rec["rows_filtered"] = int(len(df_filtered))
+    # Filtering result: share of the parsed rows that survived the filter chain
+    # (basic-value + clear-sky + low-irradiance + IQR), like the app's "% retained".
+    if rec["rows_raw"]:
+        pct = 100.0 * rec["rows_filtered"] / rec["rows_raw"]
+        rec["filtering_result"] = (f"{pct:.1f}% retained "
+                                   f"({rec['rows_filtered']}/{rec['rows_raw']} rows)")
     if len(df_filtered) == 0:
         rec.update(status="ERROR", stage="filter",
                    reason="All rows removed by filtering -- nothing left to analyze.")
@@ -365,61 +373,70 @@ def write_csv(results, path):
             w.writerow(row)
 
 
-def write_pdf(results, counts, meta, path):
-    lines = []
-    lines.append(("PVcopilot Pipeline Report", "title"))
-    lines.append((f"Generated {meta['generated_utc']}  -  {meta['dataset_dir']}", "subtitle"))
-    lines.append((f"{meta['n_files']} dataset(s)   "
-                  + "   ".join(f"{k}: {counts[k]}" for k in STATUS_ORDER), "subtitle"))
-    lines.append(("", "gap"))
+# The variables PVcopilot tries to detect in every dataset.
+EXPECTED_ROLES = ["Time", "DC Power", "DC Voltage", "DC Current",
+                  "Irradiance", "Module temperature"]
 
-    for r in sorted(results, key=lambda x: (STATUS_ORDER.index(x["status"]), x["file"])):
-        lines.append((r["file"], "file"))
-        lines.append((f"{r['status']}  (stage: {r['stage']})", "status:" + r["status"]))
-        meta_bits = []
-        if r["duration_years"] is not None:
-            meta_bits.append(f"{r['duration_years']} yr")
-        if r["method"]:
-            meta_bits.append(f"method={r['method']}")
-        if r["rd_percent_per_year"] is not None:
-            meta_bits.append(f"rd={r['rd_percent_per_year']} %/yr")
-        if r["rows_raw"] is not None:
-            meta_bits.append(f"rows {r['rows_raw']}->{r['rows_filtered']}")
-        if meta_bits:
-            lines.append(("    " + "  |  ".join(meta_bits), "detail"))
-        for para in str(r["reason"]).splitlines() or [""]:
-            for wrapped in (textwrap.wrap(para, width=108) or [""]):
-                lines.append(("    " + wrapped, "detail"))
-        if r["notes"]:
-            for note in r["notes"]:
-                for wrapped in textwrap.wrap("- " + note, width=104):
-                    lines.append(("      " + wrapped, "detail"))
-        lines.append(("", "gap"))
 
-    LINES_PER_PAGE = 50
-    y_start, line_h = 0.96, 0.92 / LINES_PER_PAGE
-    with PdfPages(path) as pdf:
-        i = 0
-        while i < len(lines):
-            fig = plt.figure(figsize=(8.5, 11))
-            ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
-            y = y_start
-            for text, kind in lines[i:i + LINES_PER_PAGE]:
-                if kind == "title":
-                    ax.text(0.06, y, text, fontsize=18, fontweight="bold")
-                elif kind == "subtitle":
-                    ax.text(0.06, y, text, fontsize=10, color="#444444")
-                elif kind == "file":
-                    ax.text(0.06, y, text, fontsize=11, fontweight="bold", family="monospace")
-                elif kind.startswith("status:"):
-                    st = kind.split(":", 1)[1]
-                    ax.text(0.06, y, text, fontsize=10, fontweight="bold",
-                            color=STATUS_COLOR.get(st, "#000000"))
-                elif kind == "detail":
-                    ax.text(0.06, y, text, fontsize=9, color="#222222", family="monospace")
-                y -= line_h
-            pdf.savefig(fig); plt.close(fig)
-            i += LINES_PER_PAGE
+def _format_detected_columns(mapped):
+    """Render the variables the tool detected (or created) from the dataset's
+    columns, e.g. 'DC Power=power | Irradiance=irr | Time=measured_on'. A value
+    of 'computed_dc_power' means power was computed as Voltage x Current."""
+    if not mapped:
+        return ""
+    # Stable, readable order; any extra roles appended after the known ones.
+    keys = ([k for k in EXPECTED_ROLES if k in mapped]
+            + [k for k in mapped if k not in EXPECTED_ROLES])
+    return " | ".join(f"{k}={mapped[k]}" for k in keys)
+
+
+def _missing_maps(mapped):
+    """Which of the expected variables the tool could NOT map for this dataset,
+    e.g. 'Irradiance, Module temperature'. 'none' when all were found."""
+    mapped = mapped or {}
+    missing = [role for role in EXPECTED_ROLES if role not in mapped]
+    return ", ".join(missing) if missing else "none"
+
+
+def _why_missing(r):
+    """Explain why the filtering result and/or degradation rate is blank for a
+    dataset, using the stage the pipeline stopped at and its reason. Empty when
+    both values are present (nothing missing)."""
+    has_filter = bool(r.get("filtering_result"))
+    has_rd = r.get("rd_percent_per_year") is not None
+    if has_filter and has_rd:
+        return ""
+    missing = []
+    if not has_filter:
+        missing.append("filtering result")
+    if not has_rd:
+        missing.append("degradation rate")
+    reason = " ".join(str(r.get("reason", "")).split())  # flatten newlines
+    stage = r.get("stage")
+    return f"No {' and '.join(missing)} (stopped at '{stage}'): {reason}"
+
+
+def write_results_csv(results, path):
+    """Focused results sheet: one row per dataset with the tool's actual outputs
+    -- the filtering result and degradation rate (when they exist), the columns
+    the tool detected/created, and (when either output is missing) why."""
+    cols = ["dataset", "filtering_result", "degradation_rate_pct_per_year",
+            "missing_maps", "statistical_trend_method",
+            "detected_or_created_columns", "why_missing"]
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in results:
+            w.writerow({
+                "dataset": r["file"],
+                "filtering_result": r.get("filtering_result") or "",
+                "degradation_rate_pct_per_year":
+                    "" if r.get("rd_percent_per_year") is None else r["rd_percent_per_year"],
+                "missing_maps": _missing_maps(r.get("mapped")),
+                "statistical_trend_method": r.get("method") or "",
+                "detected_or_created_columns": _format_detected_columns(r.get("mapped")),
+                "why_missing": _why_missing(r),
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -445,14 +462,33 @@ def _print_legend():
     print("=" * 78 + "\n")
 
 
-def collect_files(dataset_dir, include_examples):
+def _next_run_number():
+    """Next sequential run number: 1 + the highest already in reports/.
+    Numbered filenames mean the highest number is always the latest run."""
+    n = 0
+    if os.path.isdir(REPORT_DIR):
+        for f in os.listdir(REPORT_DIR):
+            m = re.match(r"pvcopilot_(?:results|pipeline_report)_(\d+)\.", f)
+            if m:
+                n = max(n, int(m.group(1)))
+    return n + 1
+
+
+def collect_files(dataset_dir, include_examples, match=None):
+    """Collect supported dataset files, optionally keeping only filenames that
+    match a glob pattern (e.g. 'my_*' to test just the combined my_* datasets)."""
+    def keep(f):
+        if not f.lower().endswith(SUPPORTED):
+            return False
+        return fnmatch.fnmatch(f, match) if match else True
+
     files = []
     if os.path.isdir(dataset_dir):
         files += [os.path.join(dataset_dir, f) for f in sorted(os.listdir(dataset_dir))
-                  if f.lower().endswith(SUPPORTED)]
+                  if keep(f)]
     if include_examples and os.path.isdir(EXAMPLE_DIR):
         files += [os.path.join(EXAMPLE_DIR, f) for f in sorted(os.listdir(EXAMPLE_DIR))
-                  if f.lower().endswith(SUPPORTED)]
+                  if keep(f)]
     return files
 
 
@@ -467,9 +503,12 @@ def main():
                     help="Force a degradation method instead of the app's auto-gating.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Only test the first N datasets (handy for a quick check).")
+    ap.add_argument("--match", default=None,
+                    help="Only test filenames matching this glob, e.g. 'my_*' or "
+                         "'my_*_csv_12*.csv'. Combine with --limit for the first N matches.")
     args = ap.parse_args()
 
-    files = collect_files(args.dataset_dir, args.include_examples)
+    files = collect_files(args.dataset_dir, args.include_examples, match=args.match)
     if args.limit:
         files = files[:args.limit]
     if not files:
@@ -489,24 +528,28 @@ def main():
 
     counts = _counts(results)
     os.makedirs(REPORT_DIR, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run = _next_run_number()    # 1, 2, 3, ... -- the highest number is the latest run
     meta = {
+        "run": run,
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset_dir": os.path.relpath(args.dataset_dir, PROJECT_ROOT),
         "n_files": len(files),
         "forced_method": args.method,
     }
 
-    base = os.path.join(REPORT_DIR, f"pvcopilot_pipeline_report_{stamp}")
-    latest = os.path.join(REPORT_DIR, "pvcopilot_pipeline_latest")
-    for target in (base, latest):
-        write_json(results, counts, meta, target + ".json")
-        write_csv(results, target + ".csv")
-        write_pdf(results, counts, meta, target + ".pdf")
+    # Output files are numbered per run so the highest number is always the
+    # latest. Results sheet = dataset | filtering result | degradation rate |
+    # detected/created columns | why_missing.
+    write_json(results, counts, meta,
+               os.path.join(REPORT_DIR, f"pvcopilot_pipeline_report_{run}.json"))
+    write_csv(results,
+              os.path.join(REPORT_DIR, f"pvcopilot_pipeline_report_{run}.csv"))
+    results_csv = os.path.join(REPORT_DIR, f"pvcopilot_results_{run}.csv")
+    write_results_csv(results, results_csv)
 
     print("\nSummary: " + "   ".join(f"{k}: {counts[k]}" for k in STATUS_ORDER))
-    print(f"Reports written to {os.path.relpath(REPORT_DIR, PROJECT_ROOT)}/ "
-          f"(this run: ...{stamp}.json/.csv/.pdf, plus ...latest.*)")
+    print(f"Run #{run}. Results: {os.path.relpath(results_csv, PROJECT_ROOT)} "
+          f"(highest number = latest run).")
     # Non-zero exit if anything genuinely failed -- handy for CI / scripting.
     return 2 if counts["ERROR"] else 0
 
