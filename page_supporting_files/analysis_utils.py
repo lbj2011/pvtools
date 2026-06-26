@@ -43,6 +43,90 @@ else:  # cborg
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
 
+
+# Column usability is judged primarily by MISSINGNESS rate (non-null / total),
+# the standard convention:
+#   missing > MAX_MISSING_FRAC  -> drop (too sparse to trust; e.g. 4/1000 = 99.6%)
+#   FLAG_MISSING_FRAC..MAX      -> keep but flag ("treat carefully")
+#   < FLAG_MISSING_FRAC         -> keep and fill the few gaps
+# A small absolute floor also applies so a tiny-but-full column isn't selected.
+MAX_MISSING_FRAC = 0.5      # drop columns more than 50% missing
+FLAG_MISSING_FRAC = 0.05    # flag columns 5-50% missing
+MIN_VALID_POINTS = 10       # secondary absolute floor
+
+
+def _missing_frac(df, col):
+    """Fraction of a column that is missing (non-numeric/blank counts as missing)."""
+    if col not in df.columns or len(df) == 0:
+        return 1.0
+    return float(pd.to_numeric(df[col], errors="coerce").isna().mean())
+
+
+def _best_by_data(df, cols):
+    """Pick the column that actually carries data among candidate column names.
+
+    A candidate is usable only if it is at most MAX_MISSING_FRAC missing, has at
+    least MIN_VALID_POINTS real values, and isn't all-zero/constant (nunique<=1).
+    A name match is NOT enough -- an empty/near-empty/mostly-missing column is
+    never selectable. Among the usable ones, returns the column with the most
+    non-null values (tie-break: highest variance, then original order).
+
+    Returns (best_col_or_None, viable_cols).
+    """
+    total = len(df)
+    viable, stats = [], {}
+    for c in cols or []:
+        if c not in df.columns:
+            continue
+        s = pd.to_numeric(df[c], errors="coerce")
+        non_null = int(s.notna().sum())
+        missing_frac = 1.0 - (non_null / total) if total else 1.0
+        if missing_frac > MAX_MISSING_FRAC:     # too sparse -> drop
+            continue
+        if non_null < MIN_VALID_POINTS:         # absolute floor for tiny frames
+            continue
+        nunique = int(s.nunique(dropna=True))
+        if nunique <= 1:            # all-NaN handled above; this drops constant / all-zero
+            continue
+        viable.append(c)
+        stats[c] = (non_null, float(s.var(skipna=True) or 0.0))
+    if not viable:
+        return None, []
+    best = max(viable, key=lambda c: (stats[c][0], stats[c][1]))
+    return best, viable
+
+
+_TIME_NAME_RE = re.compile(
+    r'(?:^|[^a-z])(timestamp|datetime|measured_on|meas_on|date|time|utc|epoch)(?:[^a-z]|$)',
+    re.I)
+
+
+def _name_looks_like_time(name):
+    """True if a column NAME reads like a timestamp (time/date/timestamp/...),
+    matched as whole tokens so 'update'/'runtime' don't false-positive."""
+    return bool(_TIME_NAME_RE.search(str(name)))
+
+
+def _looks_like_time(series, sample=20, min_frac=0.8):
+    """True if a column's values look like timestamps: sample the first non-null
+    values, try to parse them as datetimes, and require most to parse AND the
+    values not to be all identical (a constant isn't a usable time axis).
+
+    Numeric columns are rejected outright -- pd.to_datetime would happily read
+    integers as nanoseconds-since-epoch, so a plain power/voltage column would
+    otherwise masquerade as time. A datetime-typed column passes immediately.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return False
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series.dropna().nunique() > 1
+    vals = series.dropna().head(sample)
+    if len(vals) == 0:
+        return False
+    parsed = pd.to_datetime(vals, errors="coerce")
+    frac_ok = parsed.notna().mean()
+    return bool(frac_ok >= min_frac and parsed.nunique(dropna=True) > 1)
+
 # ================================
 # Read data
 # ================================
@@ -61,7 +145,7 @@ def parse_contents(contents=None, filename=None, df=None):
     if df is None:
 
         if contents is None:
-            return None, html.Div("Please upload a file to analyze."), {}, None
+            return None, html.Div("Please upload a file to analyze."), {}, None, []
 
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
@@ -83,13 +167,13 @@ def parse_contents(contents=None, filename=None, df=None):
                 return None, html.Div(
                     f"Unsupported file type: {filename}",
                     className="alert alert-danger"
-                ), {}, None
+                ), {}, None, []
 
         except Exception as e:
             return None, html.Div(
                 f"There was an error processing the file: {e}",
                 className="alert alert-danger"
-            ), {}, None
+            ), {}, None, []
 
     else:
         # Example dataset case
@@ -133,7 +217,7 @@ def parse_contents(contents=None, filename=None, df=None):
             "Uploaded file does not contain valid column names. "
             "Column names must include descriptive text (e.g. 'power', 'time').",
             className="alert alert-danger"
-        ), {}, None
+        ), {}, None, []
 
     # ----------------------------------
     # 3. Prepare LLM identification
@@ -142,16 +226,28 @@ def parse_contents(contents=None, filename=None, df=None):
     # method (it does single-diode-model fitting on V and I).  They are NOT
     # required by YoY / LR / HW / ARIMA / CSD (those only need DC Power), so
     # they may safely come back as "N/A" without blocking the workflow.
-    required_vars = [
+    # Canonical roles the rest of the app keys on. (DC Voltage/Current are only
+    # required by PVPRO; they may be absent for the statistical methods.)
+    canonical_vars = [
         "DC Power",
         "DC Voltage",
         "DC Current",
         "Irradiance",
         "Module temperature",
     ]
-
     if not time_in_index:
-        required_vars.insert(1, "Time")
+        canonical_vars.insert(1, "Time")
+
+    # Roles we ask the LLM about -- includes the AC counterparts so we can fall
+    # back to AC when no DC column exists.
+    llm_roles = [
+        "DC Power", "AC Power",
+        "DC Voltage", "AC Voltage",
+        "DC Current", "AC Current",
+        "Irradiance", "Module temperature",
+    ]
+    if not time_in_index:
+        llm_roles.append("Time")
 
     prompt = f"""
     You are identifying physical quantities from PV (photovoltaic) system data
@@ -159,9 +255,14 @@ def parse_contents(contents=None, filename=None, df=None):
 
     {colnames}
 
-    Map each of these physical quantities to the column name that represents
-    it (or "N/A" if no column matches):
-    {', '.join(required_vars)}.
+    For each physical quantity below, list the columns that could represent it,
+    best match first, AT MOST 3 per quantity (empty list if none match):
+    {', '.join(llm_roles)}.
+
+    List more than one only when a file genuinely has several channels for the
+    same quantity (per inverter / string / MPPT); otherwise a single best match
+    is fine. Keep DC and AC strictly separate (see rules below). Irradiance,
+    Module temperature, and Time have no AC/DC distinction. Be concise.
 
     =======================================================================
     NAMING CONVENTIONS YOU MUST KNOW
@@ -205,9 +306,9 @@ def parse_contents(contents=None, filename=None, df=None):
         p_array, p_string, inv1_input_power, inv1_dc_power,
         inverter1_dc_power, mppt_power, panel_power, string_power.
 
-    NOTE: We do NOT need AC Power, AC Voltage, or AC Current for this
-    workflow.  If a column is on the AC side (output / grid / inverter
-    output), do NOT map it to any of the required variables -- skip it.
+    AC columns (output / grid / inverter output) belong under the AC roles
+    (AC Power / AC Voltage / AC Current) -- list them there, NOT under the DC
+    roles. We prefer DC and only fall back to AC when no DC column exists.
 
     Patterns for Irradiance (plane-of-array):
         poa, poa_irradiance, ghi, dni, irr, irrad, irradiance, g_poa,
@@ -246,77 +347,81 @@ def parse_contents(contents=None, filename=None, df=None):
        to disambiguate quantity type (V -> voltage, A -> current, W -> power,
        W/m^2 -> irradiance, degC/C -> temperature).
 
-    5) DON'T GUESS. If after applying rules 1-4 you genuinely cannot tell,
-       return "N/A". Returning a wrong column is worse than returning N/A.
+    5) DON'T GUESS THE QUANTITY TYPE. If you genuinely cannot tell what a column
+       is, leave it out. But DO list every column you ARE confident matches a
+       role -- multiple matches are expected and wanted.
 
     =======================================================================
     OUTPUT FORMAT
     =======================================================================
 
-    Return ONLY a JSON object — no prose, no markdown fences:
+    Return ONLY a JSON object — no prose, no markdown fences. Each value is a
+    list of matching column names, best match first (use [] if none match):
 
     {{
-      "variable_mapping": [
-        {{"Metric": "DC Power", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "DC Voltage", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "DC Current", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Irradiance", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Module temperature", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Time", "Variable Name": "column_name_or_N/A"}}
-      ]
+      "candidates": {{
+        "DC Power": ["col", ...],
+        "AC Power": ["col", ...],
+        "DC Voltage": ["col", ...],
+        "AC Voltage": ["col", ...],
+        "DC Current": ["col", ...],
+        "AC Current": ["col", ...],
+        "Irradiance": ["col", ...],
+        "Module temperature": ["col", ...],
+        "Time": ["col", ...]
+      }}
     }}
     """
 
     # Default return values
     mapped_variables_dict = {}
+    mapping_notes = []   # AC-fallback / ambiguous-column / time-by-value warnings
 
     try:
-        # Call LLM
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            # max_tokens=500,
-        )
+        # Call LLM. Pin temperature=0 + a fixed seed so the SAME file maps to the
+        # SAME columns run-to-run (otherwise identification is nondeterministic
+        # and a dataset can flip between "power found" and "not found"). Some
+        # models reject these params -- fall back to a plain call if so.
+        try:
+            response = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                seed=0,
+            )
+        except Exception:
+            response = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+            )
 
         res_text = response.choices[0].message.content.strip()
         cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
 
         result = json.loads(cleaned)
-        mapping_data = result.get("variable_mapping", [])
+        raw_candidates = result.get("candidates", {}) or {}
 
-        mapping_df = pd.DataFrame(mapping_data)
+        def _cands(role):
+            """Candidate column names the LLM proposed for a role (best-first),
+            keeping only real, non-'N/A' strings."""
+            v = raw_candidates.get(role, [])
+            if isinstance(v, str):
+                v = [v]
+            return [c for c in v if isinstance(c, str) and c and c != "N/A"]
 
-        # ----------------------------------
-        # If time is in index, override mapping
-        # ----------------------------------
-        # inject index time
-        if time_in_index:
-            mapping_df = mapping_df[mapping_df["Metric"] != "Time"]
-
-            index_name = df.index.name
-            display_name = index_name if index_name not in [None, ""] else "__index__"
-
-            mapping_df.loc[len(mapping_df)] = {
-                "Metric": "Time",
-                "Variable Name": display_name
-            }
-
-        # ----------------------------------
-        # Ensure all required variables appear (fill missing with N/A)
-        # ----------------------------------
-        existing_metrics = set(mapping_df["Metric"].tolist())
-
-        for rv in required_vars:
-            if rv not in existing_metrics:
-                mapping_df.loc[len(mapping_df)] = {"Metric": rv, "Variable Name": "N/A"}
+        def _ambiguity_note(role, chosen, viable, ac=False):
+            if chosen and len(viable) > 1:
+                mapping_notes.append(
+                    f"Multiple columns matched {'AC ' if ac else ''}{role} "
+                    f"({', '.join(viable)}); using '{chosen}' (most data). "
+                    f"Change it in Advanced mode if it's wrong.")
 
         # ----------------------------------
         # Deterministic safety net: pair up DC Voltage / DC Current.
         #
-        # If the LLM identified one of {DC Voltage, DC Current} but not the
-        # other, try to find the partner by simple name-pattern substitution
-        # on the identified column. This handles the very common case where
-        # both DC sensors are named consistently (e.g. inv1_input_current ↔
+        # If only one of {DC Voltage, DC Current} resolved, try to find the
+        # partner by simple name-pattern substitution on the identified column.
+        # Handles consistently-named sensor pairs (inv1_input_current ↔
         # inv1_input_voltage, vdc ↔ idc, v_mp ↔ i_mp, ...).
         # ----------------------------------
         def _pair_partner(known_col, want):
@@ -378,64 +483,167 @@ def parse_contents(contents=None, filename=None, df=None):
                         return c
             return None
 
-        def _set_metric(metric_name, value):
-            mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"] = value
-
-        def _get_metric(metric_name):
-            rows = mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"]
-            return rows.iloc[0] if len(rows) else "N/A"
-
-        dc_v_now = _get_metric("DC Voltage")
-        dc_i_now = _get_metric("DC Current")
-
-        if dc_v_now == "N/A" and dc_i_now != "N/A":
-            partner = _pair_partner(dc_i_now, want="voltage")
-            if partner:
-                _set_metric("DC Voltage", partner)
-                print(f"[parse_contents] DC Voltage recovered by pairing: "
-                      f"{dc_i_now!r} -> {partner!r}")
-
-        if dc_i_now == "N/A" and dc_v_now != "N/A":
-            partner = _pair_partner(dc_v_now, want="current")
-            if partner:
-                _set_metric("DC Current", partner)
-                print(f"[parse_contents] DC Current recovered by pairing: "
-                      f"{dc_v_now!r} -> {partner!r}")
-
         # ----------------------------------
-        # Build dict of recognized variables (skip N/A)
+        # Resolve each role: prefer the candidate with the MOST REAL DATA, fall
+        # back DC -> AC for the electrical quantities, and warn on ambiguity.
         # ----------------------------------
-        mapped_variables_dict = {
-            row["Metric"]: row["Variable Name"]
-            for _, row in mapping_df.iterrows()
-            if row["Variable Name"] != "N/A"
-        }
+        def _resolve_dc_ac(dc_role, ac_role, label):
+            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC."""
+            best, viable = _best_by_data(df, _cands(dc_role))
+            if best:
+                _ambiguity_note(dc_role, best, viable)
+                return best, "dc"
+            best, viable = _best_by_data(df, _cands(ac_role))
+            if best:
+                mapping_notes.append(
+                    f"No DC {label} found — using AC {label} '{best}' "
+                    f"(includes inverter effects, so it's an approximation).")
+                _ambiguity_note(ac_role, best, viable, ac=True)
+                return best, "ac"
+            return None, None
 
-        # If the timestamp lives in a column (not already the index), promote
-        # it to a DatetimeIndex. All downstream filtering and aggregation
-        # operate on df.index as datetime (df.index.date, df.index.hour, ...),
-        # so an uploaded CSV -- whose time is a column with a plain integer
-        # index -- only analyzes correctly once that column becomes the index.
-        if not time_in_index:
-            tcol = mapped_variables_dict.get("Time")
-            if tcol and tcol in df.columns:
-                df[tcol] = pd.to_datetime(df[tcol], errors="coerce")
-                df = df.dropna(subset=[tcol]).set_index(tcol)
+        # Voltage / Current (needed for PVPRO and for V*I power).
+        v_col, v_side = _resolve_dc_ac("DC Voltage", "AC Voltage", "voltage")
+        i_col, i_side = _resolve_dc_ac("DC Current", "AC Current", "current")
 
-        # If DC Power wasn't identified but DC Voltage and DC Current were,
-        # compute power = V * I so the downstream analyses can still run.
-        if "DC Power" not in mapped_variables_dict:
-            v_col = mapped_variables_dict.get("DC Voltage")
-            i_col = mapped_variables_dict.get("DC Current")
-            if v_col and i_col and v_col in df.columns and i_col in df.columns:
-                df["computed_dc_power"] = df[v_col] * df[i_col]
-                mapped_variables_dict["DC Power"] = "computed_dc_power"
-                mapping_df.loc[mapping_df["Metric"] == "DC Power",
-                               "Variable Name"] = "computed_dc_power"
+        # Pair recovery: if exactly one of V/I is still missing, try the name-swap.
+        if v_col and not i_col:
+            p = _pair_partner(v_col, want="current")
+            if p:
+                i_col, i_side = p, v_side
+        elif i_col and not v_col:
+            p = _pair_partner(i_col, want="voltage")
+            if p:
+                v_col, v_side = p, i_side
 
-        # The "Identified Variables" eyebrow is rendered by the consumer
-        # (pvcopilot.py wraps this table in a card with its own heading), so
-        # we don't add a second H5 here.
+        # Power: DC direct -> DC V*I -> AC direct -> AC V*I.
+        best_dc_p, viable_dc_p = _best_by_data(df, _cands("DC Power"))
+        p_col, p_side = None, None
+        if best_dc_p:
+            p_col, p_side = best_dc_p, "dc"
+            _ambiguity_note("DC Power", best_dc_p, viable_dc_p)
+        elif v_col and i_col and v_side == "dc" and i_side == "dc":
+            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                       * pd.to_numeric(df[i_col], errors="coerce"))
+            p_col, p_side = "computed_dc_power", "dc"
+            mapping_notes.append("DC Power computed as Voltage × Current (no direct power column).")
+        else:
+            best_ac_p, viable_ac_p = _best_by_data(df, _cands("AC Power"))
+            if best_ac_p:
+                p_col, p_side = best_ac_p, "ac"
+                mapping_notes.append(
+                    f"No DC power found — using AC power '{best_ac_p}' "
+                    f"(includes inverter effects, so it's an approximation).")
+                _ambiguity_note("AC Power", best_ac_p, viable_ac_p, ac=True)
+            elif v_col and i_col:
+                df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                           * pd.to_numeric(df[i_col], errors="coerce"))
+                p_col, p_side = "computed_dc_power", "ac"
+                mapping_notes.append("Power computed as Voltage × Current on the AC side "
+                                     "(no DC power) — includes inverter effects, approximate.")
+
+        # Fill the third electrical quantity from the other two (P = V * I).
+        # Exact on the DC side; on the AC side it's approximate (ignores power
+        # factor) but consistent with the rest of the AC fallback. Only derive
+        # from a SAME-SIDE partner so we never mix DC and AC. Only matters for
+        # PVPRO. Division guards: zero/near-zero denominators -> NaN (dropped).
+        if p_col:
+            _pnum = pd.to_numeric(df[p_col], errors="coerce")
+            if v_col is None and i_col is not None and i_side == p_side:
+                df["computed_dc_voltage"] = _pnum / pd.to_numeric(
+                    df[i_col], errors="coerce").replace(0, np.nan)
+                v_col, v_side = "computed_dc_voltage", p_side
+                mapping_notes.append(
+                    "DC Voltage computed as Power / Current." if p_side == "dc"
+                    else "Voltage computed as AC Power / AC Current — approximate "
+                         "(ignores power factor).")
+            elif i_col is None and v_col is not None and v_side == p_side:
+                df["computed_dc_current"] = _pnum / pd.to_numeric(
+                    df[v_col], errors="coerce").replace(0, np.nan)
+                i_col, i_side = "computed_dc_current", p_side
+                mapping_notes.append(
+                    "DC Current computed as Power / Voltage." if p_side == "dc"
+                    else "Current computed as AC Power / AC Voltage — approximate "
+                         "(ignores power factor).")
+
+        # Irradiance / Module temperature (no AC/DC variant).
+        irr_col, irr_viable = _best_by_data(df, _cands("Irradiance"))
+        _ambiguity_note("Irradiance", irr_col, irr_viable)
+        temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
+        _ambiguity_note("Module temperature", temp_col, temp_viable)
+
+        # Time: detect BY NAME first (the LLM's name-based pick, then any column
+        # whose name reads like time); only if no time-like NAME exists, fall
+        # back to scanning column VALUES for one that parses as datetimes.
+        if time_in_index:
+            time_col = df.index.name if df.index.name not in [None, ""] else "__index__"
+        else:
+            # A time column must also actually contain timestamps -- a name match
+            # on an empty column is not enough.
+            def _has_time_data(col):
+                return (col in df.columns
+                        and pd.to_datetime(df[col], errors="coerce").notna().sum() >= MIN_VALID_POINTS)
+
+            time_col = None
+            # 1) BY NAME — trust the LLM's Time candidate if it's a real, populated column.
+            for c in _cands("Time"):
+                if _has_time_data(c):
+                    time_col = c
+                    break
+            # 2) BY NAME — backup: any column whose NAME looks like time AND has data.
+            if time_col is None:
+                for c in df.columns:
+                    if _name_looks_like_time(c) and _has_time_data(c):
+                        time_col = c
+                        break
+            # 3) BY VALUE — no time-like name with data; scan values.
+            if time_col is None:
+                for c in df.columns:
+                    if _looks_like_time(df[c]):
+                        time_col = c
+                        mapping_notes.append(f"Time column detected from values: '{c}'.")
+                        break
+
+        # Canonical mapping (keys stay DC-named so downstream is unchanged; the
+        # chosen column may be an AC column when DC was absent).
+        mapped_variables_dict = {}
+        if time_col:
+            mapped_variables_dict["Time"] = time_col
+        if p_col:
+            mapped_variables_dict["DC Power"] = p_col
+        if v_col:
+            mapped_variables_dict["DC Voltage"] = v_col
+        if i_col:
+            mapped_variables_dict["DC Current"] = i_col
+        if irr_col:
+            mapped_variables_dict["Irradiance"] = irr_col
+        if temp_col:
+            mapped_variables_dict["Module temperature"] = temp_col
+
+        # Flag kept-but-gappy columns (5-50% missing): usable, but the user
+        # should treat the result carefully. (>50% missing was already dropped.)
+        for _role, _col in mapped_variables_dict.items():
+            if _role == "Time" or _col == "computed_dc_power":
+                continue
+            _mf = _missing_frac(df, _col)
+            if _mf > FLAG_MISSING_FRAC:
+                mapping_notes.append(
+                    f"{_role} column '{_col}' is {_mf:.0%} missing — kept, but treat "
+                    "the result carefully (gaps were filled/skipped).")
+
+        # Promote a time COLUMN to the DatetimeIndex (downstream operates on the
+        # index). Computed power already lives in df; nothing else to add.
+        if not time_in_index and time_col and time_col in df.columns:
+            df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+            df = df.dropna(subset=[time_col]).set_index(time_col)
+
+        # Build the read-only mapping table for display (canonical roles).
+        display_roles = ["Time", "DC Power", "DC Voltage", "DC Current",
+                         "Irradiance", "Module temperature"]
+        mapping_df = pd.DataFrame(
+            [{"Metric": r, "Variable Name": mapped_variables_dict.get(r, "N/A")}
+             for r in display_roles])
+
         summary_table = html.Div([
             html.Table(
                 [
@@ -453,9 +661,9 @@ def parse_contents(contents=None, filename=None, df=None):
         # Check for missing Power/Time
         # ----------------------------------
         missing_msgs = []
-        if mapping_df.loc[mapping_df["Metric"] == "DC Power", "Variable Name"].iloc[0] == "N/A":
+        if "DC Power" not in mapped_variables_dict:
             missing_msgs.append("⚠️ Power column not identified.")
-        if mapping_df.loc[mapping_df["Metric"] == "Time", "Variable Name"].iloc[0] == "N/A":
+        if "Time" not in mapped_variables_dict:
             missing_msgs.append("⚠️ Time column not identified.")
 
         if missing_msgs:
@@ -474,8 +682,9 @@ def parse_contents(contents=None, filename=None, df=None):
             className="alert alert-warning"
         )
         mapped_variables_dict = {}
+        mapping_notes = []
 
-    return df, summary_table, mapped_variables_dict, code_read
+    return df, summary_table, mapped_variables_dict, code_read, mapping_notes
 
 
 # ================================
@@ -761,28 +970,97 @@ def low_irra_power_filter(df, mapped_variables_dict,
     return normal_indices, outlier_indices
 
 # ================================
+# Low power filter (no-irradiance fallback)
+# ================================
+def low_power_filter(df, mapped_variables_dict, peak_quantile=0.99, min_frac=0.15):
+    """Power-only cleanup used when there's no irradiance (so the irradiance-based
+    clear-sky / low-irradiance filters can't run).
+
+    Keeps points producing at least `min_frac` of the system's peak power and
+    drops the rest -- i.e. removes night, dawn/dusk, and heavily-clouded low-output
+    readings, which otherwise stay in (raw power has no irradiance to gate on) and
+    contaminate the trend. `peak_quantile` (99th pct) is a spike-robust stand-in
+    for the true peak.
+
+    Returns (normal_indices, outlier_indices), matching the other filters.
+    """
+    power_key = mapped_variables_dict.get("DC Power")
+    if not power_key or power_key not in df.columns:
+        return df.index, df.index[[]]
+    p = pd.to_numeric(df[power_key], errors="coerce")
+    peak = p.quantile(peak_quantile)
+    if not np.isfinite(peak) or peak <= 0:
+        return df.index, df.index[[]]
+    mask = p >= (min_frac * peak)
+    # Safety: never drop every row. If the threshold would remove everything
+    # (e.g. an outlier-inflated peak), keep all rather than zero out the dataset.
+    if not mask.any():
+        return df.index, df.index[[]]
+    return df.index[mask], df.index[~mask]
+
+
+# ================================
 # DAILY AGGREGATION
 # ================================
+# When there's no irradiance, the daily value is the day's PEAK power (a high
+# quantile) rather than the mean -- and low-peak days are dropped. Rationale:
+# without irradiance we can't weather-normalize, so a daily MEAN collapses on
+# sparsely/partially-sampled days (e.g. a dawn-only day averages near zero),
+# which then blows up year-over-year ratios. A clear day's PEAK power is roughly
+# comparable year-to-year (same solar geometry), so trending daily peaks of
+# clear/high-output days is the standard fallback and keeps the signal stable.
+PEAK_QUANTILE = 0.95          # "peak" = 95th percentile of a day's power
+CLEAR_DAY_FRAC = 0.6          # keep days whose peak >= 60% of the reference peak
+CLEAR_DAY_MIN_DAYS = 10       # only apply the clear-day drop when we have enough days
+DENOM_FLOOR_FRAC = 0.2        # YoY: ignore pairs whose prior value < 20% of median
+
+# Plausible annual degradation band (%/yr). Real PV degradation is a small
+# NEGATIVE number (~0 to -3 %/yr typically). Anything positive beyond noise, or
+# steeper than ~-3 %/yr, almost always means the inputs were un-normalizable
+# (no irradiance), too sparse, or otherwise unreliable -- we flag those as
+# rate_reliable = no. (Tunable: loosen MIN to e.g. -5 if you want to allow
+# genuinely fast-degrading systems through unflagged.)
+DEGRADATION_PLAUSIBLE_MIN = -3.0
+DEGRADATION_PLAUSIBLE_MAX = 0.5
+
+
+def rate_is_plausible(rd):
+    """True if a degradation rate (%/yr) is finite and within the plausible band
+    (roughly a small negative number). Used to flag unreliable results rather
+    than presenting them as trustworthy."""
+    try:
+        return bool(np.isfinite(rd) and
+                    DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
+    except Exception:
+        return False
+
+
 def aggregate_daily(df_f, irradiance_col=None):
     # Group by the post-dropna frame's OWN index. Grouping by df_f.index.date
     # (the full, original-length index) breaks with "Grouper and axis must be
     # same length" whenever dropna() removes rows -- which happens on any real
     # data that has gaps/NaNs.
-    #
-    # When irradiance is available, weight the daily 'norm' by irradiance;
-    # otherwise (power-only data) fall back to a simple daily mean of 'norm'.
     if irradiance_col and irradiance_col in df_f.columns:
+        # Irradiance available: irradiance-weighted daily mean of 'norm'.
         sub = df_f[['norm', irradiance_col]].dropna()
         daily = (
             sub
             .groupby(sub.index.date)
             .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
         )
-    else:
-        sub = df_f[['norm']].dropna()
-        daily = sub.groupby(sub.index.date)['norm'].mean()
+        daily.index = pd.to_datetime(daily.index)
+        return daily
 
+    # No irradiance: daily PEAK power, then drop low-peak (cloudy / partial /
+    # sparsely-sampled) days so the trend is built from comparable clear days.
+    sub = df_f[['norm']].dropna()
+    daily = sub.groupby(sub.index.date)['norm'].quantile(PEAK_QUANTILE)
     daily.index = pd.to_datetime(daily.index)
+
+    if len(daily) >= CLEAR_DAY_MIN_DAYS:
+        reference_peak = daily.quantile(0.90)   # robust "clear-sky" peak level
+        if reference_peak and np.isfinite(reference_peak):
+            daily = daily[daily >= CLEAR_DAY_FRAC * reference_peak]
 
     return daily
 
@@ -793,6 +1071,14 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
                 tolerance_days=15):
     series = series.dropna().sort_index()
     yoy = []
+
+    # Denominator guard: a year-over-year ratio is curr/prev, so a small `prev`
+    # explodes it (e.g. a 257 W partial-day vs a normal day -> +465). Skip any
+    # pair whose prior-year value is implausibly low relative to the series'
+    # typical level, not just ~zero. This kills the artifact where un-normalized
+    # low-output days act as tiny denominators and send the rate to hundreds %.
+    median_level = float(np.median(series.values)) if len(series) else 0.0
+    prev_floor = max(eps, DENOM_FLOOR_FRAC * median_level)
 
     # Pair each point with the value closest to exactly one year earlier,
     # accepting any match within +/- tolerance_days rather than requiring the
@@ -811,8 +1097,8 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
         prev = series.iloc[j]
         curr = series.iloc[i]
 
-        if prev < eps:
-            continue
+        if prev < prev_floor:
+            continue  # prior-year value too low to be a trustworthy denominator
 
         ratio = curr / prev - 1
 

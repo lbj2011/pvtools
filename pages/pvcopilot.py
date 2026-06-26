@@ -13,8 +13,9 @@ from page_supporting_files.analysis_utils import parse_contents
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
-from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
+from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, low_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
+from page_supporting_files.analysis_utils import rate_is_plausible
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
@@ -383,18 +384,21 @@ def _duration_years(df):
         return None
 
 
-def _data_quality_notes(df, mapping):
+def _data_quality_notes(df, mapping, extra_notes=None):
     """Build a single collapsed disclosure listing missing-data items and what
     each implies for the degradation result.
+
+    `extra_notes` is an optional list of strings (e.g. the AC-fallback /
+    ambiguous-column warnings parse_contents emits) folded into the same toggle.
 
     Returns (n_notes, component). Component is None when there's nothing to
     flag, so the caller can skip rendering entirely.
     """
     mapping = mapping or {}
-    notes = []
+    notes = list(extra_notes or [])
 
-    if mapping.get("DC Power") == "computed_dc_power":
-        notes.append("No direct power channel — power computed as DC Voltage × DC Current.")
+    # (The "power computed as V x I" note already comes from parse_contents via
+    # extra_notes, so we don't add a duplicate here.)
 
     irra_key = mapping.get("Irradiance")
     has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
@@ -455,6 +459,37 @@ def _duration_block_banner(duration_years):
             "borderRadius": "10px",
             "color": "#991b1b",
             "fontSize": "14px",
+            "lineHeight": "1.5",
+            "fontFamily": "Arial, sans-serif",
+            "marginBottom": "16px",
+        },
+    )
+
+
+def _implausible_rate_banner(rd):
+    """Red banner shown above a degradation result whose rate is outside the
+    plausible band (positive or very large). Returns None when the rate is fine,
+    so callers can skip it. Real degradation is a small negative number; an
+    implausible value almost always means un-normalizable (no irradiance) or
+    too-sparse data."""
+    if rate_is_plausible(rd):
+        return None
+    return html.Div(
+        [
+            html.B(f"⚠️ Unreliable result ({rd:.1f}%/year). "),
+            "This is outside the physically plausible range for panel degradation "
+            "(which is a small negative number, roughly 0 to −3%/year). It usually "
+            "means the data has no irradiance to normalize against, or too few / too "
+            "sparse points — so this number reflects weather and sampling noise, not "
+            "real aging. Treat it as not trustworthy.",
+        ],
+        style={
+            "padding": "12px 14px",
+            "background": "#fef2f2",
+            "border": "1px solid #fecaca",
+            "borderRadius": "10px",
+            "color": "#991b1b",
+            "fontSize": "13px",
             "lineHeight": "1.5",
             "fontFamily": "Arial, sans-serif",
             "marginBottom": "16px",
@@ -4060,7 +4095,7 @@ def _simple_result_layout(stash):
             }),
         ], style={"marginBottom": "18px"}),
         html.Div([
-            _detail_row("Method", html.B("YoY", style={"color": VALUE_DETAIL})),
+            _detail_row("Method", html.B(stash.get("method", "YoY"), style={"color": VALUE_DETAIL})),
             _detail_row("Duration", html.B(f"{duration_years:.1f} years", style={"color": VALUE_DETAIL})),
             _detail_row("Window", html.B(f"{start}  →  {end}",
                         style={"fontFamily": "Arial, sans-serif", "color": VALUE_DETAIL})),
@@ -4085,8 +4120,14 @@ def _simple_result_layout(stash):
     # Same consolidated data-quality notes toggle as Advanced mode (no
     # irradiance / no temperature / computed power). Built from the detected
     # mapping carried in the stash; collapsed by default so it stays neat.
-    _n_notes, notes_component = _data_quality_notes(None, stash.get("mapped"))
-    pre_blocks = [notes_component] if notes_component is not None else []
+    _n_notes, notes_component = _data_quality_notes(
+        None, stash.get("mapped"), extra_notes=stash.get("mapping_notes"))
+    pre_blocks = []
+    _rate_banner = _implausible_rate_banner(rate_pct * 100)  # stash holds rate_pct = rd/100
+    if _rate_banner is not None:
+        pre_blocks.append(_rate_banner)
+    if notes_component is not None:
+        pre_blocks.append(notes_component)
 
     return html.Div(pre_blocks + [
         html.Div(summary_block, style={"marginBottom": "20px"}),
@@ -4742,12 +4783,22 @@ def run_filter(filter_clicks, upload_clicks,
             removed = (~mask & _current_mask).sum()
             _current_mask &= mask
             _filter_stats.append(f"Low irra-power filter removed {removed} points")
-        elif "low-irra-power" in selected_filters:
-            _filter_stats.append("⚠️ Low-irradiance/power filter skipped — requires irradiance.")
+        elif "low-irra-power" in selected_filters and not has_irr:
+            # No irradiance: drop night / low-output points by power alone so
+            # the trend isn't contaminated by uncleaned low-light readings.
+            normal_idx, _ = low_power_filter(_df_filtered, mapped_variables_dict)
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = (~mask & _current_mask).sum()
+            _current_mask &= mask
+            _filter_stats.append(f"Low-power filter (no irradiance) removed {removed} points")
 
         if "outlier" in selected_filters:
             _iqr = iqr_multiplier if iqr_multiplier is not None else 1.5
-            normal_idx, outlier_idx = identify_outliers_iqr(_df_filtered, "norm", iqr_multiplier=_iqr)
+            # Compute IQR fences on the points that survived prior filters (not
+            # the full frame) so night/low-output values don't dominate the
+            # distribution and flag real daytime production as outliers.
+            _kept = _df_filtered.loc[_df_filtered.index[_current_mask]]
+            normal_idx, outlier_idx = identify_outliers_iqr(_kept, "norm", iqr_multiplier=_iqr)
             mask = _df_filtered.index.isin(normal_idx)
             removed = (~mask & _current_mask).sum()
             _current_mask &= mask
@@ -5059,32 +5110,48 @@ def analyze_uploaded_data_callback(
         # is deliberately not capped.)
         def _compute_fast():
             daily_data = aggregate_daily(df_filtered, irra_key)
-            if selected_metric == "YOY":
-                return compute_yoy(daily_data,
-                                   rolling_window=yoy_window if yoy_window else 30,
-                                   iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
-            elif selected_metric == "LR":
-                return compute_lr(daily_data)
-            elif selected_metric == "HW":
-                return compute_hw(daily_data, period=hw_period if hw_period else 12)
-            elif selected_metric == "ARIMA":
-                return compute_arima(daily_data,
-                                     p=arima_p if arima_p is not None else 1,
-                                     d=arima_d if arima_d is not None else 1,
-                                     q=arima_q if arima_q is not None else 0,
-                                     seasonal_period=arima_s if arima_s else 12)
-            elif selected_metric == "CSD":
-                return compute_csd(daily_data, period=csd_period if csd_period else 12)
-            else:
-                raise ValueError(f"Unknown metric: {selected_metric}")
+
+            def _run(m):
+                if m == "YOY":
+                    return compute_yoy(daily_data,
+                                       rolling_window=yoy_window if yoy_window else 30,
+                                       iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
+                elif m == "LR":
+                    return compute_lr(daily_data)
+                elif m == "HW":
+                    return compute_hw(daily_data, period=hw_period if hw_period else 12)
+                elif m == "ARIMA":
+                    return compute_arima(daily_data,
+                                         p=arima_p if arima_p is not None else 1,
+                                         d=arima_d if arima_d is not None else 1,
+                                         q=arima_q if arima_q is not None else 0,
+                                         seasonal_period=arima_s if arima_s else 12)
+                elif m == "CSD":
+                    return compute_csd(daily_data, period=csd_period if csd_period else 12)
+                else:
+                    raise ValueError(f"Unknown metric: {m}")
+
+            rd, fig = _run(selected_metric)
+            used = selected_metric
+            # If the chosen method can't produce a rate (e.g. YoY on sparse,
+            # irregular data), fall back to Linear Regression rather than NaN.
+            if (rd is None or not np.isfinite(rd)) and selected_metric != "LR":
+                rd_lr, fig_lr = _run("LR")
+                if rd_lr is not None and np.isfinite(rd_lr):
+                    rd, fig, used = rd_lr, fig_lr, "LR"
+            return rd, fig, used
 
         try:
-            rd, fig = _run_with_timeout(_compute_fast)
+            rd, fig, _used_metric = _run_with_timeout(_compute_fast)
         except FutureTimeout:
             return [_no_data_alert("Calculating degradation is taking longer than expected — "
                                    "something may be wrong with your data. Check the file's "
                                    "formatting and columns, then try again."),
                     "", False, "Calculate Degradation", {}, {}, True]
+
+        # Reflect the method actually used (in case of fallback) in the result.
+        if _used_metric != selected_metric:
+            selected_metric = _used_metric
 
     # Restyle the figure
     if fig is not None:
@@ -5149,18 +5216,21 @@ def analyze_uploaded_data_callback(
 
     # The "no irradiance → un-normalized, less reliable" caveat is now shown in
     # the consolidated data-quality notes toggle right after Analyze (see
-    # _data_quality_notes()), so it's no longer repeated next to the result.
+    # _data_quality_notes()). Here we additionally flag a rate that came out
+    # physically implausible (positive / very large) so the user doesn't trust it.
+    _rate_banner = _implausible_rate_banner(rd)
 
-    degradation_layout = html.Div([
-        html.Div(summary_block, style={"marginBottom": "20px"}),
-        html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})),
-    ], className="slide-in-up", style={
-        "padding": "20px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
-        "marginTop": "16px",
-    })
+    degradation_layout = html.Div(
+        ([_rate_banner] if _rate_banner is not None else []) + [
+            html.Div(summary_block, style={"marginBottom": "20px"}),
+            html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})),
+        ], className="slide-in-up", style={
+            "padding": "20px",
+            "background": "#f8fafc",
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "10px",
+            "marginTop": "16px",
+        })
 
     result_dict = {
         "rate_pct_per_year": round(float(rate_pct) * 100, 4),
@@ -5850,13 +5920,13 @@ def analyze_uploaded_data_callback(
         # STEP_TIMEOUT_S so a malformed file can't hang the UI indefinitely.
         try:
             if data_source == "upload" and contents is not None:
-                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
+                df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, contents, filename)
                 if df is None:
                     return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, []
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
-                df, summary_table, mapped_variables_dict, code_read = _run_with_timeout(
+                df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, df=df)
             else:
                 return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
@@ -5894,7 +5964,8 @@ def analyze_uploaded_data_callback(
 
         # Consolidated, collapsible data-quality notes + (if <1yr) a hard-block banner,
         # surfaced right after analysis so the user sees implications before calculating.
-        _n_notes, notes_component = _data_quality_notes(df, mapped_variables_dict)
+        _n_notes, notes_component = _data_quality_notes(
+            df, mapped_variables_dict, extra_notes=mapping_notes)
         pre_blocks = []
         if duration_years is not None and duration_years < 1.0:
             pre_blocks.append(_duration_block_banner(duration_years))
@@ -7164,10 +7235,10 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
     try:
         if data_source == "example" and stored_df_json:
             df_raw = _df_from_store(stored_df_json)
-            df, summary_table, mapped, code_read = parse_contents(df=df_raw)
+            df, summary_table, mapped, code_read, mapping_notes = parse_contents(df=df_raw)
             source_name = _EXAMPLE_FRIENDLY.get(stored_file_name, "Example data")
         elif data_source == "upload" and contents is not None:
-            df, summary_table, mapped, code_read = parse_contents(contents, filename)
+            df, summary_table, mapped, code_read, mapping_notes = parse_contents(contents, filename)
             source_name = filename or "your file"
         else:
             return _simple_fail(_no_data_alert(
@@ -7214,6 +7285,7 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
     payload = {
         "df": df.to_json(date_format="iso", orient="split"),
         "mapped": mapped,
+        "mapping_notes": mapping_notes,
         "irra_key": irra_key,
         "source_name": source_name,
         "n_raw": int(len(df)),
@@ -7282,8 +7354,15 @@ def simple_stage_filter(pdata):
                 norm_lower=0.01, norm_upper_pct=99,
             )
             current_mask &= df_filtered.index.isin(normal_idx)
+        else:
+            # No irradiance: drop night / low-output points by power alone.
+            normal_idx, _ = low_power_filter(df_filtered, mapped)
+            current_mask &= df_filtered.index.isin(normal_idx)
 
-        normal_idx, _ = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=1.5)
+        # IQR on the points that survived prior filters (not the full frame), so
+        # night/low values don't pull the fences down and flag daytime as outliers.
+        _kept = df_filtered.loc[df_filtered.index[current_mask]]
+        normal_idx, _ = identify_outliers_iqr(_kept, "norm", iqr_multiplier=1.5)
         current_mask &= df_filtered.index.isin(normal_idx)
 
         df_good = df_filtered.loc[df_filtered.index[current_mask]]
@@ -7305,6 +7384,7 @@ def simple_stage_filter(pdata):
         "n_kept": int(len(df_good)),
         "method": pdata.get("method", "YOY"),
         "mapped": mapped,
+        "mapping_notes": pdata.get("mapping_notes", []),
     }
     method = pdata.get("method", "YOY")
     progress = {"started": True, "data": True, "filter": True,
@@ -7422,6 +7502,13 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         irra_key = pfiltered["irra_key"]
         daily_data = aggregate_daily(df_good, irra_key)
         rd, fig = compute_yoy(daily_data, rolling_window=30, iqr_multiplier=1.5)
+        _simple_method = "YoY"
+        # Fall back to Linear Regression if YoY can't produce a rate (sparse /
+        # irregular data) instead of returning NaN on an otherwise-fine dataset.
+        if rd is None or not np.isfinite(rd):
+            rd_lr, fig_lr = compute_lr(daily_data)
+            if rd_lr is not None and np.isfinite(rd_lr):
+                rd, fig, _simple_method = rd_lr, fig_lr, "LR"
     except Exception as e:
         return _fail(_no_data_alert(f"Degradation calculation failed: {e}"))
 
@@ -7452,7 +7539,7 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
 
     stash = {
         "rate_pct": float(rate_pct),
-        "method": "YOY",
+        "method": _simple_method,
         "duration_years": float(duration_years),
         "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
         "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
@@ -7463,9 +7550,10 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         "pct_kept": float(pct_kept),
         "trend_summary": trend_summary,
         "fig": fig.to_json() if fig is not None else None,
-        # Carry the detected mapping so the result can show the same
-        # data-quality notes toggle as Advanced mode.
+        # Carry the detected mapping + parse warnings so the result can show the
+        # same data-quality notes toggle as Advanced mode.
         "mapped": pfiltered.get("mapped") or {},
+        "mapping_notes": pfiltered.get("mapping_notes", []),
     }
 
     # Success: Step 3 DONE.  Reveal the result.

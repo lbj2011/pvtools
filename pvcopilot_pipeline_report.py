@@ -23,8 +23,10 @@ Files are numbered per run (1, 2, 3, ...) so the HIGHEST number is the latest ru
     reports/pvcopilot_results_<N>.csv            (focused results sheet)
 
 The focused results sheet has columns:
-    dataset | filtering_result | degradation_rate_pct_per_year | missing_maps |
+    dataset | total_duration_years | mean_power_w | filtering_result |
+    degradation_rate_pct_per_year | rate_reliable | missing_maps |
     statistical_trend_method | detected_or_created_columns | why_missing
+(mean_power_w is in watts; units are inferred from the power column name.)
 
 Usage (always with the pvtools env):
     conda activate pvtools
@@ -49,6 +51,7 @@ import fnmatch
 import argparse
 import textwrap
 import traceback
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
@@ -66,11 +69,13 @@ try:
 
     import numpy as np
     import pandas as pd
+    from tqdm import tqdm
 
     # The SAME functions PVcopilot's callbacks use.
     from page_supporting_files.analysis_utils import (
-        parse_contents, normalize, low_irra_power_filter, aggregate_daily,
-        compute_yoy, compute_lr, compute_hw, compute_arima, compute_csd,
+        parse_contents, normalize, low_irra_power_filter, low_power_filter,
+        aggregate_daily, compute_yoy, compute_lr, compute_hw, compute_arima,
+        compute_csd, rate_is_plausible,
     )
     from page_supporting_files.pvcopilot_filter_functions import (
         basic_value_filter, clear_sky_filter, identify_outliers_iqr,
@@ -97,6 +102,9 @@ REPORT_DIR = os.path.join(PROJECT_ROOT, "reports")
 
 # Mirror the app: cap each heavy stage so a pathological dataset can't hang the run.
 STEP_TIMEOUT_S = 10
+# Minimum rows surviving filtering to even attempt a degradation fit. Below this
+# the estimate is meaningless (and the methods can crash), so we refuse cleanly.
+MIN_FILTERED_ROWS = 20
 # Default filters match the app's `filter-options` default value.
 DEFAULT_FILTERS = ["timezone", "low-irra-power", "outlier", "clearsky"]
 
@@ -138,6 +146,18 @@ def _build_contents(path):
         data = f.read()
     b64 = base64.b64encode(data).decode()
     return f"data:application/octet-stream;base64,{b64}"
+
+
+def _power_unit_scale(col_name):
+    """Multiplier to convert a power column to WATTS, inferred from its name
+    (units aren't stored in the data): kW -> 1000, MW -> 1e6, else assume watts.
+    Computed V x I power ('computed_dc_power') is already in watts."""
+    name = (col_name or "").lower()
+    if "mw" in name:
+        return 1_000_000.0
+    if "kw" in name and "kwh" not in name:   # kWh would be energy, not power
+        return 1000.0
+    return 1.0
 
 
 def _duration_years(df):
@@ -186,33 +206,53 @@ def _run_filters(df, mapping):
             df_f, mapping, irr_thresh=300, power_ratio=0.02,
             norm_lower=0.01, norm_upper_pct=99)
         current_mask &= df_f.index.isin(normal_idx)
+    elif not has_irr:
+        # No irradiance: drop night / low-output points by power alone.
+        normal_idx, _ = low_power_filter(df_f, mapping)
+        current_mask &= df_f.index.isin(normal_idx)
 
     if "outlier" in DEFAULT_FILTERS:
-        normal_idx, _ = identify_outliers_iqr(df_f, "norm", iqr_multiplier=1.5)
+        # Compute IQR fences on the points that survived the prior filters, not
+        # the full frame -- otherwise night/low-output values dominate the
+        # distribution and real daytime production gets flagged as outliers
+        # (which, intersected with low_power_filter, can wipe out every row).
+        kept = df_f.loc[df_f.index[current_mask]]
+        normal_idx, _ = identify_outliers_iqr(kept, "norm", iqr_multiplier=1.5)
         current_mask &= df_f.index.isin(normal_idx)
 
     return df_f.loc[df_f.index[current_mask]]
 
 
+def _compute_one(daily, method):
+    if method == "YOY":
+        return compute_yoy(daily)[0]
+    if method == "LR":
+        return compute_lr(daily)[0]
+    if method == "HW":
+        return compute_hw(daily, period=12)[0]
+    if method == "ARIMA":
+        return compute_arima(daily, p=1, d=1, q=0, seasonal_period=12)[0]
+    if method == "CSD":
+        return compute_csd(daily, period=12)[0]
+    raise ValueError(f"Unknown method: {method}")
+
+
 def _run_degradation(df_filtered, mapping, method):
-    """aggregate_daily + the chosen statistical method. Returns rd (%/yr)."""
+    """aggregate_daily + the chosen method, with an LR fallback. Returns
+    (rd, method_used). YoY/HW/ARIMA/CSD need regular, dense, year-spanning data;
+    on sparse/irregular series they return NaN. Rather than failing a perfectly
+    good dataset, fall back to Linear Regression (which fits a trend to any set
+    of points). Returns method_used so the caller can note the fallback."""
     irra_key = mapping.get("Irradiance")
     if not irra_key or irra_key not in df_filtered.columns:
         irra_key = None
     daily = aggregate_daily(df_filtered, irra_key)
-    if method == "YOY":
-        rd, _ = compute_yoy(daily)
-    elif method == "LR":
-        rd, _ = compute_lr(daily)
-    elif method == "HW":
-        rd, _ = compute_hw(daily, period=12)
-    elif method == "ARIMA":
-        rd, _ = compute_arima(daily, p=1, d=1, q=0, seasonal_period=12)
-    elif method == "CSD":
-        rd, _ = compute_csd(daily, period=12)
-    else:
-        raise ValueError(f"Unknown method: {method}")
-    return rd
+    rd = _compute_one(daily, method)
+    if (rd is None or not np.isfinite(rd)) and method != "LR":
+        rd_lr = _compute_one(daily, "LR")
+        if rd_lr is not None and np.isfinite(rd_lr):
+            return rd_lr, "LR"
+    return rd, method
 
 
 # ---------------------------------------------------------------------------
@@ -228,14 +268,14 @@ def run_one(path, forced_method=None):
     rec = {
         "file": fname, "status": "ERROR", "stage": "load", "reason": "",
         "rows_raw": None, "rows_filtered": None, "filtering_result": None,
-        "duration_years": None, "mapped": {}, "method": None,
-        "rd_percent_per_year": None, "notes": [],
+        "duration_years": None, "mean_power_w": None, "mapped": {}, "method": None,
+        "rd_percent_per_year": None, "rate_reliable": None, "notes": [],
     }
 
     # ---- Stage 1: ANALYZE (load + LLM column identification) ----
     try:
         contents = _build_contents(path)
-        df, summary_table, mapping, _code = _with_timeout(
+        df, summary_table, mapping, _code, mapping_notes = _with_timeout(
             parse_contents, contents, fname)
     except FutureTimeout:
         rec.update(stage="analyze", reason=f"Analyze exceeded {STEP_TIMEOUT_S}s timeout.")
@@ -245,17 +285,50 @@ def run_one(path, forced_method=None):
                    reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
         return rec
 
+    # AC-fallback / ambiguous-column / time-by-value warnings from parse_contents.
+    # Recording them makes such rows WARNING and surfaces the reason in the JSON.
+    if mapping_notes:
+        rec["notes"].extend(mapping_notes)
+
     if df is None:
+        # A genuine read/parse failure is an ERROR (the tool broke on the file).
         rec.update(stage="analyze",
                    reason=_extract_text(summary_table).strip() or "File could not be read/parsed.")
         return rec
     if not mapping:
-        rec.update(stage="analyze",
-                   reason=_extract_text(summary_table).strip() or "LLM column-mapping failed.")
+        # No PV variables could be identified -> not enough information to solve,
+        # which is a clean refusal (BLOCKED), not a tool failure.
+        rec.update(status="BLOCKED", stage="analyze",
+                   reason="Not enough information: no usable PV variables could be "
+                          "identified in this dataset.")
         return rec
 
     rec["mapped"] = dict(mapping)
     rec["rows_raw"] = int(len(df))
+
+    # Mean DC power across ALL parsed rows (pre-filter), normalized to WATTS.
+    # Units aren't in the data, so we infer them from the power column's name
+    # (kW/MW -> scaled; otherwise watts). Computed V x I power is already watts.
+    # Captured here so even BLOCKED datasets report it.
+    _pk = mapping.get("DC Power")
+    if _pk and _pk in df.columns:
+        try:
+            _p = pd.to_numeric(df[_pk], errors="coerce")
+            _mean = float(_p.mean())
+            rec["mean_power_w"] = round(_mean * _power_unit_scale(_pk), 1) if np.isfinite(_mean) else None
+            # Near-constant power (tiny coefficient of variation) means the column
+            # is daily-aggregated / a non-instantaneous channel: there's no
+            # night/cloud variation to filter, so retention will look very high
+            # AND the degradation signal is weak. Flag it so a 99%-retained row
+            # isn't mistaken for "99% clear-sky-quality data".
+            _cov = float(_p.std() / _mean) if _mean else 0.0
+            if 0 < _cov < 0.1:
+                rec["notes"].append(
+                    f"Power column '{_pk}' is near-constant (variation {_cov:.1%}) — "
+                    "looks daily-aggregated, not instantaneous. Little to filter "
+                    "(retention will be high) and the degradation signal is weak.")
+        except Exception:
+            rec["mean_power_w"] = None
 
     # ---- Stage 2 (FIRST GATE): DURATION -------------------------------------
     # Block purely on HOW LONG the data spans, before requiring any specific
@@ -272,16 +345,18 @@ def run_one(path, forced_method=None):
         return rec
 
     # ---- Required columns (only reached by data that is long enough) --------
+    # No usable Time/DC Power column means there isn't enough information to
+    # solve the problem -> BLOCKED (clean refusal), not ERROR (a tool failure).
     missing_required = [v for v in ("DC Power", "Time") if v not in mapping]
     if missing_required:
-        rec.update(status="ERROR", stage="analyze",
-                   reason="Missing required column(s): " + ", ".join(missing_required)
-                          + ". Need both Time and DC Power.")
+        rec.update(status="BLOCKED", stage="analyze",
+                   reason="Not enough information: no usable "
+                          + " and ".join(missing_required)
+                          + " column found, so degradation can't be computed.")
         return rec
 
-    # Data-quality notes (what the app shows in its toggle).
-    if mapping.get("DC Power") == "computed_dc_power":
-        rec["notes"].append("Power computed as V*I (no direct power channel).")
+    # Data-quality notes. (The "power computed as V x I" note already comes from
+    # parse_contents via mapping_notes, so we don't add a duplicate here.)
     has_irr = bool(mapping.get("Irradiance")) and mapping["Irradiance"] in df.columns
     has_temp = bool(mapping.get("Module temperature")) and mapping["Module temperature"] in df.columns
     if not has_irr:
@@ -317,14 +392,16 @@ def run_one(path, forced_method=None):
         pct = 100.0 * rec["rows_filtered"] / rec["rows_raw"]
         rec["filtering_result"] = (f"{pct:.1f}% retained "
                                    f"({rec['rows_filtered']}/{rec['rows_raw']} rows)")
-    if len(df_filtered) == 0:
-        rec.update(status="ERROR", stage="filter",
-                   reason="All rows removed by filtering -- nothing left to analyze.")
+    if len(df_filtered) < MIN_FILTERED_ROWS:
+        rec.update(status="BLOCKED", stage="filter",
+                   reason=f"Only {len(df_filtered)} row(s) survived filtering "
+                          f"(need >= {MIN_FILTERED_ROWS}) -- not enough clean data to "
+                          "estimate degradation. Correctly refused rather than guessing.")
         return rec
 
-    # ---- Stage 4: DEGRADATION ----
+    # ---- Stage 4: DEGRADATION (with LR fallback for sparse data) ----
     try:
-        rd = _with_timeout(_run_degradation, df_filtered, mapping, method)
+        rd, method_used = _with_timeout(_run_degradation, df_filtered, mapping, method)
     except FutureTimeout:
         rec.update(stage="degradation", reason=f"Degradation exceeded {STEP_TIMEOUT_S}s timeout.")
         return rec
@@ -333,12 +410,28 @@ def run_one(path, forced_method=None):
                    reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
         return rec
 
+    if method_used != method:
+        rec["notes"].append(
+            f"{method} produced no rate (data too sparse/irregular for it); "
+            f"fell back to Linear Regression.")
+        method = method_used
+        rec["method"] = method_used
+
     if rd is None or not np.isfinite(rd):
         rec.update(status="ERROR", stage="degradation",
                    reason=f"{method} returned no finite degradation rate (got {rd}).")
         return rec
 
     rec["rd_percent_per_year"] = round(float(rd), 4)
+    # Flag rates outside the plausible band (positive / very large) -- almost
+    # always un-normalizable (no irradiance) or too-sparse data, not real aging.
+    rec["rate_reliable"] = rate_is_plausible(rd)
+    if not rec["rate_reliable"]:
+        rec["notes"].append(
+            f"Degradation rate {rd:.1f} %/yr is outside the plausible range "
+            "(real degradation is a small negative number) — treat as UNRELIABLE; "
+            "usually caused by missing irradiance or too few/sparse points.")
+
     rec["stage"] = "done"
     rec["status"] = "WARNING" if rec["notes"] else "GOOD"
     rec["reason"] = (f"{method} degradation rate = {rd:.3f} %/yr"
@@ -420,7 +513,8 @@ def write_results_csv(results, path):
     """Focused results sheet: one row per dataset with the tool's actual outputs
     -- the filtering result and degradation rate (when they exist), the columns
     the tool detected/created, and (when either output is missing) why."""
-    cols = ["dataset", "filtering_result", "degradation_rate_pct_per_year",
+    cols = ["dataset", "total_duration_years", "mean_power_w",
+            "filtering_result", "degradation_rate_pct_per_year", "rate_reliable",
             "missing_maps", "statistical_trend_method",
             "detected_or_created_columns", "why_missing"]
     with open(path, "w", newline="") as f:
@@ -429,9 +523,16 @@ def write_results_csv(results, path):
         for r in results:
             w.writerow({
                 "dataset": r["file"],
+                "total_duration_years":
+                    "" if r.get("duration_years") is None else r["duration_years"],
+                "mean_power_w":
+                    "" if r.get("mean_power_w") is None else r["mean_power_w"],
                 "filtering_result": r.get("filtering_result") or "",
                 "degradation_rate_pct_per_year":
                     "" if r.get("rd_percent_per_year") is None else r["rd_percent_per_year"],
+                "rate_reliable":
+                    "" if r.get("rate_reliable") is None
+                    else ("yes" if r["rate_reliable"] else "no"),
                 "missing_maps": _missing_maps(r.get("mapped")),
                 "statistical_trend_method": r.get("method") or "",
                 "detected_or_created_columns": _format_detected_columns(r.get("mapped")),
@@ -442,26 +543,6 @@ def write_results_csv(results, path):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def _print_legend():
-    """Explain the four verdicts before the run begins."""
-    print("=" * 78)
-    print("PVcopilot pipeline -- result legend")
-    print("=" * 78)
-    rows = [
-        ("GOOD",    "Full pipeline ran and produced a finite degradation rate (no caveats)."),
-        ("WARNING", "Ran and produced a rate, but with caveats (no irradiance/temperature,"),
-        ("",        "  or YoY fell back to LR). Tool worked; result is less reliable."),
-        ("BLOCKED", "Tool correctly REFUSED -- data is under 1 year, so degradation isn't"),
-        ("",        "  meaningful. This is expected behavior, NOT a failure."),
-        ("ERROR",   "Tool genuinely FAILED -- unreadable file, no column mapping, a filter"),
-        ("",        "  crashed, all rows filtered out, >10s timeout, or no valid rate."),
-        ("",        "  Check each ERROR's 'reason' and 'stage' in the report."),
-    ]
-    for label, text in rows:
-        print(f"  {label:<8}{text}")
-    print("=" * 78 + "\n")
-
-
 def _next_run_number():
     """Next sequential run number: 1 + the highest already in reports/.
     Numbered filenames mean the highest number is always the latest run."""
@@ -516,15 +597,16 @@ def main():
               f"(supported: {', '.join(SUPPORTED)}).")
         return 1
 
-    _print_legend()
-    print(f"Running {len(files)} dataset(s) through the PVcopilot pipeline...\n")
+    # Run quietly: suppress the per-dataset chatter and the noisy prints from the
+    # filter functions (they go to stdout), and show only a tqdm progress bar
+    # (on stderr) with %done + ETA. The summary still prints at the end.
     results = []
-    for path in files:
-        fname = os.path.basename(path)
-        print(f"  - {fname} ...", flush=True, end=" ")
-        rec = run_one(path, forced_method=args.method)
-        print(rec["status"])
-        results.append(rec)
+    _bar = tqdm(files, desc="PVcopilot pipeline", unit="dataset", file=sys.stderr)
+    with open(os.devnull, "w") as _devnull:
+        for path in _bar:
+            with redirect_stdout(_devnull):
+                rec = run_one(path, forced_method=args.method)
+            results.append(rec)
 
     counts = _counts(results)
     os.makedirs(REPORT_DIR, exist_ok=True)

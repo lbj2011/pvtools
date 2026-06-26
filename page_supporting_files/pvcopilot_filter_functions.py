@@ -254,8 +254,23 @@ def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
         print(f"  Temperature [{temp_min}, {temp_max}] °C  : removed {(~df[temp_key].between(temp_min, temp_max)).sum()} pts")
 
     if power_key and power_key in df.columns:
-        mask &= df[power_key] >= power_min
-        print(f"  Power >= {power_min} W               : removed {(df[power_key] < power_min).sum()} pts")
+        p = pd.to_numeric(df[power_key], errors="coerce")
+        mask &= p >= power_min
+        print(f"  Power >= {power_min} W               : removed {(p < power_min).sum()} pts")
+
+        # Adaptive upper bound: drop absurd sensor spikes (e.g. 4.5e14 W) that
+        # have no fixed physical ceiling. Anything above 5x the 99th percentile
+        # of positive power is non-physical. Generous on purpose -- real data
+        # never exceeds it (q99 is already near the true peak), so this only
+        # ever removes glitches and can't zero out a dataset.
+        pos = p[p > 0]
+        if len(pos) > 20:
+            spike_cap = 5.0 * pos.quantile(0.99)
+            if np.isfinite(spike_cap) and spike_cap > 0:
+                n_spikes = int((p > spike_cap).sum())
+                if n_spikes:
+                    mask &= p <= spike_cap
+                    print(f"  Power spike cap (<= 5x q99)        : removed {n_spikes} pts")
 
     normal_indices  = df.index[mask]
     outlier_indices = df.index[~mask]
