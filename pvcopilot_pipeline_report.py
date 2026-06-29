@@ -102,6 +102,10 @@ REPORT_DIR = os.path.join(PROJECT_ROOT, "reports")
 
 # Mirror the app: cap each heavy stage so a pathological dataset can't hang the run.
 STEP_TIMEOUT_S = 10
+# The analyze stage makes an LLM call (bounded client-side in analysis_utils),
+# which can spike or retry once on a busy gateway, so give it more headroom than
+# the pure-pandas filter/degradation stages.
+ANALYZE_TIMEOUT_S = 25
 # Minimum rows surviving filtering to even attempt a degradation fit. Below this
 # the estimate is meaningless (and the methods can crash), so we refuse cleanly.
 MIN_FILTERED_ROWS = 20
@@ -276,7 +280,7 @@ def run_one(path, forced_method=None):
     try:
         contents = _build_contents(path)
         df, summary_table, mapping, _code, mapping_notes = _with_timeout(
-            parse_contents, contents, fname)
+            parse_contents, contents, fname, timeout=ANALYZE_TIMEOUT_S)
     except FutureTimeout:
         rec.update(stage="analyze", reason=f"Analyze exceeded {STEP_TIMEOUT_S}s timeout.")
         return rec
@@ -284,7 +288,6 @@ def run_one(path, forced_method=None):
         rec.update(stage="analyze",
                    reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
         return rec
-
     # AC-fallback / computed-power / time-by-value warnings from parse_contents.
     # Recording them makes such rows WARNING and surfaces the reason in the JSON.
     if mapping_notes:

@@ -30,13 +30,25 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Switching providers also swaps the model name (CBORG prefixes it with "openai/").
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "cborg").lower()
 
+# Bound every LLM HTTP call. Without an explicit timeout the SDK waits
+# indefinitely, and a single hung request blocks the worker thread it runs on
+# forever (the step-timeout wrapper can't kill a thread) -- a few of those
+# saturate the thread pool and make EVERY later call time out. max_retries is
+# also capped: the default (2) silently triples latency on a flaky gateway,
+# which is exactly how a 3-4s call balloons past the step timeout.
+LLM_TIMEOUT_S = 12.0
+LLM_MAX_RETRIES = 1
+
 if LLM_PROVIDER == "openai":
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    client = openai.OpenAI(api_key=OPENAI_API_KEY,
+                           timeout=LLM_TIMEOUT_S, max_retries=LLM_MAX_RETRIES)
     LLM_MODEL = "gpt-5.4-nano"
 else:  # cborg
     client = openai.OpenAI(
         api_key=cborg_API_KEY,
         base_url="https://api.cborg.lbl.gov",
+        timeout=LLM_TIMEOUT_S,
+        max_retries=LLM_MAX_RETRIES,
     )
     LLM_MODEL = "openai/gpt-5.4-nano"
 
@@ -44,15 +56,19 @@ def _time_to_years(index):
     return (index - index[0]).days / 365.25
 
 
-# Column usability is judged primarily by MISSINGNESS rate (non-null / total),
-# the standard convention:
-#   missing > MAX_MISSING_FRAC  -> drop (too sparse to trust; e.g. 4/1000 = 99.6%)
-#   FLAG_MISSING_FRAC..MAX      -> keep but flag ("treat carefully")
-#   < FLAG_MISSING_FRAC         -> keep and fill the few gaps
-# A small absolute floor also applies so a tiny-but-full column isn't selected.
-MAX_MISSING_FRAC = 0.5      # drop columns more than 50% missing
-FLAG_MISSING_FRAC = 0.05    # flag columns 5-50% missing
-MIN_VALID_POINTS = 10       # secondary absolute floor
+# Column usability is judged by how much REAL data it carries -- both an absolute
+# count and the missingness rate:
+#   non-null < MIN_VALID_POINTS  -> drop (essentially empty; e.g. a few stray cells)
+#   missing  > MAX_MISSING_FRAC  -> drop (a near-dead sensor, e.g. 94% missing)
+#   FLAG_MISSING_FRAC..MAX       -> keep but flag ("treat carefully")
+#   < FLAG_MISSING_FRAC          -> keep and fill the few gaps
+# The ceiling is deliberately high: a column that is, say, 64% missing but still
+# has >1000 real values (a DC channel logged less often than the AC meter) is
+# perfectly usable and must NOT be discarded in favor of a worse fallback. Only
+# genuinely dead/near-empty columns are dropped.
+MAX_MISSING_FRAC = 0.9      # drop only near-dead columns (>90% missing)
+FLAG_MISSING_FRAC = 0.05    # flag columns 5-90% missing as gappy
+MIN_VALID_POINTS = 10       # absolute floor: fewer real values than this -> drop
 # Min plausible irradiance peak (95th pct, W/m^2). Below this the column is the
 # wrong units / a dead sensor, so we ignore it rather than void every row.
 MIN_IRRADIANCE_PEAK = 50.0
@@ -95,7 +111,16 @@ def _best_by_data(df, cols):
         stats[c] = (non_null, float(s.var(skipna=True) or 0.0))
     if not viable:
         return None, []
-    best = max(viable, key=lambda c: (stats[c][0], stats[c][1]))
+    # Among candidates whose completeness is essentially tied with the best
+    # (within ~2% or 50 rows), defer to the candidate ORDER -- the LLM lists
+    # best-first, so a system-total 'dc_power' ranks ahead of a per-inverter
+    # 'inv1_dc_power' and isn't lost to it over a handful of extra rows. Only a
+    # MEANINGFULLY more complete column overrides that order.
+    order = {c: i for i, c in enumerate(cols)}
+    max_non_null = max(stats[c][0] for c in viable)
+    tol = max(1, int(0.02 * max_non_null))   # ~2% of the best, relative
+    near_best = [c for c in viable if stats[c][0] >= max_non_null - tol]
+    best = min(near_best, key=lambda c: order.get(c, 1 << 30))
     return best, viable
 
 
@@ -395,7 +420,10 @@ def parse_contents(contents=None, filename=None, df=None):
                 temperature=0,
                 seed=0,
             )
-        except Exception:
+        except (openai.BadRequestError, openai.UnprocessableEntityError):
+            # Only retry without the params when the model REJECTS them (a 4xx).
+            # A timeout / connection / rate-limit error must NOT trigger a second
+            # full call here -- that would stack another timeout on top.
             response = client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[{"role": "user", "content": prompt}],
@@ -510,7 +538,7 @@ def parse_contents(contents=None, filename=None, df=None):
             best, viable = _best_by_data(df, _cands(ac_role))
             if best:
                 mapping_notes.append(
-                    f"No DC {label} found — using AC {label} '{best}' "
+                    f"No usable DC {label} column — using AC {label} '{best}' "
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note(ac_role, best, viable, ac=True)
                 return best, "ac"
@@ -546,7 +574,7 @@ def parse_contents(contents=None, filename=None, df=None):
             if best_ac_p:
                 p_col, p_side = best_ac_p, "ac"
                 mapping_notes.append(
-                    f"No DC power found — using AC power '{best_ac_p}' "
+                    f"No usable DC power column — using AC power '{best_ac_p}' "
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note("AC Power", best_ac_p, viable_ac_p, ac=True)
             elif v_col and i_col:
@@ -613,10 +641,17 @@ def parse_contents(contents=None, filename=None, df=None):
                     f"Auto-selected irradiance '{irr_col}' (in W/m²); other irradiance "
                     "columns were the wrong units and were skipped.")
         elif all_irr:
-            # Irradiance-named columns exist but none are usably scaled.
-            mapping_notes.append(
-                "Irradiance column(s) present but not in W/m² (wrong units / dead sensor) "
-                "— ignoring irradiance and using raw power.")
+            # Irradiance-named columns exist but none were usable. Say WHY: a
+            # column in the right W/m² range that still got dropped was too
+            # sparse (mostly missing); otherwise it was the wrong units.
+            if valid_irr:
+                mapping_notes.append(
+                    "Irradiance column(s) present and in W/m² but too sparse "
+                    "(mostly missing) — ignoring irradiance and using raw power.")
+            else:
+                mapping_notes.append(
+                    "Irradiance column(s) present but not in W/m² (wrong units / dead sensor) "
+                    "— ignoring irradiance and using raw power.")
         temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
         _ambiguity_note("Module temperature", temp_col, temp_viable)
 

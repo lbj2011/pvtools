@@ -43,8 +43,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 # (Python can't force-kill a thread). That's acceptable — the only requirement
 # is that the *UI* stops waiting and reports the problem.
 # =============================================================================
-_TIMEOUT_POOL = ThreadPoolExecutor(max_workers=4)
+_TIMEOUT_POOL = ThreadPoolExecutor(max_workers=8)
 STEP_TIMEOUT_S = 10
+# The Analyze step makes an LLM call (column identification), which legitimately
+# takes a few seconds and can spike or retry once on a busy gateway. Give it more
+# headroom than the pure-pandas filter/compute steps so a slow-but-fine call
+# doesn't surface as a false "timeout" to the user.
+ANALYZE_TIMEOUT_S = 25
 
 
 def _run_with_timeout(fn, *args, timeout=STEP_TIMEOUT_S, **kwargs):
@@ -384,12 +389,17 @@ def _duration_years(df):
         return None
 
 
-def _data_quality_notes(df, mapping, extra_notes=None):
+def _data_quality_notes(df, mapping, extra_notes=None, include_missing=True):
     """Build a single collapsed disclosure listing missing-data items and what
     each implies for the degradation result.
 
     `extra_notes` is an optional list of strings (e.g. the AC-fallback /
     ambiguous-column warnings parse_contents emits) folded into the same toggle.
+
+    `include_missing`: when False, the missing-irradiance / missing-temperature
+    items are omitted because the caller (Advanced mode) shows them inline under
+    each variable row instead of in this consolidated panel. Simple mode, which
+    has no editable mapping table, leaves it True.
 
     Returns (n_notes, component). Component is None when there's nothing to
     flag, so the caller can skip rendering entirely.
@@ -397,20 +407,18 @@ def _data_quality_notes(df, mapping, extra_notes=None):
     mapping = mapping or {}
     notes = list(extra_notes or [])
 
-    # (The "power computed as V x I" note already comes from parse_contents via
-    # extra_notes, so we don't add a duplicate here.)
+    if include_missing:
+        irra_key = mapping.get("Irradiance")
+        has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
+        if not has_irr:
+            notes.append("No irradiance column — power is NOT irradiance-normalized, so the "
+                         "degradation rate is not weather-corrected and is less reliable.")
 
-    irra_key = mapping.get("Irradiance")
-    has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
-    if not has_irr:
-        notes.append("No irradiance column — power is NOT irradiance-normalized, so the "
-                     "degradation rate is not weather-corrected and is less reliable.")
-
-    temp_key = mapping.get("Module temperature")
-    has_temp = bool(temp_key) and (df is None or temp_key in getattr(df, "columns", []))
-    if has_irr and not has_temp:
-        notes.append("No module-temperature column — normalization uses irradiance only, "
-                     "with no temperature correction.")
+        temp_key = mapping.get("Module temperature")
+        has_temp = bool(temp_key) and (df is None or temp_key in getattr(df, "columns", []))
+        if has_irr and not has_temp:
+            notes.append("No module-temperature column — normalization uses irradiance only, "
+                         "with no temperature correction.")
 
     if not notes:
         return 0, None
@@ -4221,6 +4229,45 @@ def _alt_hint(others):
     })
 
 
+# What a MISSING variable means for the analysis, shown inline under its row.
+# (message, is_required): required variables block degradation entirely (red);
+# the rest only reduce accuracy or disable PVPRO (amber).
+_MISSING_HINT = {
+    "DC Power": ("Required — degradation can't run without power. Select a power "
+                 "column (or pick voltage + current and it's derived as V × I).", True),
+    "Time": ("Required — degradation can't run without timestamps. Select the "
+             "time column.", True),
+    "DC Voltage": ("Not detected — PVPRO physics analysis can't be run "
+                   "(it needs both voltage and current).", False),
+    "DC Current": ("Not detected — PVPRO physics analysis can't be run "
+                   "(it needs both voltage and current).", False),
+    "Irradiance": ("Not detected — the rate won't be weather-normalized, so it's "
+                   "less reliable.", False),
+    "Module temperature": ("Not detected — no temperature correction will be "
+                           "applied.", False),
+}
+
+
+def _missing_hint(metric):
+    """Inline warning shown under a row whose variable wasn't detected, spelling
+    out what its absence means (and, for V/I, that PVPRO can't run)."""
+    entry = _MISSING_HINT.get(metric)
+    if not entry:
+        return ""
+    # Red when the missing variable BLOCKS degradation (power/time); yellow when
+    # degradation can still be calculated, just with a caveat (irradiance, temp,
+    # voltage/current → no PVPRO).
+    msg, required = entry
+    color = "#b91c1c" if required else "#ca8a04"   # red (blocker) / yellow (caveat)
+    return html.Div([
+        html.Span("⚠ ", style={"fontWeight": "700"}),
+        html.Span(msg),
+    ], style={
+        "marginTop": "4px", "fontSize": "11.5px", "color": color,
+        "fontFamily": "Arial, sans-serif", "lineHeight": "1.35",
+    })
+
+
 def build_variable_mapping_table(mapped_variables_dict, columns,
                                  time_in_index=False, status_children=None,
                                  alternatives=None):
@@ -4304,8 +4351,10 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     clearable=True,
                     style={"fontSize": "13px"},
                 ),
-                # Inline hint: other valid columns the user could switch to.
-                _alt_hint(alternatives.get(metric)),
+                # Inline note under the row: if the variable is missing, what
+                # that means for the analysis; otherwise, other valid columns.
+                _missing_hint(metric) if not detected
+                else _alt_hint(alternatives.get(metric)),
             ], style={"flex": "1"}),
         ], style={
             "display": "flex", "alignItems": "flex-start", "gap": "14px",
@@ -5943,13 +5992,13 @@ def analyze_uploaded_data_callback(
         try:
             if data_source == "upload" and contents is not None:
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
-                    parse_contents, contents, filename)
+                    parse_contents, contents, filename, timeout=ANALYZE_TIMEOUT_S)
                 if df is None:
                     return summary_table, {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, []
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
-                    parse_contents, df=df)
+                    parse_contents, df=df, timeout=ANALYZE_TIMEOUT_S)
             else:
                 return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
                         {}, None, "", False, "Analyze Data", None, "", filename, None, [])
@@ -5984,13 +6033,14 @@ def analyze_uploaded_data_callback(
         except Exception:
             figures_output = html.Div("Figure generation failed.", style={"color": ACCENT})
 
-        # Consolidated, collapsible data-quality notes + (if <1yr) a hard-block banner,
-        # surfaced right after analysis so the user sees implications before calculating.
-        # Column-ambiguity ("also valid: …") hints live ONLY inline under each
-        # dropdown (see build_variable_mapping_table); they're intentionally not
-        # in mapping_notes, so the consolidated panel keeps the other caveats only.
+        # Missing-variable warnings (no irradiance / temperature / voltage /
+        # current → what each implies, incl. "no PVPRO") are rendered INLINE
+        # under each row in build_variable_mapping_table, not in this panel
+        # (include_missing=False). Column-ambiguity "also valid: …" hints are
+        # likewise inline. The consolidated panel keeps only the remaining
+        # transformation caveats from mapping_notes (AC fallback, computed V×I).
         _n_notes, notes_component = _data_quality_notes(
-            df, mapped_variables_dict, extra_notes=mapping_notes)
+            df, mapped_variables_dict, extra_notes=mapping_notes, include_missing=False)
         pre_blocks = []
         if duration_years is not None and duration_years < 1.0:
             pre_blocks.append(_duration_block_banner(duration_years))
