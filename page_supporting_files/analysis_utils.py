@@ -53,6 +53,9 @@ def _time_to_years(index):
 MAX_MISSING_FRAC = 0.5      # drop columns more than 50% missing
 FLAG_MISSING_FRAC = 0.05    # flag columns 5-50% missing
 MIN_VALID_POINTS = 10       # secondary absolute floor
+# Min plausible irradiance peak (95th pct, W/m^2). Below this the column is the
+# wrong units / a dead sensor, so we ignore it rather than void every row.
+MIN_IRRADIANCE_PEAK = 50.0
 
 
 def _missing_frac(df, col):
@@ -99,6 +102,9 @@ def _best_by_data(df, cols):
 _TIME_NAME_RE = re.compile(
     r'(?:^|[^a-z])(timestamp|datetime|measured_on|meas_on|date|time|utc|epoch)(?:[^a-z]|$)',
     re.I)
+
+_IRR_NAME_RE = re.compile(
+    r'irradian|irrad|poa|ghi|dni|pyran|insol|solar|g_poa|ref_cell|isc_ref', re.I)
 
 
 def _name_looks_like_time(name):
@@ -409,12 +415,20 @@ def parse_contents(contents=None, filename=None, df=None):
                 v = [v]
             return [c for c in v if isinstance(c, str) and c and c != "N/A"]
 
+        # Per-role list of the OTHER valid columns the user could switch to
+        # (keyed by the canonical mapping-table role). Surfaced inline under the
+        # matching dropdown in Advanced mode.
+        alternatives = {}
+        _CANON_ROLE = {"AC Power": "DC Power", "AC Voltage": "DC Voltage",
+                       "AC Current": "DC Current"}
+
         def _ambiguity_note(role, chosen, viable, ac=False):
+            # Record the OTHER valid columns for this role. These are surfaced
+            # ONLY inline under the matching dropdown in Advanced mode -- we
+            # deliberately do NOT add them to mapping_notes (the consolidated
+            # warning panel), so the message lives in exactly one place.
             if chosen and len(viable) > 1:
-                mapping_notes.append(
-                    f"Multiple columns matched {'AC ' if ac else ''}{role} "
-                    f"({', '.join(viable)}); using '{chosen}' (most data). "
-                    f"Change it in Advanced mode if it's wrong.")
+                alternatives[_CANON_ROLE.get(role, role)] = [c for c in viable if c != chosen]
 
         # ----------------------------------
         # Deterministic safety net: pair up DC Voltage / DC Current.
@@ -566,9 +580,43 @@ def parse_contents(contents=None, filename=None, df=None):
                     else "Current computed as AC Power / AC Voltage — approximate "
                          "(ignores power factor).")
 
-        # Irradiance / Module temperature (no AC/DC variant).
-        irr_col, irr_viable = _best_by_data(df, _cands("Irradiance"))
-        _ambiguity_note("Irradiance", irr_col, irr_viable)
+        # Irradiance. The filters assume W/m^2 (clear-sky peaks ~800-1200), so a
+        # column whose peak is far below that is the wrong units / a dead sensor
+        # and would void every row. Many sites expose several irradiance channels
+        # at different scales, so: (1) prefer an LLM candidate that's in plausible
+        # W/m^2 units; (2) if none are, scan ALL irradiance-named columns for a
+        # properly-scaled one; (3) only if nothing is usable, drop irradiance and
+        # fall back to the power-only path.
+        def _irr_peak(c):
+            return pd.to_numeric(df[c], errors="coerce").quantile(0.95)
+
+        def _wm2_ok(c):
+            return c in df.columns and np.isfinite(_irr_peak(c)) and _irr_peak(c) >= MIN_IRRADIANCE_PEAK
+
+        # Consider EVERY irradiance column -- the LLM's candidates plus a scan of
+        # all irradiance-named columns -- but keep only the ones actually in W/m^2.
+        # Pick the one with the most data; the ambiguity warning then offers ONLY
+        # the other VALID columns as alternatives (never the mis-scaled ones).
+        irr_named = [c for c in df.columns if _IRR_NAME_RE.search(str(c))]
+        all_irr = list(dict.fromkeys([c for c in _cands("Irradiance") if c in df.columns]
+                                     + irr_named))
+        valid_irr = [c for c in all_irr if _wm2_ok(c)]
+        irr_col, irr_viable = _best_by_data(df, valid_irr)
+
+        if irr_col is not None:
+            # Warn (with ONLY the valid alternatives) when more than one works.
+            _ambiguity_note("Irradiance", irr_col, irr_viable)
+            # If the LLM's own picks were mis-scaled and we recovered a valid one,
+            # say so (so a single valid column is still explained).
+            if not any(_wm2_ok(c) for c in _cands("Irradiance") if c in df.columns):
+                mapping_notes.append(
+                    f"Auto-selected irradiance '{irr_col}' (in W/m²); other irradiance "
+                    "columns were the wrong units and were skipped.")
+        elif all_irr:
+            # Irradiance-named columns exist but none are usably scaled.
+            mapping_notes.append(
+                "Irradiance column(s) present but not in W/m² (wrong units / dead sensor) "
+                "— ignoring irradiance and using raw power.")
         temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
         _ambiguity_note("Module temperature", temp_col, temp_viable)
 
@@ -636,6 +684,12 @@ def parse_contents(contents=None, filename=None, df=None):
         if not time_in_index and time_col and time_col in df.columns:
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             df = df.dropna(subset=[time_col]).set_index(time_col)
+
+        # Stash the per-role alternatives on the frame so the Advanced UI can
+        # render them inline under each dropdown (set AFTER any re-index so it
+        # lands on the final df object the caller receives).
+        df.attrs["mapping_alternatives"] = {
+            r: cols for r, cols in alternatives.items() if cols}
 
         # Build the read-only mapping table for display (canonical roles).
         display_roles = ["Time", "DC Power", "DC Voltage", "DC Current",

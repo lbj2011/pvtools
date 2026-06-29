@@ -285,10 +285,18 @@ def run_one(path, forced_method=None):
                    reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
         return rec
 
-    # AC-fallback / ambiguous-column / time-by-value warnings from parse_contents.
+    # AC-fallback / computed-power / time-by-value warnings from parse_contents.
     # Recording them makes such rows WARNING and surfaces the reason in the JSON.
     if mapping_notes:
         rec["notes"].extend(mapping_notes)
+
+    # Column ambiguity is no longer a mapping_note (it's a UI-only inline hint),
+    # so read it from df.attrs to keep flagging those rows in the batch report.
+    alts = getattr(df, "attrs", {}).get("mapping_alternatives") if df is not None else None
+    if alts:
+        for role, others in alts.items():
+            rec["notes"].append(
+                f"Multiple columns matched {role}; also valid: {', '.join(others)}.")
 
     if df is None:
         # A genuine read/parse failure is an ERROR (the tool broke on the file).

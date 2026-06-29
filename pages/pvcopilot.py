@@ -4205,8 +4205,25 @@ _MAP_METRICS = [
 _REQUIRED_FOR_DEGRADATION = {"DC Power", "Time"}
 
 
+def _alt_hint(others):
+    """A subtle one-line hint listing other valid columns for a role, shown
+    directly under that row's dropdown. Returns "" when there's nothing to add."""
+    if not others:
+        return ""
+    return html.Div([
+        html.Span("Also valid: ", style={"fontWeight": "600"}),
+        html.Span(", ".join(others)),
+        html.Span(" — switch above if this isn't the right one.",
+                  style={"color": INK_SOFT}),
+    ], style={
+        "marginTop": "4px", "fontSize": "11.5px", "color": "#0369a1",
+        "fontFamily": "Arial, sans-serif", "lineHeight": "1.35",
+    })
+
+
 def build_variable_mapping_table(mapped_variables_dict, columns,
-                                 time_in_index=False, status_children=None):
+                                 time_in_index=False, status_children=None,
+                                 alternatives=None):
     """Build an editable variable-mapping table.
 
     Args:
@@ -4215,12 +4232,16 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
         time_in_index: whether the Time variable is the DataFrame index.
         status_children: optional element rendered in the status slot (used by
             the Apply callback to show the confirmation/warning after re-render).
+        alternatives: optional {metric: [other valid column names]} — when a role
+            had more than one valid match, the others are shown as a subtle hint
+            directly under that row's dropdown so the user can switch if needed.
 
     Returns:
         A Dash component (the editable table + apply button + status line).
     """
     mapped_variables_dict = mapped_variables_dict or {}
     columns = list(columns or [])
+    alternatives = alternatives or {}
 
     header = html.Div([
         html.Div("Metric", style={
@@ -4274,7 +4295,7 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                 }),
             ], style={"flex": "0 0 42%", "display": "flex",
                       "alignItems": "center"}),
-            html.Div(
+            html.Div([
                 dcc.Dropdown(
                     id={"type": "var-map-dd", "metric": metric},
                     options=opts,
@@ -4283,10 +4304,11 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     clearable=True,
                     style={"fontSize": "13px"},
                 ),
-                style={"flex": "1"},
-            ),
+                # Inline hint: other valid columns the user could switch to.
+                _alt_hint(alternatives.get(metric)),
+            ], style={"flex": "1"}),
         ], style={
-            "display": "flex", "alignItems": "center", "gap": "14px",
+            "display": "flex", "alignItems": "flex-start", "gap": "14px",
             "padding": "8px 4px",
             "background": "#ffffff" if i % 2 else "#f1f5f9",
             "borderRadius": "6px",
@@ -5923,7 +5945,7 @@ def analyze_uploaded_data_callback(
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, contents, filename)
                 if df is None:
-                    return summary_table, {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, []
+                    return summary_table, {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, []
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
@@ -5934,16 +5956,16 @@ def analyze_uploaded_data_callback(
         except FutureTimeout:
             return (_no_data_alert("This is taking longer than expected — something may be wrong "
                                    "with your data. Check the file's formatting and columns, then try again."),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+                    {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, [])
         except Exception as e:
             return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+                    {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, [])
 
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+                    {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, [])
 
         # Dataset time span — drives the <1yr block (below) and the <2yr YoY disable.
         duration_years = _duration_years(df)
@@ -5964,6 +5986,9 @@ def analyze_uploaded_data_callback(
 
         # Consolidated, collapsible data-quality notes + (if <1yr) a hard-block banner,
         # surfaced right after analysis so the user sees implications before calculating.
+        # Column-ambiguity ("also valid: …") hints live ONLY inline under each
+        # dropdown (see build_variable_mapping_table); they're intentionally not
+        # in mapping_notes, so the consolidated panel keeps the other caveats only.
         _n_notes, notes_component = _data_quality_notes(
             df, mapped_variables_dict, extra_notes=mapping_notes)
         pre_blocks = []
@@ -5979,9 +6004,13 @@ def analyze_uploaded_data_callback(
             or (mapped_variables_dict or {}).get("Time") == "__index__"
         )
         # Editable variable-mapping table (defaults to the LLM detection;
-        # the user can override any row or fill in ones the LLM missed).
+        # the user can override any row or fill in ones the LLM missed). When a
+        # role had several valid matches, the others are offered inline under
+        # that row's dropdown (parse_contents stashed them on df.attrs).
+        alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
         editable_mapping = build_variable_mapping_table(
             mapped_variables_dict, data_columns, time_in_index=time_in_index,
+            alternatives=alternatives,
         )
 
         combined_output = html.Div(pre_blocks + [
@@ -6016,10 +6045,14 @@ def analyze_uploaded_data_callback(
             }),
         ], className="slide-in-up")
 
+        # Preserve data-source-store and the upload-status banner (dash.no_update)
+        # so the loaded file's name stays visible after analyzing AND the source
+        # stays "upload"/"example" — otherwise the same file can't be re-analyzed.
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
-                "Analyze Data", None, "", stored_file_name, duration_store, data_columns)
+                "Analyze Data", dash.no_update, dash.no_update, stored_file_name,
+                duration_store, data_columns)
 
-    return ("", {}, None, "", False, "Analyze Data", None, "", stored_file_name, None, [])
+    return ("", {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, [])
 
 
 # =============================================================================
