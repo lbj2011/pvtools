@@ -4,6 +4,8 @@ import io
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 import base64, os, json
+import hashlib
+import threading
 import openai
 # import rdtools
 import ast
@@ -52,6 +54,55 @@ else:  # cborg
     )
     LLM_MODEL = "openai/gpt-5.4-nano"
 
+# ---------------------------------------------------------------------------
+# Deterministic LLM column-identification cache.
+#
+# The LLM (even at temperature=0 / seed=0, via the gateway) does NOT return the
+# same candidate lists every call, so the SAME file could map to different
+# columns run-to-run -- which silently changed filtering results and which
+# datasets got BLOCKED. The prompt depends only on the column NAMES (not the
+# data), so we hash it and cache the result on disk: the first run for a given
+# column-signature calls the LLM; every run after that reuses it. Same file ->
+# same mapping -> same filtering -> same status, always. Delete the cache file
+# to force fresh identification.
+# ---------------------------------------------------------------------------
+_LLM_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               ".llm_id_cache.json")
+_LLM_CACHE_LOCK = threading.Lock()
+_LLM_CACHE = None  # loaded lazily
+
+
+def _llm_cache_load():
+    global _LLM_CACHE
+    if _LLM_CACHE is None:
+        try:
+            with open(_LLM_CACHE_PATH, "r") as f:
+                _LLM_CACHE = json.load(f)
+        except Exception:
+            _LLM_CACHE = {}
+    return _LLM_CACHE
+
+
+def _llm_cache_get(key):
+    with _LLM_CACHE_LOCK:
+        return _llm_cache_load().get(key)
+
+
+def _llm_cache_put(key, value):
+    # Load-modify-write under a lock, with an atomic replace, so the parallel
+    # workers in the pipeline can't corrupt the file.
+    with _LLM_CACHE_LOCK:
+        cache = _llm_cache_load()
+        cache[key] = value
+        try:
+            tmp = _LLM_CACHE_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(cache, f)
+            os.replace(tmp, _LLM_CACHE_PATH)
+        except Exception:
+            pass
+
+
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
 
@@ -72,6 +123,20 @@ MIN_VALID_POINTS = 10       # absolute floor: fewer real values than this -> dro
 # Min plausible irradiance peak (95th pct, W/m^2). Below this the column is the
 # wrong units / a dead sensor, so we ignore it rather than void every row.
 MIN_IRRADIANCE_PEAK = 50.0
+
+
+# A per-device channel names a specific inverter / mppt / string / combiner /
+# meter / zone by NUMBER (inv1, mppt_2, string3, meter_1, ...). A system-level
+# column has no such device index. For whole-system degradation the system total
+# is the right signal, so it is preferred over any single device's channel.
+_DEVICE_LEVEL_RE = re.compile(
+    r'(?:inv|inverter|mppt|string|combiner|cb|ch|meter|zone|block|array)[\s_]*\d',
+    re.I)
+
+
+def _is_device_level(col):
+    """True if a column name targets one numbered device (inv1, mppt_2, ...)."""
+    return bool(_DEVICE_LEVEL_RE.search(str(col)))
 
 
 def _missing_frac(df, col):
@@ -111,16 +176,20 @@ def _best_by_data(df, cols):
         stats[c] = (non_null, float(s.var(skipna=True) or 0.0))
     if not viable:
         return None, []
-    # Among candidates whose completeness is essentially tied with the best
-    # (within ~2% or 50 rows), defer to the candidate ORDER -- the LLM lists
-    # best-first, so a system-total 'dc_power' ranks ahead of a per-inverter
-    # 'inv1_dc_power' and isn't lost to it over a handful of extra rows. Only a
-    # MEANINGFULLY more complete column overrides that order.
+    # Deterministic ranking (independent of the LLM's candidate order, which is
+    # unreliable). In priority order:
+    #   1. SYSTEM-LEVEL over per-device: a system 'dc_power' beats 'inv1_dc_power'
+    #      -- a single inverter undercounts and can wipe out the irradiance-power
+    #      filter, blocking a dataset that should work.
+    #   2. MOST real data (non-null count).
+    #   3. Highest variance, then original order -- stable final tie-breaks.
     order = {c: i for i, c in enumerate(cols)}
-    max_non_null = max(stats[c][0] for c in viable)
-    tol = max(1, int(0.02 * max_non_null))   # ~2% of the best, relative
-    near_best = [c for c in viable if stats[c][0] >= max_non_null - tol]
-    best = min(near_best, key=lambda c: order.get(c, 1 << 30))
+    best = min(viable, key=lambda c: (
+        _is_device_level(c),        # False(0) = system-level sorts first
+        -stats[c][0],               # more non-null first
+        -stats[c][1],               # higher variance first
+        order.get(c, 1 << 30),      # then the candidate's listed order
+    ))
     return best, viable
 
 
@@ -409,31 +478,37 @@ def parse_contents(contents=None, filename=None, df=None):
     mapping_notes = []   # AC-fallback / ambiguous-column / time-by-value warnings
 
     try:
-        # Call LLM. Pin temperature=0 + a fixed seed so the SAME file maps to the
-        # SAME columns run-to-run (otherwise identification is nondeterministic
-        # and a dataset can flip between "power found" and "not found"). Some
-        # models reject these params -- fall back to a plain call if so.
-        try:
-            response = client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-                seed=0,
-            )
-        except (openai.BadRequestError, openai.UnprocessableEntityError):
-            # Only retry without the params when the model REJECTS them (a 4xx).
-            # A timeout / connection / rate-limit error must NOT trigger a second
-            # full call here -- that would stack another timeout on top.
-            response = client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-            )
+        # Deterministic identification: reuse the cached candidate lists for this
+        # exact column-signature if we've seen it. temperature=0/seed=0 alone is
+        # NOT enough (the gateway doesn't honor the seed), so the cache is what
+        # guarantees the same file maps the same way every run.
+        cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        raw_candidates = _llm_cache_get(cache_key)
 
-        res_text = response.choices[0].message.content.strip()
-        cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
+        if raw_candidates is None:
+            # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
+            # Some models reject these params -- fall back to a plain call if so.
+            try:
+                response = client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    seed=0,
+                )
+            except (openai.BadRequestError, openai.UnprocessableEntityError):
+                # Only retry without the params when the model REJECTS them (a 4xx).
+                # A timeout / connection / rate-limit error must NOT trigger a second
+                # full call here -- that would stack another timeout on top.
+                response = client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-        result = json.loads(cleaned)
-        raw_candidates = result.get("candidates", {}) or {}
+            res_text = response.choices[0].message.content.strip()
+            cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
+            result = json.loads(cleaned)
+            raw_candidates = result.get("candidates", {}) or {}
+            _llm_cache_put(cache_key, raw_candidates)
 
         def _cands(role):
             """Candidate column names the LLM proposed for a role (best-first),

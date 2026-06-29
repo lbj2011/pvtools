@@ -72,3 +72,4 @@ htmlcov/
 
 # Generated PVcopilot pipeline reports
 reports/
+.llm_id_cache.json
