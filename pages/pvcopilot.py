@@ -15,7 +15,7 @@ from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, low_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
-from page_supporting_files.analysis_utils import rate_is_plausible
+from page_supporting_files.analysis_utils import rate_is_plausible, degradation_reliability
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
@@ -467,6 +467,36 @@ def _duration_block_banner(duration_years):
             "borderRadius": "10px",
             "color": "#991b1b",
             "fontSize": "14px",
+            "lineHeight": "1.5",
+            "fontFamily": "Arial, sans-serif",
+            "marginBottom": "16px",
+        },
+    )
+
+
+def _unreliable_rate_banner(rd, reasons):
+    """Amber banner shown ABOVE a degradation result that was computed but isn't
+    trustworthy, listing the specific reason(s). Returns None when there are no
+    reasons (the rate is reliable), so callers can skip it. The rate itself is
+    still displayed -- this just tells the user not to trust it, and why."""
+    if not reasons:
+        return None
+    return html.Div(
+        [
+            html.B(f"⚠️ This {rd:+.1f}%/year rate is not reliable. "),
+            "It was still computed, but treat it with caution because:",
+            html.Ul(
+                [html.Li(r, style={"marginBottom": "3px"}) for r in reasons],
+                style={"margin": "8px 0 0 0", "paddingLeft": "20px"},
+            ),
+        ],
+        style={
+            "padding": "12px 14px",
+            "background": "#fffbeb",
+            "border": "1px solid #fde68a",
+            "borderRadius": "10px",
+            "color": "#92400e",
+            "fontSize": "13px",
             "lineHeight": "1.5",
             "fontFamily": "Arial, sans-serif",
             "marginBottom": "16px",
@@ -4131,7 +4161,10 @@ def _simple_result_layout(stash):
     _n_notes, notes_component = _data_quality_notes(
         None, stash.get("mapped"), extra_notes=stash.get("mapping_notes"))
     pre_blocks = []
-    _rate_banner = _implausible_rate_banner(rate_pct * 100)  # stash holds rate_pct = rd/100
+    # stash holds rate_pct = rd/100; show the rate with its specific
+    # unreliability reasons rather than a generic implausible-only banner.
+    _rate_banner = _unreliable_rate_banner(rate_pct * 100,
+                                           stash.get("reliability_reasons"))
     if _rate_banner is not None:
         pre_blocks.append(_rate_banner)
     if notes_component is not None:
@@ -5224,6 +5257,18 @@ def analyze_uploaded_data_callback(
         if _used_metric != selected_metric:
             selected_metric = _used_metric
 
+        # Too sparse to fit a trend: both the chosen method AND the LR fallback
+        # refused (returned NaN) because too few daily points survived filtering.
+        # Show a clear explanation instead of a meaningless "nan%/year".
+        if rd is None or not np.isfinite(rd):
+            return [_no_data_alert(
+                "Not enough clean data to compute a reliable degradation rate. "
+                "After filtering, too few daily points remain to fit a trend — a "
+                "rate from so few points would be meaningless, so the tool won't "
+                "guess. This usually means most data was filtered out (e.g. no "
+                "irradiance, or sparse/low-quality readings)."),
+                "", False, "Calculate Degradation", {}, {}, True]
+
     # Restyle the figure
     if fig is not None:
         fig.update_layout(
@@ -5285,11 +5330,17 @@ def analyze_uploaded_data_callback(
         ], style={"fontFamily": "Arial, sans-serif"}),
     ])
 
-    # The "no irradiance → un-normalized, less reliable" caveat is now shown in
-    # the consolidated data-quality notes toggle right after Analyze (see
-    # _data_quality_notes()). Here we additionally flag a rate that came out
-    # physically implausible (positive / very large) so the user doesn't trust it.
-    _rate_banner = _implausible_rate_banner(rd)
+    # Show the rate, but flag whether it's trustworthy with the SPECIFIC reasons
+    # (too few daily points / no irradiance / short span / implausible value)
+    # rather than presenting a sparse-data number as if it were solid.
+    try:
+        _ndaily = int(aggregate_daily(df_filtered, irra_key).dropna().shape[0])
+    except Exception:
+        _ndaily = None
+    _reliable, _reasons = degradation_reliability(
+        rd, n_points=_ndaily, has_irradiance=bool(irra_key),
+        duration_years=duration_years)
+    _rate_banner = _unreliable_rate_banner(rd, _reasons)
 
     degradation_layout = html.Div(
         ([_rate_banner] if _rate_banner is not None else []) + [
@@ -7595,6 +7646,15 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     except Exception as e:
         return _fail(_no_data_alert(f"Degradation calculation failed: {e}"))
 
+    # Too sparse to fit a trend (both YoY and LR refused) -> explain, never "nan%".
+    if rd is None or not np.isfinite(rd):
+        return _fail(_no_data_alert(
+            "Not enough clean data to compute a reliable degradation rate. After "
+            "filtering, too few daily points remain to fit a trend — a rate from "
+            "so few points would be meaningless, so the tool won't guess. This "
+            "usually means most data was filtered out (e.g. no irradiance, or "
+            "sparse/low-quality readings)."))
+
     if fig is not None:
         fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
@@ -7612,6 +7672,15 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     end_date   = df_good.index.max()
     duration_years = (end_date - start_date).days / 365.25
     rate_pct = rd / 100
+
+    # Reliability + specific reasons, shown with the rate (never hidden).
+    try:
+        _ndaily = int(daily_data.dropna().shape[0])
+    except Exception:
+        _ndaily = None
+    _reliable, _reasons = degradation_reliability(
+        rd, n_points=_ndaily, has_irradiance=bool(irra_key),
+        duration_years=duration_years)
 
     n_raw = pfiltered["n_raw"]
     n_kept = pfiltered["n_kept"]
@@ -7637,6 +7706,7 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         # same data-quality notes toggle as Advanced mode.
         "mapped": pfiltered.get("mapped") or {},
         "mapping_notes": pfiltered.get("mapping_notes", []),
+        "reliability_reasons": _reasons,
     }
 
     # Success: Step 3 DONE.  Reveal the result.

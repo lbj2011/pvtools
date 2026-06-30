@@ -103,6 +103,19 @@ def _llm_cache_put(key, value):
             pass
 
 
+def commit_llm_cache(df):
+    """Save the column-mapping the LLM produced for this dataframe to the cache,
+    but ONLY when the caller has decided the run was GOOD. parse_contents stashes
+    the freshly-identified mapping as 'pending' on df.attrs; nothing is written
+    until this is called, so a wrong mapping from a failed/unreliable dataset is
+    never locked in. A no-op if the result was a cache hit or there's nothing
+    pending."""
+    pending = getattr(df, "attrs", {}).get("_llm_cache_pending") if df is not None else None
+    if pending:
+        key, value = pending
+        _llm_cache_put(key, value)
+
+
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
 
@@ -484,8 +497,13 @@ def parse_contents(contents=None, filename=None, df=None):
         # guarantees the same file maps the same way every run.
         cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         raw_candidates = _llm_cache_get(cache_key)
+        # Only SAVE the mapping once the dataset is confirmed GOOD downstream.
+        # On a miss we hold the freshly-identified result "pending" and let the
+        # caller commit it (commit_llm_cache) iff the run was clean -- so a wrong
+        # mapping from a failed/iffy dataset never gets locked into the cache.
+        _cache_miss = raw_candidates is None
 
-        if raw_candidates is None:
+        if _cache_miss:
             # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
             # Some models reject these params -- fall back to a plain call if so.
             try:
@@ -508,7 +526,7 @@ def parse_contents(contents=None, filename=None, df=None):
             cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
             result = json.loads(cleaned)
             raw_candidates = result.get("candidates", {}) or {}
-            _llm_cache_put(cache_key, raw_candidates)
+            # NOTE: deliberately NOT saved here -- see commit_llm_cache().
 
         def _cands(role):
             """Candidate column names the LLM proposed for a role (best-first),
@@ -800,6 +818,11 @@ def parse_contents(contents=None, filename=None, df=None):
         # lands on the final df object the caller receives).
         df.attrs["mapping_alternatives"] = {
             r: cols for r, cols in alternatives.items() if cols}
+
+        # Hold a freshly-identified (not-yet-cached) mapping as "pending" so the
+        # caller can commit it to the cache only if the run is GOOD.
+        df.attrs["_llm_cache_pending"] = (
+            (cache_key, raw_candidates) if _cache_miss else None)
 
         # Build the read-only mapping table for display (canonical roles).
         display_roles = ["Time", "DC Power", "DC Voltage", "DC Current",
@@ -1187,6 +1210,12 @@ DENOM_FLOOR_FRAC = 0.2        # YoY: ignore pairs whose prior value < 20% of med
 DEGRADATION_PLAUSIBLE_MIN = -3.0
 DEGRADATION_PLAUSIBLE_MAX = 0.5
 
+# A per-year degradation trend fit to a handful of daily points is unreliable --
+# a few noisy days swing the slope to absurd values (+33%/yr from 4 points). We
+# still REPORT a rate below this many daily points, but flag it as unreliable
+# (with the reason) rather than presenting it as trustworthy.
+MIN_TREND_POINTS = 20
+
 
 def rate_is_plausible(rd):
     """True if a degradation rate (%/yr) is finite and within the plausible band
@@ -1197,6 +1226,34 @@ def rate_is_plausible(rd):
                     DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
     except Exception:
         return False
+
+
+def degradation_reliability(rd, n_points=None, has_irradiance=True,
+                            duration_years=None):
+    """Decide whether a (computed) degradation rate is trustworthy, and if not,
+    WHY -- so the UI can show the rate alongside 'unreliable because ...'.
+
+    Returns (is_reliable, reasons). reasons is a list of plain-English strings;
+    an empty list means the rate looks reliable.
+    """
+    reasons = []
+    if n_points is not None and n_points < MIN_TREND_POINTS:
+        reasons.append(
+            f"only {n_points} daily data point(s) survived filtering "
+            f"(a reliable trend needs at least {MIN_TREND_POINTS})")
+    if not has_irradiance:
+        reasons.append(
+            "there is no irradiance column, so power isn't weather-normalized "
+            "(year-to-year weather then looks like degradation)")
+    if duration_years is not None and duration_years < 2:
+        reasons.append(
+            f"the data spans only {duration_years:.1f} year(s) — under 2 years is "
+            "too short to separate real aging from seasonal weather")
+    if not rate_is_plausible(rd):
+        reasons.append(
+            f"the computed rate ({rd:+.1f}%/yr) is outside the physically "
+            "plausible range (real degradation is roughly 0 to −3%/yr)")
+    return (len(reasons) == 0), reasons
 
 
 def aggregate_daily(df_f, irradiance_col=None):
@@ -1339,17 +1396,24 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
 def compute_lr(series):
     series = series.dropna()
 
+    # Mathematical minimum for a slope. Too-few-points still produces a number;
+    # the caller flags it as unreliable (see degradation_reliability) rather than
+    # the tool refusing outright.
     if len(series) < 2:
         return np.nan, None
 
-    t = _time_to_years(series.index).values.reshape(-1, 1)
+    t = _time_to_years(series.index).values
     y = series.values
 
-    model = LinearRegression().fit(t, y)
-    trend = model.predict(t)
+    # Theil-Sen (median of pairwise slopes) instead of ordinary least squares:
+    # OLS is dragged by a few outlier days (e.g. a handful of high-output days at
+    # the end read as steep "improvement"), while the median slope is robust to
+    # them and recovers the true gentle trend.
+    from scipy import stats as _scipy_stats
+    slope, intercept, _lo, _hi = _scipy_stats.theilslopes(y, t)
+    trend = slope * t + intercept
 
-    slope = model.coef_[0]
-    rd = slope / np.mean(y)*100
+    rd = slope / np.mean(y) * 100
 
     fig = go.Figure()
 

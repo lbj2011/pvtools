@@ -75,7 +75,8 @@ try:
     from page_supporting_files.analysis_utils import (
         parse_contents, normalize, low_irra_power_filter, low_power_filter,
         aggregate_daily, compute_yoy, compute_lr, compute_hw, compute_arima,
-        compute_csd, rate_is_plausible,
+        compute_csd, rate_is_plausible, degradation_reliability, MIN_TREND_POINTS,
+        commit_llm_cache,
     )
     from page_supporting_files.pvcopilot_filter_functions import (
         basic_value_filter, clear_sky_filter, identify_outliers_iqr,
@@ -410,6 +411,19 @@ def run_one(path, forced_method=None):
                           "estimate degradation. Correctly refused rather than guessing.")
         return rec
 
+    # Count AGGREGATED DAILY points -- drives the reliability flag below. A trend
+    # from a few daily points is still reported, but flagged as unreliable (with
+    # the reason). Only a truly uncomputable case (<2 points) is refused.
+    _irr_key = mapping.get("Irradiance")
+    _irr_key = _irr_key if _irr_key and _irr_key in df_filtered.columns else None
+    _daily = aggregate_daily(df_filtered, _irr_key)
+    _n_daily = int(_daily.dropna().shape[0]) if _daily is not None else 0
+    if _n_daily < 2:
+        rec.update(status="BLOCKED", stage="degradation",
+                   reason=f"Only {_n_daily} daily data point(s) after aggregation -- "
+                          "a trend cannot be computed at all.")
+        return rec
+
     # ---- Stage 4: DEGRADATION (with LR fallback for sparse data) ----
     try:
         rd, method_used = _with_timeout(_run_degradation, df_filtered, mapping, method)
@@ -434,19 +448,25 @@ def run_one(path, forced_method=None):
         return rec
 
     rec["rd_percent_per_year"] = round(float(rd), 4)
-    # Flag rates outside the plausible band (positive / very large) -- almost
-    # always un-normalizable (no irradiance) or too-sparse data, not real aging.
-    rec["rate_reliable"] = rate_is_plausible(rd)
-    if not rec["rate_reliable"]:
+    # Report the rate but flag whether it's trustworthy, with the specific
+    # reason(s) -- too few daily points, no irradiance, short span, or an
+    # implausible value -- rather than silently presenting it as reliable.
+    reliable, reasons = degradation_reliability(
+        rd, n_points=_n_daily, has_irradiance=bool(_irr_key),
+        duration_years=rec.get("duration_years"))
+    rec["rate_reliable"] = reliable
+    if not reliable:
         rec["notes"].append(
-            f"Degradation rate {rd:.1f} %/yr is outside the plausible range "
-            "(real degradation is a small negative number) — treat as UNRELIABLE; "
-            "usually caused by missing irradiance or too few/sparse points.")
+            f"Rate {rd:+.2f}%/yr is UNRELIABLE because " + "; ".join(reasons) + ".")
 
     rec["stage"] = "done"
     rec["status"] = "WARNING" if rec["notes"] else "GOOD"
     rec["reason"] = (f"{method} degradation rate = {rd:.3f} %/yr"
                      + (" (with caveats)" if rec["notes"] else ""))
+    # Save the LLM column-mapping to the cache ONLY for a clean GOOD run, so a
+    # wrong/iffy mapping is never locked in (WARNING/BLOCKED/ERROR re-query next run).
+    if rec["status"] == "GOOD":
+        commit_llm_cache(df)
     return rec
 
 
