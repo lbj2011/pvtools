@@ -389,6 +389,45 @@ def _duration_years(df):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Quiet notice cards — one shared visual language for every banner on the page:
+# a white card with a hairline border, a small colored status dot, a semibold
+# title, and muted body text. Color lives ONLY in the dot.
+# ---------------------------------------------------------------------------
+_CARD_FONT = ("-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', "
+              "Roboto, Helvetica, Arial, sans-serif")
+_CARD_STYLE = {
+    "padding": "13px 16px",
+    "background": "#ffffff",
+    "border": "1px solid #e8e8ed",
+    "borderRadius": "12px",
+    "marginBottom": "16px",
+    "fontFamily": _CARD_FONT,
+    "boxShadow": "0 1px 2px rgba(0,0,0,0.04)",
+}
+_DOT_RED, _DOT_AMBER, _DOT_GREEN = "#ff3b30", "#ff9f0a", "#34c759"
+
+
+def _card_dot(color):
+    return html.Span(style={
+        "width": "8px", "height": "8px", "borderRadius": "50%",
+        "background": color, "flex": "0 0 auto", "marginRight": "9px",
+    })
+
+
+def _card_title_row(dot_color, title, extra=None):
+    kids = [_card_dot(dot_color),
+            html.Span(title, style={"fontWeight": "600", "fontSize": "13.5px",
+                                    "color": "#1d1d1f"})]
+    if extra is not None:
+        kids.append(extra)
+    return html.Div(kids, style={"display": "flex", "alignItems": "center"})
+
+
+_CARD_BODY_STYLE = {"fontSize": "13px", "color": "#6e6e73", "lineHeight": "1.55",
+                    "marginTop": "6px", "marginLeft": "17px"}
+
+
 def _data_quality_notes(df, mapping, extra_notes=None, include_missing=True):
     """Build a single collapsed disclosure listing missing-data items and what
     each implies for the degradation result.
@@ -427,24 +466,22 @@ def _data_quality_notes(df, mapping, extra_notes=None, include_missing=True):
     component = html.Details(
         [
             html.Summary(
-                f"⚠️ {n} data-quality note{'s' if n != 1 else ''} — click to expand",
-                style={"cursor": "pointer", "color": "#92400e", "fontSize": "14px",
-                       "fontWeight": "600", "fontFamily": "Arial, sans-serif"},
+                _card_title_row(
+                    _DOT_AMBER,
+                    f"{n} data-quality note{'s' if n != 1 else ''}",
+                    extra=html.Span("Show details", style={
+                        "marginLeft": "auto", "fontSize": "12px",
+                        "color": "#86868b", "fontWeight": "500"}),
+                ),
+                style={"cursor": "pointer", "listStyle": "none"},
             ),
             html.Ul(
-                [html.Li(t, style={"fontSize": "13px", "color": "#92400e",
-                                   "marginBottom": "4px", "lineHeight": "1.5"})
-                 for t in notes],
-                style={"marginTop": "8px", "marginBottom": "0", "paddingLeft": "18px"},
+                [html.Li(t, style={"marginBottom": "5px"}) for t in notes],
+                style={**_CARD_BODY_STYLE, "marginTop": "10px",
+                       "marginBottom": "0", "paddingLeft": "18px"},
             ),
         ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fffbeb",
-            "border": "1px solid #fde68a",
-            "borderRadius": "10px",
-            "marginBottom": "16px",
-        },
+        style=_CARD_STYLE,
     )
     return n, component
 
@@ -455,22 +492,15 @@ def _duration_block_banner(duration_years):
     months = int(round((duration_years or 0) * 12))
     return html.Div(
         [
-            html.B("Not enough data for degradation analysis. "),
-            f"This dataset spans only about {months} month{'s' if months != 1 else ''} "
-            "(less than 1 year). Degradation analysis needs at least 1 year of data, so "
-            "the Calculate Degradation step is disabled for this dataset.",
+            _card_title_row(_DOT_RED, "Not enough data for degradation analysis"),
+            html.Div(
+                f"This dataset spans only about {months} "
+                f"month{'s' if months != 1 else ''} — less than the 1 year the "
+                "analysis needs, so the Calculate Degradation step is disabled "
+                "for this dataset.",
+                style=_CARD_BODY_STYLE),
         ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fef2f2",
-            "border": "1px solid #fecaca",
-            "borderRadius": "10px",
-            "color": "#991b1b",
-            "fontSize": "14px",
-            "lineHeight": "1.5",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        },
+        style=_CARD_STYLE,
     )
 
 
@@ -483,24 +513,16 @@ def _unreliable_rate_banner(rd, reasons):
         return None
     return html.Div(
         [
-            html.B(f"⚠️ This {rd:+.1f}%/year rate is not reliable. "),
-            "It was still computed, but treat it with caution because:",
+            _card_title_row(_DOT_AMBER, f"This {rd:+.1f}%/year rate isn't reliable"),
+            html.Div("It was still computed, but treat it with caution because:",
+                     style=_CARD_BODY_STYLE),
             html.Ul(
-                [html.Li(r, style={"marginBottom": "3px"}) for r in reasons],
-                style={"margin": "8px 0 0 0", "paddingLeft": "20px"},
+                [html.Li(r, style={"marginBottom": "4px"}) for r in reasons],
+                style={**_CARD_BODY_STYLE, "marginTop": "4px",
+                       "marginBottom": "0", "paddingLeft": "35px"},
             ),
         ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fffbeb",
-            "border": "1px solid #fde68a",
-            "borderRadius": "10px",
-            "color": "#92400e",
-            "fontSize": "13px",
-            "lineHeight": "1.5",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        },
+        style=_CARD_STYLE,
     )
 
 
@@ -514,24 +536,16 @@ def _implausible_rate_banner(rd):
         return None
     return html.Div(
         [
-            html.B(f"⚠️ Unreliable result ({rd:.1f}%/year). "),
-            "This is outside the physically plausible range for panel degradation "
-            "(which is a small negative number, roughly 0 to −3%/year). It usually "
-            "means the data has no irradiance to normalize against, or too few / too "
-            "sparse points — so this number reflects weather and sampling noise, not "
-            "real aging. Treat it as not trustworthy.",
+            _card_title_row(_DOT_RED, f"Unreliable result ({rd:.1f}%/year)"),
+            html.Div(
+                "This is outside the physically plausible range for panel "
+                "degradation (a small negative number, roughly 0 to −3%/year). "
+                "It usually means the data has no irradiance to normalize "
+                "against, or too few / too sparse points — so this number "
+                "reflects weather and sampling noise, not real aging.",
+                style=_CARD_BODY_STYLE),
         ],
-        style={
-            "padding": "12px 14px",
-            "background": "#fef2f2",
-            "border": "1px solid #fecaca",
-            "borderRadius": "10px",
-            "color": "#991b1b",
-            "fontSize": "13px",
-            "lineHeight": "1.5",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        },
+        style=_CARD_STYLE,
     )
 
 
@@ -4210,58 +4224,89 @@ _MAP_METRICS = [
 _REQUIRED_FOR_DEGRADATION = {"DC Power", "Time"}
 
 
+# Quiet, refined styling for the notices under each mapping row — neutral
+# grays, hairline borders, generous spacing; color is reserved for a single
+# small status dot on the missing-variable notices.
+_HINT_FONT = ("-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', "
+              "Roboto, Helvetica, Arial, sans-serif")
+_HINT_INK = "#1d1d1f"          # primary text
+_HINT_INK_SOFT = "#86868b"     # secondary text
+_HINT_HAIRLINE = "#d2d2d7"     # pill border
+_HINT_FILL = "#ffffff"         # pill fill
+
+
+def _col_chip(name):
+    """A column name as a quiet, hairline pill."""
+    return html.Span(name, style={
+        "fontFamily": "SFMono-Regular, ui-monospace, Menlo, monospace",
+        "fontSize": "11px", "color": _HINT_INK,
+        "background": _HINT_FILL,
+        "border": f"1px solid {_HINT_HAIRLINE}",
+        "borderRadius": "980px", "padding": "2.5px 10px",
+        "whiteSpace": "nowrap", "display": "inline-block",
+    })
+
+
 def _alt_hint(others):
-    """A subtle one-line hint listing other valid columns for a role, shown
-    directly under that row's dropdown. Returns "" when there's nothing to add."""
+    """A quiet one-line notice listing the other valid columns for a role,
+    shown under that row's dropdown. Returns "" when there's nothing to add."""
     if not others:
         return ""
-    return html.Div([
-        html.Span("Also valid: ", style={"fontWeight": "600"}),
-        html.Span(", ".join(others)),
-        html.Span(" — switch above if this isn't the right one.",
-                  style={"color": INK_SOFT}),
-    ], style={
-        "marginTop": "4px", "fontSize": "11.5px", "color": "#0369a1",
-        "fontFamily": "Arial, sans-serif", "lineHeight": "1.35",
-    })
+    return html.Div(
+        [html.Span("Also detected", style={
+            "fontSize": "11px", "color": _HINT_INK_SOFT,
+            "fontWeight": "500", "flex": "0 0 auto",
+        })] + [_col_chip(c) for c in others],
+        title="These columns also look valid for this variable — "
+              "switch above if the selected one isn't right.",
+        style={
+            "marginTop": "7px", "display": "flex", "flexWrap": "wrap",
+            "alignItems": "center", "gap": "6px",
+            "fontFamily": _HINT_FONT, "lineHeight": "1.4",
+        },
+    )
 
 
 # What a MISSING variable means for the analysis, shown inline under its row.
 # (message, is_required): required variables block degradation entirely (red);
 # the rest only reduce accuracy or disable PVPRO (amber).
 _MISSING_HINT = {
-    "DC Power": ("Required — degradation can't run without power. Select a power "
-                 "column (or pick voltage + current and it's derived as V × I).", True),
-    "Time": ("Required — degradation can't run without timestamps. Select the "
-             "time column.", True),
-    "DC Voltage": ("Not detected — PVPRO physics analysis can't be run "
-                   "(it needs both voltage and current).", False),
-    "DC Current": ("Not detected — PVPRO physics analysis can't be run "
-                   "(it needs both voltage and current).", False),
-    "Irradiance": ("Not detected — the rate won't be weather-normalized, so it's "
-                   "less reliable.", False),
-    "Module temperature": ("Not detected — no temperature correction will be "
-                           "applied.", False),
+    "DC Power": ("Degradation can't run without power. Select a power column — "
+                 "or pick voltage + current and it's derived as V × I.", True),
+    "Time": ("Degradation can't run without timestamps. Select the time "
+             "column.", True),
+    "DC Voltage": ("PVPRO physics analysis can't be run — it needs both "
+                   "voltage and current.", False),
+    "DC Current": ("PVPRO physics analysis can't be run — it needs both "
+                   "voltage and current.", False),
+    "Irradiance": ("The rate won't be weather-normalized, so it's less "
+                   "reliable.", False),
+    "Module temperature": ("No temperature correction will be applied.", False),
 }
 
 
 def _missing_hint(metric):
-    """Inline warning shown under a row whose variable wasn't detected, spelling
-    out what its absence means (and, for V/I, that PVPRO can't run)."""
+    """A quiet inline notice under a row whose variable wasn't detected: a small
+    status dot (red = blocks degradation, amber = caveat only) and one line of
+    muted text explaining what the absence means."""
     entry = _MISSING_HINT.get(metric)
     if not entry:
         return ""
-    # Red when the missing variable BLOCKS degradation (power/time); yellow when
-    # degradation can still be calculated, just with a caveat (irradiance, temp,
-    # voltage/current → no PVPRO).
     msg, required = entry
-    color = "#b91c1c" if required else "#ca8a04"   # red (blocker) / yellow (caveat)
+    dot = "#ff3b30" if required else "#ff9f0a"      # red (blocker) / amber (caveat)
+    lead = "Required" if required else "Not detected"
     return html.Div([
-        html.Span("⚠ ", style={"fontWeight": "700"}),
-        html.Span(msg),
+        html.Span(style={
+            "width": "6px", "height": "6px", "borderRadius": "50%",
+            "background": dot, "flex": "0 0 auto", "marginTop": "6px",
+        }),
+        html.Span([
+            html.Span(f"{lead} · ", style={"color": _HINT_INK, "fontWeight": "600"}),
+            html.Span(msg, style={"color": _HINT_INK_SOFT}),
+        ], style={"fontSize": "12px", "lineHeight": "1.45"}),
     ], style={
-        "marginTop": "4px", "fontSize": "11.5px", "color": color,
-        "fontFamily": "Arial, sans-serif", "lineHeight": "1.35",
+        "marginTop": "7px", "display": "flex", "gap": "8px",
+        "alignItems": "flex-start", "fontFamily": _HINT_FONT,
     })
 
 
@@ -4303,24 +4348,64 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
     })
 
     rows = []
+    # Friendly group names per metric for the dropdown's pinned section.
+    _ROLE_GROUP = {
+        "DC Power": "Power columns", "DC Voltage": "Voltage columns",
+        "DC Current": "Current columns", "Irradiance": "Irradiance columns",
+        "Module temperature": "Temperature columns", "Time": "Time columns",
+    }
+
+    def _group_header(text, key):
+        """A non-selectable section header inside the dropdown."""
+        return {
+            "label": html.Span(text, style={
+                "fontSize": "10px", "fontWeight": "700", "color": "#86868b",
+                "textTransform": "uppercase", "letterSpacing": "0.08em",
+                "cursor": "default",
+            }),
+            "value": f"__hdr__{key}__", "disabled": True, "search": "",
+        }
+
+    def _valid_opt(c, label=None):
+        """A recognized-for-this-role column: bold, with a small accent dot."""
+        return {
+            "label": html.Span([
+                html.Span(style={
+                    "display": "inline-block", "width": "6px", "height": "6px",
+                    "borderRadius": "50%", "background": ACCENT,
+                    "marginRight": "8px", "verticalAlign": "middle",
+                }),
+                html.Span(label or c, style={"fontWeight": "600", "color": INK}),
+            ]),
+            "value": c, "search": label or c,
+        }
+
     for i, metric in enumerate(_MAP_METRICS):
         current = mapped_variables_dict.get(metric)
 
-        # Time options: offer the index sentinel plus any real columns.
-        if metric == "Time":
-            opts = []
-            if time_in_index or current == "__index__":
-                opts.append({"label": "(use index / __index__)",
-                             "value": "__index__"})
-            opts += [{"label": c, "value": c} for c in columns]
-            # Make sure the current value is selectable even if odd.
-            if current and current not in [o["value"] for o in opts]:
-                opts.insert(0, {"label": current, "value": current})
-        else:
-            opts = [{"label": c, "value": c} for c in columns]
-            if current and current not in columns:
-                # LLM picked something not in the column list — keep it visible.
-                opts.insert(0, {"label": current, "value": current})
+        # Columns recognized as THIS variable: the detected one + any valid
+        # alternatives. They're pinned at the top under a labeled group so the
+        # right candidates are always one glance away.
+        valid = []
+        if metric == "Time" and (time_in_index or current == "__index__"):
+            valid.append("__index__")
+        if current and current not in valid:
+            valid.append(current)
+        for c in alternatives.get(metric, []):
+            if c not in valid:
+                valid.append(c)
+
+        rest = [c for c in columns if c not in valid]
+
+        opts = []
+        if valid:
+            opts.append(_group_header(_ROLE_GROUP.get(metric, metric), metric))
+            for c in valid:
+                opts.append(_valid_opt(
+                    c, label="(use index / __index__)" if c == "__index__" else None))
+            if rest:
+                opts.append(_group_header("All columns", f"{metric}-all"))
+        opts += [{"label": c, "value": c, "search": c} for c in rest]
 
         detected = bool(current)
         dot_color = "#16a34a" if detected else "#d97706"   # green / amber
@@ -4716,17 +4801,15 @@ def update_upload_status(filename):
     if filename:
         msg = html.Div(
             [
-                html.Span("✓", style={"color": SUCCESS, "marginRight": "8px", "fontWeight": "600"}),
-                html.Span(f"File selected: ", style={"color": INK_SOFT, "fontSize": "14px"}),
-                html.Span(filename, style={"color": INK, "fontSize": "14px", "fontWeight": "600", "fontFamily": "Arial, sans-serif"}),
+                _card_dot(_DOT_GREEN),
+                html.Span("File selected", style={
+                    "color": "#86868b", "fontSize": "13px", "fontWeight": "500",
+                    "marginRight": "8px"}),
+                html.Span(filename, style={
+                    "color": "#1d1d1f", "fontSize": "13.5px", "fontWeight": "600"}),
             ],
-            style={
-                "padding": "10px 14px",
-                "background": "#f0fdf4",
-                "border": "1px solid #bbf7d0",
-                "borderRadius": "8px",
-                "fontSize": "14px",
-            },
+            style={**_CARD_STYLE, "display": "flex", "alignItems": "center",
+                   "padding": "11px 16px", "marginBottom": "0"},
             className="slide-in-top",
         )
         return [msg, "upload", "", filename]
@@ -5985,11 +6068,15 @@ def analyze_uploaded_data_callback(
             df_json = df.to_json(date_format="iso", orient="split")
             output_msg = html.Div(
                 [
-                    html.Span("✓", style={"color": SUCCESS, "marginRight": "8px", "fontWeight": "600"}),
-                    html.Span(f"{example_filename}", style={"fontFamily": "Arial, sans-serif", "fontSize": "14px", "color": INK, "fontWeight": "600"}),
-                    html.Span(" loaded", style={"color": INK_SOFT, "fontSize": "14px", "marginLeft": "4px"}),
+                    _card_dot(_DOT_GREEN),
+                    html.Span(example_filename, style={
+                        "fontSize": "13.5px", "color": "#1d1d1f", "fontWeight": "600"}),
+                    html.Span("loaded", style={
+                        "color": "#86868b", "fontSize": "13px", "marginLeft": "6px",
+                        "fontWeight": "500"}),
                 ],
-                style={"padding": "10px 14px", "background": "#f0fdf4", "border": "1px solid #bbf7d0", "borderRadius": "8px", "fontSize": "14px"},
+                style={**_CARD_STYLE, "display": "flex", "alignItems": "center",
+                       "padding": "11px 16px", "marginBottom": "0"},
                 className="slide-in-top",
             )
         except Exception as e:
