@@ -1902,6 +1902,9 @@ def filter_row(checkbox_id, label, customize_body=None):
 
 _param_input_style = {
     "width": "100%",
+    # Include padding + border inside the 100% width; without this an input
+    # renders at 100% + 16px padding + 2px border and overflows its column.
+    "boxSizing": "border-box",
     "fontSize": "14px",
     "padding": "6px 8px",
     "borderRadius": "6px",
@@ -1912,6 +1915,46 @@ _param_input_style = {
 }
 
 _label_style = {"fontSize": "13px", "fontWeight": "600", "color": INK, "marginBottom": "3px", "fontFamily": "Arial, sans-serif"}
+
+# --- PVPRO numeric stepper (own − / + buttons; native spinners are hidden via
+# the .pvpro-num CSS because they blank the value in this Dash version). ---
+_step_btn_style = {
+    "border": f"1px solid {BORDER_STRONG}", "background": "#fff", "cursor": "pointer",
+    "fontSize": "18px", "fontWeight": "700", "color": INK, "lineHeight": "1",
+    "padding": "0 12px", "minWidth": "34px", "flex": "0 0 auto",
+    "fontFamily": "Arial, sans-serif", "boxSizing": "border-box",
+}
+# Per-field step / min config for the stepper callback (keyed by input id).
+_PVPRO_STEP_CFG = {
+    "cells":    (1, 1, 0),        # (step, min, decimals)
+    "mps":      (1, 1, 0),
+    "ps":       (1, 1, 0),
+    "alphaisc": (0.0001, 0, 4),
+    "days":     (1, 2, 0),
+    "iters":    (1, 2, 0),
+}
+
+
+def _pvpro_num_field(label, id_suffix, value, prefix=""):
+    """A labelled numeric field with its own − / + buttons flanking the input.
+    `prefix` is '' for Advanced ids (param-pvpro-*) or 'simple-' for Simple."""
+    input_id = f"{prefix}param-pvpro-{id_suffix}"
+    step, minv, decimals = _PVPRO_STEP_CFG[id_suffix]
+    left = {**_step_btn_style, "borderRadius": "6px 0 0 6px", "borderRight": "none"}
+    right = {**_step_btn_style, "borderRadius": "0 6px 6px 0", "borderLeft": "none"}
+    mid = {**_param_input_style, "borderRadius": "0", "textAlign": "center",
+           "minWidth": "0", "flex": "1 1 auto"}
+    return html.Div([
+        html.Div(label, style=_label_style),
+        html.Div([
+            html.Button("−", id={"type": "pvpro-step", "target": input_id, "dir": "down"},
+                        n_clicks=0, style=left),
+            dcc.Input(id=input_id, type="number", value=value, step=step, min=minv,
+                      className="pvpro-num", style=mid),
+            html.Button("+", id={"type": "pvpro-step", "target": input_id, "dir": "up"},
+                        n_clicks=0, style=right),
+        ], style={"display": "flex", "alignItems": "stretch"}),
+    ])
 _help_style  = {"fontSize": "13px", "color": INK_SOFT, "marginBottom": "5px", "lineHeight": "1.4", "fontFamily": "Arial, sans-serif"}
 
 
@@ -2202,79 +2245,34 @@ metric_options = [
                            "marginTop": "4px"},
                 ),
                 html.Div([
-                    html.Div(style={"display": "flex", "gap": "8px",
-                                    "marginBottom": "8px"}, children=[
-                        html.Div([
-                            html.Div("Cells in series (per module)",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-cells", type="number",
-                                      value=60, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
-                        html.Div([
-                            html.Div("Modules per string",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-mps", type="number",
-                                      value=1, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
-                        html.Div([
-                            html.Div("Parallel strings",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-ps", type="number",
-                                      value=1, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
+                    _pvpro_num_field("Cells in series (per module)", "cells", 60),
+                    _pvpro_num_field("Modules per string", "mps", 1),
+                    _pvpro_num_field("Parallel strings", "ps", 1),
+                    _pvpro_num_field("alpha_isc (A/°C)", "alphaisc", 0.0046),
+                    html.Div([
+                        html.Div("Technology", style=_label_style),
+                        dcc.Dropdown(
+                            id="param-pvpro-tech",
+                            options=[
+                                {"label": "mono-c-Si", "value": "mono-c-Si"},
+                                {"label": "multi-c-Si", "value": "multi-c-Si"},
+                                {"label": "GaAs", "value": "GaAs"},
+                                {"label": "CIGS", "value": "CIGS"},
+                                {"label": "CdTe", "value": "CdTe"},
+                            ],
+                            value="mono-c-Si", clearable=False,
+                            style={"fontSize": "13px"},
+                        ),
                     ]),
-                    html.Div(style={"display": "flex", "gap": "8px",
-                                    "marginBottom": "8px"}, children=[
-                        html.Div([
-                            html.Div("alpha_isc (A/°C)",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-alphaisc",
-                                      type="number", value=0.0046,
-                                      step=0.0001, min=0,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
-                        html.Div([
-                            html.Div("Technology", style=_label_style),
-                            dcc.Dropdown(
-                                id="param-pvpro-tech",
-                                options=[
-                                    {"label": "mono-c-Si", "value": "mono-c-Si"},
-                                    {"label": "multi-c-Si", "value": "multi-c-Si"},
-                                    {"label": "GaAs", "value": "GaAs"},
-                                    {"label": "CIGS", "value": "CIGS"},
-                                    {"label": "CdTe", "value": "CdTe"},
-                                ],
-                                value="mono-c-Si",
-                                clearable=False,
-                                style={"fontSize": "13px"},
-                            ),
-                        ], style={"flex": "1"}),
-                    ]),
-                    html.Div(style={"display": "flex", "gap": "8px"}, children=[
-                        html.Div([
-                            html.Div("Days per run", style=_label_style),
-                            dcc.Input(id="param-pvpro-days",
-                                      type="number", value=14,
-                                      step=1, min=2,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
-                        html.Div([
-                            html.Div("Iterations per year",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-iters",
-                                      type="number", value=12,
-                                      step=1, min=2,
-                                      style=_param_input_style),
-                        ], style={"flex": "1"}),
-                    ]),
+                    _pvpro_num_field("Days per run", "days", 14),
+                    _pvpro_num_field("Iterations per year", "iters", 12),
                 ], style={"marginTop": "6px", "padding": "12px 14px",
                           "background": "#f1f5f9", "borderRadius": "8px",
                           "border": f"1px solid {BORDER}",
-                          "width": "100%", "minWidth": "640px",
-                          "boxSizing": "border-box"}),
+                          "width": "100%", "boxSizing": "border-box",
+                          "display": "grid",
+                          "gridTemplateColumns": "repeat(auto-fit, minmax(150px, 1fr))",
+                          "gap": "12px 14px", "alignItems": "end"}),
                 ],
                 id="pvpro-params-details",
                 # open state is driven by the metric-selected callback below:
@@ -3331,67 +3329,33 @@ def _simple_pvpro_params_block():
                        "marginTop": "4px"},
             ),
             html.Div([
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap", "marginBottom": "8px"},
-                         children=[
-                    html.Div([
-                        html.Div("Cells in series (per module)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-cells", type="number",
-                                  value=60, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Modules per string", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-mps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Parallel strings", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-ps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
+                _pvpro_num_field("Cells in series (per module)", "cells", 60, prefix="simple-"),
+                _pvpro_num_field("Modules per string", "mps", 1, prefix="simple-"),
+                _pvpro_num_field("Parallel strings", "ps", 1, prefix="simple-"),
+                _pvpro_num_field("alpha_isc (A/°C)", "alphaisc", 0.0046, prefix="simple-"),
+                html.Div([
+                    html.Div("Technology", style=_label_style),
+                    dcc.Dropdown(
+                        id="simple-param-pvpro-tech",
+                        options=[
+                            {"label": "mono-c-Si", "value": "mono-c-Si"},
+                            {"label": "multi-c-Si", "value": "multi-c-Si"},
+                            {"label": "GaAs", "value": "GaAs"},
+                            {"label": "CIGS", "value": "CIGS"},
+                            {"label": "CdTe", "value": "CdTe"},
+                        ],
+                        value="mono-c-Si", clearable=False,
+                        style={"fontSize": "13px"},
+                    ),
                 ]),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap", "marginBottom": "8px"},
-                         children=[
-                    html.Div([
-                        html.Div("alpha_isc (A/°C)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-alphaisc", type="number",
-                                  value=0.0046, step=0.0001, min=0,
-                                  style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Technology", style=_label_style),
-                        dcc.Dropdown(
-                            id="simple-param-pvpro-tech",
-                            options=[
-                                {"label": "mono-c-Si", "value": "mono-c-Si"},
-                                {"label": "multi-c-Si", "value": "multi-c-Si"},
-                                {"label": "GaAs", "value": "GaAs"},
-                                {"label": "CIGS", "value": "CIGS"},
-                                {"label": "CdTe", "value": "CdTe"},
-                            ],
-                            value="mono-c-Si", clearable=False,
-                            style={"fontSize": "13px"},
-                        ),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                ]),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "flexWrap": "wrap"}, children=[
-                    html.Div([
-                        html.Div("Days per run", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-days", type="number",
-                                  value=14, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Iterations per year", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-iters", type="number",
-                                  value=12, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                ]),
+                _pvpro_num_field("Days per run", "days", 14, prefix="simple-"),
+                _pvpro_num_field("Iterations per year", "iters", 12, prefix="simple-"),
             ], style={"marginTop": "6px", "padding": "12px 14px",
                       "background": "#f1f5f9", "borderRadius": "8px",
-                      "border": f"1px solid {BORDER}",
-                      "boxSizing": "border-box"}),
+                      "border": f"1px solid {BORDER}", "boxSizing": "border-box",
+                      "display": "grid",
+                      "gridTemplateColumns": "repeat(auto-fit, minmax(150px, 1fr))",
+                      "gap": "12px 14px", "alignItems": "end"}),
         ],
         open=False,
         style={"marginTop": "12px"},
@@ -6254,6 +6218,52 @@ def reset_pvpro_params_on_new_data(*_):
     # dcc.Input(value=...) declarations.  If you change one, change
     # both, or "reset" stops actually returning to fresh-page state.
     return 60, 1, 1, 0.0046, "mono-c-Si", 14, 12, False
+
+
+# =============================================================================
+# CALLBACK — PVPRO numeric steppers (our own − / + buttons)
+#
+# The native number-input spinners blank the value in this Dash version, so
+# each PVPRO number field has explicit − / + buttons (see _pvpro_num_field).
+# This one callback handles all of them (Advanced + Simple): the clicked
+# button's id carries which input to change and the direction; we read that
+# input's current value, step it, clamp to its minimum, and write it back.
+# =============================================================================
+_PVPRO_STEP_TARGETS = [
+    "param-pvpro-cells", "param-pvpro-mps", "param-pvpro-ps",
+    "param-pvpro-alphaisc", "param-pvpro-days", "param-pvpro-iters",
+    "simple-param-pvpro-cells", "simple-param-pvpro-mps", "simple-param-pvpro-ps",
+    "simple-param-pvpro-alphaisc", "simple-param-pvpro-days", "simple-param-pvpro-iters",
+]
+
+
+@app.callback(
+    [Output(t, "value", allow_duplicate=True) for t in _PVPRO_STEP_TARGETS],
+    Input({"type": "pvpro-step", "target": ALL, "dir": ALL}, "n_clicks"),
+    [State(t, "value") for t in _PVPRO_STEP_TARGETS],
+    prevent_initial_call=True,
+)
+def _pvpro_step(_clicks, *vals):
+    out = [dash.no_update] * len(_PVPRO_STEP_TARGETS)
+    trig = ctx.triggered_id
+    if not isinstance(trig, dict):
+        return out
+    target = trig.get("target")
+    direction = trig.get("dir")
+    if target not in _PVPRO_STEP_TARGETS:
+        return out
+    idx = _PVPRO_STEP_TARGETS.index(target)
+    suffix = target.split("param-pvpro-")[-1]           # e.g. "cells"
+    step, minv, decimals = _PVPRO_STEP_CFG.get(suffix, (1, None, 0))
+    cur = vals[idx]
+    if cur is None:
+        cur = minv if minv is not None else 0
+    newv = cur + (step if direction == "up" else -step)
+    if minv is not None and newv < minv:
+        newv = minv
+    newv = round(newv, decimals) if decimals else int(round(newv))
+    out[idx] = newv
+    return out
 
 
 # =============================================================================

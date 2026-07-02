@@ -956,6 +956,17 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         ))
 
         fig_power = apply_layout(fig_power, "Power vs Time", "Power (W)")
+
+        # Robust y-axis: a few garbage spikes (e.g. a 22 MW reading on a ~150 kW
+        # system) otherwise blow up the scale and flatten all the real data to a
+        # line at the baseline. Clamp the top to just above the 99.5th percentile
+        # so the genuine daily power cycle is visible; spikes go off-screen.
+        pvals = pd.to_numeric(df[power_key], errors="coerce")
+        p_hi = pvals.quantile(0.995)
+        p_max = pvals.max()
+        if np.isfinite(p_hi) and p_hi > 0 and np.isfinite(p_max) and p_max > p_hi * 1.5:
+            fig_power.update_yaxes(range=[min(0, pvals.min()), p_hi * 1.1])
+
         figures.append(dcc.Graph(figure=fig_power))
 
     except Exception as e:
