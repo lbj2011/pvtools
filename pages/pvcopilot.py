@@ -15,7 +15,7 @@ from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, low_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
-from page_supporting_files.analysis_utils import rate_is_plausible, degradation_reliability, compute_yoy_energy
+from page_supporting_files.analysis_utils import rate_is_plausible, degradation_reliability, compute_yoy_energy, estimate_pvpro_params
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
@@ -1548,9 +1548,14 @@ def _chat_sidebar_item():
 
 
 def build_sidebar(progress=None):
-    progress = progress or {"data": False, "filter": False, "calc": False, "code": False}
+    progress = progress or {"load": False, "data": False, "filter": False,
+                            "calc": False, "code": False}
 
-    s_data   = _step_state(progress, "data",   prior_done=True)
+    # "Load the data" is done once a file/example is in (Advanced sets "load"
+    # via data-source-store; Simple sets "started" when a run kicks off).
+    load_done = bool(progress.get("load") or progress.get("started"))
+    s_load   = "done" if load_done else "active"
+    s_data   = _step_state(progress, "data",   prior_done=load_done)
     s_filter = _step_state(progress, "filter", prior_done=progress.get("data", False))
     s_calc   = _step_state(progress, "calc",   prior_done=progress.get("filter", False))
     s_code   = _step_state(progress, "code",   prior_done=progress.get("calc", False))
@@ -1589,10 +1594,11 @@ def build_sidebar(progress=None):
             html.Div(
                 [
                     section_label("Workflow"),
-                    stepper_item(1, "Data Prescreening", "Upload & inspect", TEAL,   state=s_data,   step_key="data"),
-                    stepper_item(2, "Filter",             "Clean the signal", INDIGO, state=s_filter, step_key="filter"),
-                    stepper_item(3, "Degradation",        "Compute the rate", ROSE,   state=s_calc,   step_key="calc"),
-                    stepper_item(4, "Code",               "Export & reuse",   SLATE,  state=s_code,   step_key="code"),
+                    stepper_item(1, "Load the data",      "Upload or pick an example", NAVY, state=s_load, step_key="load"),
+                    stepper_item(2, "Data Prescreening",  "Inspect & identify", TEAL,   state=s_data,   step_key="data"),
+                    stepper_item(3, "Filter",             "Clean the signal",  INDIGO, state=s_filter, step_key="filter"),
+                    stepper_item(4, "Degradation",        "Compute the rate",  ROSE,   state=s_calc,   step_key="calc"),
+                    stepper_item(5, "Code",               "Export & reuse",    SLATE,  state=s_code,   step_key="code"),
                     # Divider between the linear workflow (steps 1-4)
                     # and the always-on Chat helper.  A 1px gray line
                     # sitting in 14px of vertical breathing room reads
@@ -1949,6 +1955,14 @@ _PVPRO_STEP_CFG = {
 }
 
 
+# Base style of the stepper's middle input — module-level so callbacks can
+# restore it or apply the "auto-filled from your data" highlight variant.
+_PVPRO_MID_BASE = {**_param_input_style, "borderRadius": "0", "textAlign": "center",
+                   "minWidth": "0", "flex": "1 1 auto"}
+_PVPRO_MID_AUTOFILL = {**_PVPRO_MID_BASE, "background": "#eff6ff",
+                       "border": "1px solid #60a5fa", "fontWeight": "600"}
+
+
 def _pvpro_num_field(label, id_suffix, value, prefix=""):
     """A labelled numeric field with its own − / + buttons flanking the input.
     `prefix` is '' for Advanced ids (param-pvpro-*) or 'simple-' for Simple."""
@@ -1956,8 +1970,7 @@ def _pvpro_num_field(label, id_suffix, value, prefix=""):
     step, minv, decimals = _PVPRO_STEP_CFG[id_suffix]
     left = {**_step_btn_style, "borderRadius": "6px 0 0 6px", "borderRight": "none"}
     right = {**_step_btn_style, "borderRadius": "0 6px 6px 0", "borderLeft": "none"}
-    mid = {**_param_input_style, "borderRadius": "0", "textAlign": "center",
-           "minWidth": "0", "flex": "1 1 auto"}
+    mid = dict(_PVPRO_MID_BASE)
     return html.Div([
         html.Div(label, style=_label_style),
         html.Div([
@@ -2280,6 +2293,10 @@ metric_options = [
                     ]),
                     _pvpro_num_field("Days per run", "days", 14),
                     _pvpro_num_field("Iterations per year", "iters", 12),
+                    # Filled by autofill_pvpro_params when array-layout values
+                    # could be estimated from the analyzed data.
+                    html.Div(id="pvpro-autofill-note",
+                             style={"gridColumn": "1 / -1"}),
                 ], style={"marginTop": "6px", "padding": "12px 14px",
                           "background": "#f1f5f9", "borderRadius": "8px",
                           "border": f"1px solid {BORDER}",
@@ -3005,7 +3022,10 @@ def _shared_example_btn(btn_id, label):
 
 
 shared_upload_header = html.Div(
-    [
+    # id makes this the scroll target for the sidebar's "Load the data" step
+    # (the stepper-click callback maps step "load" -> "agent-load-wrap").
+    id="agent-load-wrap",
+    children=[
         html.Div("LOAD YOUR DATA", style={
             "fontSize": "15px", "color": ACCENT, "fontWeight": "800",
             "fontFamily": "Arial, sans-serif", "textTransform": "uppercase",
@@ -6361,6 +6381,71 @@ def reset_pvpro_params_on_new_data(*_):
 
 
 # =============================================================================
+# CALLBACK — AUTO-FILL PVPRO ARRAY PARAMS FROM THE DATA
+#
+# After Analyze (mapped-vars-store updates), estimate what the data can tell
+# us about the array layout — modules per string from the median DC operating
+# voltage, parallel strings from the median DC current — and pre-fill those
+# fields. Auto-filled inputs get a blue highlight and a note under the grid
+# says exactly what was filled and from what, so the user knows to review
+# rather than assume they typed it. Fields that can't be estimated are left
+# untouched at their defaults.
+# =============================================================================
+@app.callback(
+    Output("param-pvpro-mps", "value", allow_duplicate=True),
+    Output("param-pvpro-ps",  "value", allow_duplicate=True),
+    Output("param-pvpro-mps", "style"),
+    Output("param-pvpro-ps",  "style"),
+    Output("pvpro-autofill-note", "children"),
+    Input("mapped-vars-store", "data"),
+    State("dataframe-store",   "data"),
+    State("param-pvpro-cells", "value"),
+    prevent_initial_call=True,
+)
+def autofill_pvpro_params(mapping, df_json, cells):
+    base = dict(_PVPRO_MID_BASE)
+    if not mapping or not df_json:
+        # New/cleared data: back to normal look; values are handled by the
+        # reset callback.
+        return dash.no_update, dash.no_update, base, base, ""
+    try:
+        est = estimate_pvpro_params(_df_from_store(df_json), mapping,
+                                    cells_in_series=cells if cells else 60)
+    except Exception:
+        est = {}
+    if not est:
+        return dash.no_update, dash.no_update, base, base, ""
+
+    mps = est.get("modules_per_string")
+    ps = est.get("parallel_strings")
+    filled_bits = []
+    if mps:
+        filled_bits.append(f"Modules per string = {mps['value']} ({mps['basis']})")
+    if ps:
+        filled_bits.append(f"Parallel strings = {ps['value']} ({ps['basis']})")
+    note = html.Div([
+        html.Span(style={
+            "display": "inline-block", "width": "7px", "height": "7px",
+            "borderRadius": "50%", "background": "#3b82f6",
+            "marginRight": "8px", "flex": "0 0 auto", "marginTop": "5px"}),
+        html.Span([
+            html.Span("Pre-filled from your data · ", style={
+                "fontWeight": "600", "color": "#1d1d1f"}),
+            html.Span("; ".join(filled_bits) + ". Estimates assume a typical "
+                      "crystalline module — adjust if you know the real layout.",
+                      style={"color": "#6e6e73"}),
+        ], style={"fontSize": "12px", "lineHeight": "1.5"}),
+    ], style={"display": "flex", "alignItems": "flex-start", "marginTop": "4px",
+              "fontFamily": _HINT_FONT})
+
+    return (mps["value"] if mps else dash.no_update,
+            ps["value"] if ps else dash.no_update,
+            dict(_PVPRO_MID_AUTOFILL) if mps else base,
+            dict(_PVPRO_MID_AUTOFILL) if ps else base,
+            note)
+
+
+# =============================================================================
 # CALLBACK — PVPRO numeric steppers (our own − / + buttons)
 #
 # The native number-input spinners blank the value in this Dash version, so
@@ -7093,14 +7178,16 @@ app.clientside_callback(
 # =============================================================================
 @app.callback(
     Output("step-progress", "data", allow_duplicate=True),
+    Input("data-source-store",  "data"),
     Input("mapped-vars-store",  "data"),
     Input("dataframe-filtered", "data"),
     Input("degradation-result-store", "data"),
     Input("download-link",      "style"),
     prevent_initial_call="initial_duplicate",
 )
-def update_progress(mapped_vars, df_filtered, deg_result, dl_style):
+def update_progress(data_source, mapped_vars, df_filtered, deg_result, dl_style):
     return {
+        "load":   bool(data_source),                               # file/example loaded
         "data":   bool(mapped_vars),                               # data parsed
         "filter": bool(df_filtered),                               # filters applied
         "calc":   bool(deg_result) and deg_result.get("rate_pct_per_year") is not None,

@@ -1400,6 +1400,102 @@ def compute_yoy_energy(df, mapped_variables_dict, gamma=-0.004):
     return rd, fig, ci_width, int(len(ratio))
 
 
+# ---------------------------------------------------------------------------
+# PVPRO parameter estimation from the data itself.
+#
+# Typical crystalline-module operating values used to back out the array
+# layout from measured string voltage/current. Rough by nature -- the UI
+# marks these as auto-filled estimates the user should review.
+# ---------------------------------------------------------------------------
+VMP_PER_CELL = 0.51      # V at max power per crystalline cell (standard)
+MODULE_IMP_TYP = 8.5     # A at max power for a typical crystalline string
+VI_P_TOL = 0.35          # measured V*I must agree with measured P within 35%
+
+
+def estimate_pvpro_params(df, mapped_variables_dict, cells_in_series=60):
+    """Estimate PVPRO array-layout parameters FROM THE MEASUREMENTS.
+
+    All electrical quantities are measured from the dataset itself: the median
+    voltage/current/power over the TOP-DECILE power points (the array's actual
+    max-power operating region). The layout then follows arithmetically:
+
+        modules_per_string = V_measured / (cells_in_series x 0.51 V/cell)
+        parallel_strings   = I_measured / I_string
+            where I_measured is the measured current, or P_measured/V_measured
+            when no current column exists.
+
+    Before estimating, the measurements are cross-checked against each other:
+    if measured V x I disagrees with measured P by more than 35%, the columns
+    are inconsistent (e.g. an AC current fallback on a DC-side power) and NO
+    estimate is produced -- better empty than wrong.
+
+    Returns {param_name: {"value": int, "basis": str}} for the parameters the
+    data supports; {} when it can't be done honestly.
+    """
+    out = {}
+    pcol = mapped_variables_dict.get("DC Power")
+    vcol = mapped_variables_dict.get("DC Voltage")
+    icol = mapped_variables_dict.get("DC Current")
+    if not pcol or pcol not in df.columns:
+        return out
+    p = pd.to_numeric(df[pcol], errors="coerce")
+    p_hi_cut = p.quantile(0.90)
+    if not np.isfinite(p_hi_cut) or p_hi_cut <= 0:
+        return out
+    high = p >= p_hi_cut            # the array's real max-power operating region
+    if int(high.sum()) < 30:
+        return out
+    p_med = p[high].median()
+
+    v_med = None
+    if vcol and vcol in df.columns:
+        v = pd.to_numeric(df[vcol], errors="coerce")[high].median()
+        # Plausible DC string voltage only (rejects mis-scaled/AC-ish values).
+        if np.isfinite(v) and 15 <= v <= 1500:
+            v_med = float(v)
+
+    i_med, i_from = None, "measured"
+    if icol and icol in df.columns:
+        i = pd.to_numeric(df[icol], errors="coerce")[high].median()
+        if np.isfinite(i) and 0.3 <= i <= 2000:
+            i_med = float(i)
+
+    # Cross-check the measurements against each other: V x I must reproduce P.
+    # Only possible when all three exist and P is in watts-compatible units;
+    # a failed check means the mapped columns are electrically inconsistent
+    # (different sides / different sub-arrays) -> refuse to estimate.
+    if v_med is not None and i_med is not None and p_med > 0:
+        ratio = (v_med * i_med) / p_med
+        if not (1 - VI_P_TOL <= ratio <= 1 + VI_P_TOL):
+            return out
+
+    # No current column: CALCULATE it from the measured power and voltage.
+    if i_med is None and v_med is not None and p_med > 0:
+        i_calc = p_med / v_med
+        if 0.3 <= i_calc <= 2000:
+            i_med, i_from = i_calc, "P/V"
+
+    module_vmp = cells_in_series * VMP_PER_CELL
+    if v_med is not None and module_vmp > 0:
+        mps = max(1, int(round(v_med / module_vmp)))
+        if mps <= 40:
+            out["modules_per_string"] = {
+                "value": mps,
+                "basis": (f"measured {v_med:.0f} V ÷ "
+                          f"{module_vmp:.1f} V/module "
+                          f"({cells_in_series} cells × {VMP_PER_CELL} V)")}
+
+    if i_med is not None:
+        ps = max(1, int(round(i_med / MODULE_IMP_TYP)))
+        if ps <= 200:
+            src = (f"measured {i_med:.1f} A" if i_from == "measured"
+                   else f"{i_med:.1f} A calculated as P÷V")
+            out["parallel_strings"] = {
+                "value": ps,
+                "basis": f"{src} ÷ {MODULE_IMP_TYP} A/string"}
+    return out
+
+
 def aggregate_daily(df_f, irradiance_col=None):
     # Group by the post-dropna frame's OWN index. Grouping by df_f.index.date
     # (the full, original-length index) breaks with "Grouper and axis must be
