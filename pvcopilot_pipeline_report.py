@@ -24,8 +24,13 @@ Files are numbered per run (1, 2, 3, ...) so the HIGHEST number is the latest ru
 
 The focused results sheet has columns:
     dataset | total_duration_years | mean_power_w | filtering_result |
-    degradation_rate_pct_per_year | rate_reliable | missing_maps |
-    statistical_trend_method | detected_or_created_columns | why_missing
+    degradation_rate_pct_per_year | rate_reliable | unreliable_because |
+    missing_maps | multiple_matches | statistical_trend_method |
+    detected_or_created_columns | why_missing
+(unreliable_because spells out exactly which reliability checks failed when
+rate_reliable is "no" — empty when the rate is reliable.)
+(multiple_matches lists, per variable, every column that matched when there
+was more than one — with the chosen one marked "(used)".)
 (mean_power_w is in watts; units are inferred from the power column name.)
 
 Usage (always with the pvtools env):
@@ -76,7 +81,7 @@ try:
         parse_contents, normalize, low_irra_power_filter, low_power_filter,
         aggregate_daily, compute_yoy, compute_lr, compute_hw, compute_arima,
         compute_csd, rate_is_plausible, degradation_reliability, MIN_TREND_POINTS,
-        commit_llm_cache,
+        commit_llm_cache, compute_yoy_energy,
     )
     from page_supporting_files.pvcopilot_filter_functions import (
         basic_value_filter, clear_sky_filter, identify_outliers_iqr,
@@ -275,6 +280,9 @@ def run_one(path, forced_method=None):
         "rows_raw": None, "rows_filtered": None, "filtering_result": None,
         "duration_years": None, "mean_power_w": None, "mapped": {}, "method": None,
         "rd_percent_per_year": None, "rate_reliable": None, "notes": [],
+        # {role: [other valid columns]} when several columns matched one
+        # variable — surfaced as the multiple_matches column in the results CSV.
+        "alternatives": {},
     }
 
     # ---- Stage 1: ANALYZE (load + LLM column identification) ----
@@ -298,6 +306,7 @@ def run_one(path, forced_method=None):
     # so read it from df.attrs to keep flagging those rows in the batch report.
     alts = getattr(df, "attrs", {}).get("mapping_alternatives") if df is not None else None
     if alts:
+        rec["alternatives"] = alts
         for role, others in alts.items():
             rec["notes"].append(
                 f"Multiple columns matched {role}; also valid: {', '.join(others)}.")
@@ -424,16 +433,40 @@ def run_one(path, forced_method=None):
                           "a trend cannot be computed at all.")
         return rec
 
-    # ---- Stage 4: DEGRADATION (with LR fallback for sparse data) ----
-    try:
-        rd, method_used = _with_timeout(_run_degradation, df_filtered, mapping, method)
-    except FutureTimeout:
-        rec.update(stage="degradation", reason=f"Degradation exceeded {STEP_TIMEOUT_S}s timeout.")
-        return rec
-    except Exception as e:
-        rec.update(stage="degradation",
-                   reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
-        return rec
+    # ---- Stage 4: DEGRADATION ----
+    # Preferred: the energy-ratio YoY (sums each day's measured vs expected
+    # energy BEFORE trending — steadier, uses more of the data). Only the rate
+    # is reported; its internal uncertainty band feeds the reliability flag.
+    # Falls back to the classic path (point-ratio daily aggregate, LR fallback)
+    # when the energy method can't run (no irradiance / too few paired days).
+    _ci_width = None
+    rd, method_used = None, method
+    if method == "YOY" and _irr_key:
+        try:
+            _rd_e, _fig_e, _ciw, _ndays = _with_timeout(
+                compute_yoy_energy, df, mapping)
+            if _rd_e is not None and np.isfinite(_rd_e):
+                rd, method_used = float(_rd_e), "YOY"
+                rec["method"] = "YOY (energy-ratio)"
+                _ci_width, _n_daily = _ciw, _ndays
+        except Exception as e:
+            # A clean "can't run" is NaN (handled above); an exception is a
+            # BUG in the energy path — surface it instead of hiding it, then
+            # fall through to the classic path so the dataset still completes.
+            rec["notes"].append(
+                f"Energy-ratio YoY errored ({type(e).__name__}: {e}) — "
+                "fell back to the classic path.")
+
+    if rd is None:
+        try:
+            rd, method_used = _with_timeout(_run_degradation, df_filtered, mapping, method)
+        except FutureTimeout:
+            rec.update(stage="degradation", reason=f"Degradation exceeded {STEP_TIMEOUT_S}s timeout.")
+            return rec
+        except Exception as e:
+            rec.update(stage="degradation",
+                       reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
+            return rec
 
     if method_used != method:
         rec["notes"].append(
@@ -449,12 +482,13 @@ def run_one(path, forced_method=None):
 
     rec["rd_percent_per_year"] = round(float(rd), 4)
     # Report the rate but flag whether it's trustworthy, with the specific
-    # reason(s) -- too few daily points, no irradiance, short span, or an
-    # implausible value -- rather than silently presenting it as reliable.
+    # reason(s) -- too few daily points, no irradiance, short span, an
+    # implausible value, or (energy path) too-scattered year-over-year changes.
     reliable, reasons = degradation_reliability(
         rd, n_points=_n_daily, has_irradiance=bool(_irr_key),
-        duration_years=rec.get("duration_years"))
+        duration_years=rec.get("duration_years"), ci_width=_ci_width)
     rec["rate_reliable"] = reliable
+    rec["reliability_reasons"] = reasons   # -> unreliable_because in results CSV
     if not reliable:
         rec["notes"].append(
             f"Rate {rd:+.2f}%/yr is UNRELIABLE because " + "; ".join(reasons) + ".")
@@ -540,35 +574,121 @@ def _why_missing(r):
     return f"No {' and '.join(missing)} (stopped at '{stage}'): {reason}"
 
 
+def _format_multi_matches(rec):
+    """When several columns matched one variable, list them per role with the
+    one the tool chose marked '(used)'. 'none' when every role had a single
+    match. Example:
+        DC Power: dc_power__2841 (used), inv1_dc_power__2811 | Irradiance: ...
+    """
+    alts = rec.get("alternatives") or {}
+    if not alts:
+        return "none"
+    mapped = rec.get("mapped") or {}
+    parts = []
+    for role, others in alts.items():
+        chosen = mapped.get(role)
+        cols = ([f"{chosen} (used)"] if chosen else []) + list(others)
+        parts.append(f"{role}: {', '.join(cols)}")
+    return " | ".join(parts)
+
+
+RESULTS_COLS = ["dataset", "total_duration_years", "mean_power_w",
+                "filtering_result", "degradation_rate_pct_per_year",
+                "rate_reliable", "unreliable_because", "missing_maps",
+                "multiple_matches", "statistical_trend_method",
+                "detected_or_created_columns", "why_missing"]
+
+
+def _results_row(r):
+    """One dataset's results-sheet row (shared by the CSV and XLSX writers)."""
+    return {
+        "dataset": r["file"],
+        "total_duration_years":
+            "" if r.get("duration_years") is None else r["duration_years"],
+        "mean_power_w":
+            "" if r.get("mean_power_w") is None else r["mean_power_w"],
+        "filtering_result": r.get("filtering_result") or "",
+        "degradation_rate_pct_per_year":
+            "" if r.get("rd_percent_per_year") is None else r["rd_percent_per_year"],
+        "rate_reliable":
+            "" if r.get("rate_reliable") is None
+            else ("yes" if r["rate_reliable"] else "no"),
+        "unreliable_because": "; ".join(r.get("reliability_reasons") or []),
+        "missing_maps": _missing_maps(r.get("mapped")),
+        "multiple_matches": _format_multi_matches(r),
+        "statistical_trend_method": r.get("method") or "",
+        "detected_or_created_columns": _format_detected_columns(r.get("mapped")),
+        "why_missing": _why_missing(r),
+    }
+
+
 def write_results_csv(results, path):
     """Focused results sheet: one row per dataset with the tool's actual outputs
     -- the filtering result and degradation rate (when they exist), the columns
     the tool detected/created, and (when either output is missing) why."""
-    cols = ["dataset", "total_duration_years", "mean_power_w",
-            "filtering_result", "degradation_rate_pct_per_year", "rate_reliable",
-            "missing_maps", "statistical_trend_method",
-            "detected_or_created_columns", "why_missing"]
     with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=RESULTS_COLS)
         w.writeheader()
         for r in results:
-            w.writerow({
-                "dataset": r["file"],
-                "total_duration_years":
-                    "" if r.get("duration_years") is None else r["duration_years"],
-                "mean_power_w":
-                    "" if r.get("mean_power_w") is None else r["mean_power_w"],
-                "filtering_result": r.get("filtering_result") or "",
-                "degradation_rate_pct_per_year":
-                    "" if r.get("rd_percent_per_year") is None else r["rd_percent_per_year"],
-                "rate_reliable":
-                    "" if r.get("rate_reliable") is None
-                    else ("yes" if r["rate_reliable"] else "no"),
-                "missing_maps": _missing_maps(r.get("mapped")),
-                "statistical_trend_method": r.get("method") or "",
-                "detected_or_created_columns": _format_detected_columns(r.get("mapped")),
-                "why_missing": _why_missing(r),
-            })
+            w.writerow(_results_row(r))
+
+
+def write_results_xlsx(results, path):
+    """The same results sheet as a READABLE Excel file: every cell wraps its
+    text, columns have sensible widths, the header row is bold and frozen, and
+    rows whose rate is flagged unreliable get a light amber tint. (A plain CSV
+    can't carry any formatting, so this is the copy meant for human eyes.)"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ModuleNotFoundError:
+        return False   # openpyxl not installed -- CSV/JSON still written
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "results"
+
+    widths = {  # tuned per column: long free-text columns get wide + wrap
+        "dataset": 30, "total_duration_years": 10, "mean_power_w": 12,
+        "filtering_result": 24, "degradation_rate_pct_per_year": 12,
+        "rate_reliable": 9, "unreliable_because": 52, "missing_maps": 26,
+        "multiple_matches": 46, "statistical_trend_method": 16,
+        "detected_or_created_columns": 46, "why_missing": 46,
+    }
+    wrap = Alignment(wrap_text=True, vertical="top")
+    ws.append(RESULTS_COLS)
+    for i, c in enumerate(RESULTS_COLS, start=1):
+        cell = ws.cell(row=1, column=i)
+        cell.font = Font(bold=True)
+        cell.alignment = wrap
+        ws.column_dimensions[get_column_letter(i)].width = widths.get(c, 18)
+    ws.freeze_panes = "A2"
+
+    amber = PatternFill(start_color="FFF7E6", end_color="FFF7E6", fill_type="solid")
+    for r in results:
+        row = _results_row(r)
+        ws.append([row[c] for c in RESULTS_COLS])
+        for i in range(1, len(RESULTS_COLS) + 1):
+            cell = ws.cell(row=ws.max_row, column=i)
+            cell.alignment = wrap
+            if row["rate_reliable"] == "no":
+                cell.fill = amber
+        # openpyxl does NOT auto-fit wrapped rows (and neither do many
+        # viewers), so without an explicit height the wrapped lines hide
+        # behind a one-line-tall row. Estimate how many lines the longest
+        # cell wraps into (~1.9 characters per unit of column width) and
+        # size the row to show ALL of them.
+        max_lines = 1
+        for c in RESULTS_COLS:
+            text = str(row[c])
+            if not text:
+                continue
+            chars_per_line = max(int(widths.get(c, 18) * 1.9), 8)
+            max_lines = max(max_lines, -(-len(text) // chars_per_line))
+        ws.row_dimensions[ws.max_row].height = min(15 * max_lines + 4, 220)
+    wb.save(path)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -659,10 +779,15 @@ def main():
               os.path.join(REPORT_DIR, f"pvcopilot_pipeline_report_{run}.csv"))
     results_csv = os.path.join(REPORT_DIR, f"pvcopilot_results_{run}.csv")
     write_results_csv(results, results_csv)
+    # Readable Excel copy: wrapped text, sized columns, frozen bold header,
+    # amber tint on unreliable rows. Same data as the CSV.
+    results_xlsx = os.path.join(REPORT_DIR, f"pvcopilot_results_{run}.xlsx")
+    xlsx_ok = write_results_xlsx(results, results_xlsx)
 
     print("\nSummary: " + "   ".join(f"{k}: {counts[k]}" for k in STATUS_ORDER))
-    print(f"Run #{run}. Results: {os.path.relpath(results_csv, PROJECT_ROOT)} "
-          f"(highest number = latest run).")
+    print(f"Run #{run}. Results: {os.path.relpath(results_csv, PROJECT_ROOT)}"
+          + (f" + {os.path.relpath(results_xlsx, PROJECT_ROOT)}" if xlsx_ok else "")
+          + " (highest number = latest run).")
     # Non-zero exit if anything genuinely failed -- handy for CI / scripting.
     return 2 if counts["ERROR"] else 0
 

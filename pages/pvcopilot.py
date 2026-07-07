@@ -15,7 +15,7 @@ from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, low_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
-from page_supporting_files.analysis_utils import rate_is_plausible, degradation_reliability
+from page_supporting_files.analysis_utils import rate_is_plausible, degradation_reliability, compute_yoy_energy
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
@@ -4259,6 +4259,9 @@ def _alt_hint(others):
         })] + [_col_chip(c) for c in others],
         title="These columns also look valid for this variable — "
               "switch above if the selected one isn't right.",
+        # Stable hook for tests (assert presence/content without coupling to
+        # the visible label text, which is free to change).
+        className="var-alt-hint",
         style={
             "marginTop": "7px", "display": "flex", "flexWrap": "wrap",
             "alignItems": "center", "gap": "6px",
@@ -4304,10 +4307,14 @@ def _missing_hint(metric):
             html.Span(f"{lead} · ", style={"color": _HINT_INK, "fontWeight": "600"}),
             html.Span(msg, style={"color": _HINT_INK_SOFT}),
         ], style={"fontSize": "12px", "lineHeight": "1.45"}),
-    ], style={
-        "marginTop": "7px", "display": "flex", "gap": "8px",
-        "alignItems": "flex-start", "fontFamily": _HINT_FONT,
-    })
+    ],
+        # Stable hook for tests; the second class carries the severity so tests
+        # can assert red-vs-amber behavior without depending on colors/wording.
+        className=f"var-missing-hint {'blocking' if required else 'caveat'}",
+        style={
+            "marginTop": "7px", "display": "flex", "gap": "8px",
+            "alignItems": "flex-start", "fontFamily": _HINT_FONT,
+        })
 
 
 def build_variable_mapping_table(mapped_variables_dict, columns,
@@ -4963,6 +4970,12 @@ def run_filter(filter_clicks, upload_clicks,
         return [_no_data_alert("Filtering is taking longer than expected — something may be wrong "
                                "with your data. Check the file's formatting and columns, then try again."),
                 None]
+    except Exception as e:
+        # Anything else (odd data, bad parameter combination) gets a readable
+        # message instead of Dash's generic error box.
+        return [_no_data_alert(f"Filtering failed ({type(e).__name__}: {e}). "
+                               "Check the selected filters and parameter values, then try again."),
+                None]
 
     normal_indices  = df_filtered.index[current_mask]
     outlier_indices = df_filtered.index[~current_mask]
@@ -5120,6 +5133,7 @@ def run_filter(filter_clicks, upload_clicks,
     Input("load-example-btn-3",   "n_clicks"),
 
     State("dataframe-filtered",      "data"),
+    State("dataframe-store",         "data"),
     State("mapped-vars-store",       "data"),
     State("metric-selected-visible", "value"),
     State("param-yoy-window",        "value"),
@@ -5143,7 +5157,7 @@ def run_filter(filter_clicks, upload_clicks,
 def analyze_uploaded_data_callback(
         degradation_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks,
-        df_filtered_json, mapped_variables_dict, selected_metric,
+        df_filtered_json, df_raw_json, mapped_variables_dict, selected_metric,
         yoy_window, yoy_iqr, hw_period,
         arima_p, arima_d, arima_q, arima_s, csd_period,
         pvpro_cells, pvpro_mps, pvpro_ps, pvpro_alphaisc,
@@ -5262,6 +5276,20 @@ def analyze_uploaded_data_callback(
         def _compute_fast():
             daily_data = aggregate_daily(df_filtered, irra_key)
 
+            # Preferred YoY: the energy-ratio method — sums each day's measured
+            # vs expected energy on the ANALYZED frame before trending, which
+            # is steadier and uses far more of the data. Only the rate is
+            # shown; its internal uncertainty band feeds the reliability flag.
+            # Falls through to the classic path when it can't run.
+            def _run_energy():
+                if irra_key is None or not df_raw_json:
+                    return np.nan, None, np.nan, 0
+                try:
+                    _raw = _df_from_store(df_raw_json)
+                    return compute_yoy_energy(_raw, mapped_variables_dict)
+                except Exception:
+                    return np.nan, None, np.nan, 0
+
             def _run(m):
                 if m == "YOY":
                     return compute_yoy(daily_data,
@@ -5282,23 +5310,43 @@ def analyze_uploaded_data_callback(
                 else:
                     raise ValueError(f"Unknown metric: {m}")
 
-            rd, fig = _run(selected_metric)
+            # YoY: try the energy-ratio method first.
+            ci_width = np.nan
+            if selected_metric == "YOY":
+                rd_e, fig_e, ciw, _nd = _run_energy()
+                if rd_e is not None and np.isfinite(rd_e):
+                    return rd_e, fig_e, "YOY", ciw, _nd
+
+            # If the chosen method can't produce a rate — returns NaN (YoY on
+            # sparse data) OR raises (statsmodels on too-short/irregular series)
+            # — fall back to Linear Regression rather than failing the step.
+            try:
+                rd, fig = _run(selected_metric)
+            except Exception:
+                if selected_metric == "LR":
+                    raise
+                rd, fig = np.nan, None
             used = selected_metric
-            # If the chosen method can't produce a rate (e.g. YoY on sparse,
-            # irregular data), fall back to Linear Regression rather than NaN.
             if (rd is None or not np.isfinite(rd)) and selected_metric != "LR":
                 rd_lr, fig_lr = _run("LR")
                 if rd_lr is not None and np.isfinite(rd_lr):
                     rd, fig, used = rd_lr, fig_lr, "LR"
-            return rd, fig, used
+            return rd, fig, used, ci_width, None
 
         try:
-            rd, fig, _used_metric = _run_with_timeout(_compute_fast)
+            rd, fig, _used_metric, _ci_width, _n_energy_days = _run_with_timeout(_compute_fast)
         except FutureTimeout:
             return [_no_data_alert("Calculating degradation is taking longer than expected — "
                                    "something may be wrong with your data. Check the file's "
                                    "formatting and columns, then try again."),
                     "", False, "Calculate Degradation", {}, {}, True]
+        except Exception as e:
+            # E.g. statsmodels raising on too-short data or an incompatible
+            # period parameter (HW/ARIMA/CSD). Readable message, not a crash.
+            return [_no_data_alert(
+                f"{selected_metric} failed on this data ({type(e).__name__}: {e}). "
+                "Try Linear Regression, or adjust the method's parameters."),
+                "", False, "Calculate Degradation", {}, {}, True]
 
         # Reflect the method actually used (in case of fallback) in the result.
         if _used_metric != selected_metric:
@@ -5380,13 +5428,18 @@ def analyze_uploaded_data_callback(
     # Show the rate, but flag whether it's trustworthy with the SPECIFIC reasons
     # (too few daily points / no irradiance / short span / implausible value)
     # rather than presenting a sparse-data number as if it were solid.
-    try:
-        _ndaily = int(aggregate_daily(df_filtered, irra_key).dropna().shape[0])
-    except Exception:
-        _ndaily = None
+    if _n_energy_days is not None:
+        # Energy-ratio path: count the days IT actually used.
+        _ndaily = _n_energy_days
+    else:
+        try:
+            _ndaily = int(aggregate_daily(df_filtered, irra_key).dropna().shape[0])
+        except Exception:
+            _ndaily = None
     _reliable, _reasons = degradation_reliability(
         rd, n_points=_ndaily, has_irradiance=bool(irra_key),
-        duration_years=duration_years)
+        duration_years=duration_years,
+        ci_width=(_ci_width if np.isfinite(_ci_width or np.nan) else None))
     _rate_banner = _unreliable_rate_banner(rd, _reasons)
 
     degradation_layout = html.Div(
@@ -7635,6 +7688,7 @@ def simple_stage_filter(pdata):
     Output("simple-pvpro-poll-interval", "disabled", allow_duplicate=True),
     Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
     Input("simple-pipe-filtered", "data"),
+    State("simple-pipe-data",            "data"),
     State("simple-param-pvpro-cells",    "value"),
     State("simple-param-pvpro-mps",      "value"),
     State("simple-param-pvpro-ps",       "value"),
@@ -7644,7 +7698,7 @@ def simple_stage_filter(pdata):
     State("simple-param-pvpro-iters",    "value"),
     prevent_initial_call=True,
 )
-def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
+def simple_stage_calc(pfiltered, pdata, cells, mps, ps, alphaisc, tech, days, iters):
     if not pfiltered or "df_good" not in pfiltered:
         return (dash.no_update,) * 7
 
@@ -7732,8 +7786,24 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         df_good = _df_from_store(pfiltered["df_good"])
         irra_key = pfiltered["irra_key"]
         daily_data = aggregate_daily(df_good, irra_key)
-        rd, fig = compute_yoy(daily_data, rolling_window=30, iqr_multiplier=1.5)
-        _simple_method = "YoY"
+
+        # Preferred: energy-ratio YoY on the analyzed frame (steadier, uses
+        # more data). Only the rate is displayed; the internal uncertainty
+        # band feeds the reliability reasons.
+        rd, fig, _simple_method = np.nan, None, "YoY"
+        _ci_width, _n_energy_days = None, None
+        if irra_key and pdata and pdata.get("df"):
+            try:
+                _raw = _df_from_store(pdata["df"])
+                _rd_e, _fig_e, _ciw, _nd = compute_yoy_energy(
+                    _raw, pfiltered.get("mapped") or {})
+                if _rd_e is not None and np.isfinite(_rd_e):
+                    rd, fig = _rd_e, _fig_e
+                    _ci_width, _n_energy_days = _ciw, _nd
+            except Exception:
+                pass
+        if rd is None or not np.isfinite(rd):
+            rd, fig = compute_yoy(daily_data, rolling_window=30, iqr_multiplier=1.5)
         # Fall back to Linear Regression if YoY can't produce a rate (sparse /
         # irregular data) instead of returning NaN on an otherwise-fine dataset.
         if rd is None or not np.isfinite(rd):
@@ -7771,13 +7841,16 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     rate_pct = rd / 100
 
     # Reliability + specific reasons, shown with the rate (never hidden).
-    try:
-        _ndaily = int(daily_data.dropna().shape[0])
-    except Exception:
-        _ndaily = None
+    if _n_energy_days is not None:
+        _ndaily = _n_energy_days
+    else:
+        try:
+            _ndaily = int(daily_data.dropna().shape[0])
+        except Exception:
+            _ndaily = None
     _reliable, _reasons = degradation_reliability(
         rd, n_points=_ndaily, has_irradiance=bool(irra_key),
-        duration_years=duration_years)
+        duration_years=duration_years, ci_width=_ci_width)
 
     n_raw = pfiltered["n_raw"]
     n_kept = pfiltered["n_kept"]
