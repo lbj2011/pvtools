@@ -288,6 +288,66 @@ def _pvpro_drop_job(job_id):
             _PVPRO_JOBS.pop(job_id, None)
     _pvpro_debug("drop_job", job_id=job_id[:8])
 
+
+# -----------------------------------------------------------------------------
+# ANALYZE "THINKING" STATUS LINE
+#
+# While the (synchronous) Analyze callback runs, a shimmer status line under
+# the Analyze Data button narrates what is happening right now ("Reading your
+# file…", "Asking AI to identify your columns…", ...).  The mechanism mirrors
+# the PVPRO job store above — and reuses its storage backends — but is far
+# simpler because the record is only ever a message string:
+#
+#   * The analyze callback body already executes on a _TIMEOUT_POOL thread
+#     (via _run_with_timeout), so a dcc.Interval poll served by another
+#     gthread worker thread can read the message mid-run.
+#   * Records are keyed by "analyze-status:<per-tab token>:<n_clicks>" — the
+#     poll callback can derive the same key from its own States, so no job_id
+#     handshake is needed (the analyze callback couldn't provide one anyway:
+#     its response only lands when the work is already done).
+#   * Nothing ever depends on these records for correctness; a lost message
+#     just means the status line skips a beat.
+# -----------------------------------------------------------------------------
+_ANALYZE_STATUS_PREFIX = "analyze-status:"
+_ANALYZE_STATUS_TTL_S = 600
+
+
+def _analyze_status_key(token, n_clicks):
+    return f"{_ANALYZE_STATUS_PREFIX}{token}:{n_clicks}"
+
+
+def _analyze_status_set(key, message):
+    """Publish the current Analyze stage message. started_at persists from
+    the first write so the poll can show a running elapsed counter."""
+    now = time.time()
+    if _PVPRO_USE_DISKCACHE:
+        rec = _PVPRO_JOB_CACHE.get(key) or {"started_at": now}
+        rec["message"] = message
+        _PVPRO_JOB_CACHE.set(key, rec, expire=_ANALYZE_STATUS_TTL_S)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            rec = _PVPRO_JOBS.get(key) or {"started_at": now}
+            rec["message"] = message
+            _PVPRO_JOBS[key] = rec
+            # The in-memory dict has no TTL — prune stale status entries here
+            # so abandoned runs can't accumulate forever.
+            stale = [k for k, v in _PVPRO_JOBS.items()
+                     if isinstance(k, str) and k.startswith(_ANALYZE_STATUS_PREFIX)
+                     and now - v.get("started_at", now) > _ANALYZE_STATUS_TTL_S]
+            for k in stale:
+                _PVPRO_JOBS.pop(k, None)
+
+
+def _analyze_status_get(key):
+    """Snapshot of {'message', 'started_at'} for this run, or None."""
+    if _PVPRO_USE_DISKCACHE:
+        rec = _PVPRO_JOB_CACHE.get(key)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            rec = _PVPRO_JOBS.get(key)
+    return None if rec is None else dict(rec)
+
+
 # =============================================================================
 # DESIGN TOKENS — editorial / agent-chat aesthetic
 # =============================================================================
@@ -1844,8 +1904,25 @@ data_agent_body = html.Div([
             "letterSpacing": "0.01em",
         }
     ),
+    # Live "thinking" status line — hidden while idle; while an analysis is
+    # running it takes the caption's spot and narrates the current stage
+    # (fed by the analyze-status-interval poll).  The three spans are stable
+    # elements whose text is swapped in place, so the CSS shimmer/pulse
+    # animations never restart on a poll tick.
+    html.Div(
+        [
+            html.Span("✳", className="analyze-status-spark"),
+            html.Span("Starting analysis…", id="analyze-status-text",
+                      className="analyze-status-text"),
+            html.Span("", id="analyze-status-elapsed",
+                      className="analyze-status-elapsed"),
+        ],
+        id="analyze-status-line",
+        style={"display": "none"},
+    ),
     html.Div(
         "Analysis typically takes 2–10 seconds",
+        id="analyze-caption",
         style={
             "fontSize": "13px",
             "color": INK_SOFT,
@@ -2987,13 +3064,19 @@ def _success_banner(message, prefix="Note:"):
 
 
 def _working_banner(message):
-    """Blue 'in progress' banner used during the Simple-mode staged reveal."""
+    """Blue 'in progress' banner used during the Simple-mode staged reveal.
+
+    The message span carries the shimmer class of the Analyze status line
+    (no inline color — that would defeat the gradient text) so both modes
+    share the same "thinking" animation.
+    """
     return html.Div(
         [
             html.Span("⏳", style={"marginRight": "8px"}),
             html.Span(message,
+                      className="analyze-status-text",
                       style={"fontFamily": "Arial, sans-serif", "fontSize": "14px",
-                             "color": INK, "fontWeight": "600"}),
+                             "fontWeight": "600"}),
         ],
         style={"padding": "12px 16px", "background": "#eff6ff",
                "border": "1px solid #bfdbfe", "borderRadius": "10px",
@@ -4561,6 +4644,17 @@ layout = html.Div([
     dcc.Interval(id="pvpro-poll-interval", interval=1000,
                  n_intervals=0, disabled=True),
 
+    # Analyze "thinking" status line plumbing. The token is a per-tab id
+    # (filled clientside on page load) that, combined with analyze-btn's
+    # n_clicks, keys the status record — see _analyze_status_key. The
+    # interval is enabled clientside the instant Analyze is clicked and
+    # disabled again when data-summary-output lands. 450 ms keeps the
+    # narration snappy; unlike PVPRO there's no long Python fitting loop
+    # to starve of the GIL (the analyze step is mostly network + pandas).
+    dcc.Store(id="analyze-status-token", data=""),
+    dcc.Interval(id="analyze-status-interval", interval=450,
+                 n_intervals=0, disabled=True),
+
     # Main container — sidebar + chat side-by-side, BOTH inside dbc.Container so
     # their edges line up with the LBNL/DuraMAT logos in the global header.
 
@@ -6097,6 +6191,109 @@ app.clientside_callback(
 
 
 # =============================================================================
+# ANALYZE "THINKING" STATUS LINE — callbacks
+#
+# Lifecycle (see the _analyze_status_* helpers up top for the storage side):
+#   1. Page load: a per-tab token is minted clientside into
+#      analyze-status-token (keys this tab's status records).
+#   2. Analyze click: clientside instantly swaps the caption for the status
+#      line and enables analyze-status-interval — no server round-trip.
+#   3. Every 450 ms the poll callback reads the current stage message that
+#      parse_contents / the analyze callback published and mirrors it (plus
+#      an elapsed counter) into the two text spans.  Strings only, into
+#      stable spans — so the CSS shimmer never restarts mid-run.
+#   4. Completion: the analyze callback writes data-summary-output on EVERY
+#      return path (success, error, timeout), which a clientside callback
+#      uses to hide the line, restore the caption, and stop the interval.
+#      A poll already in flight can only write text into a hidden div.
+# =============================================================================
+
+# (1) Mint the per-tab token on page load. Fires with n_clicks=0 when the
+# layout mounts; keeps any existing token on later clicks.
+app.clientside_callback(
+    """
+    function(_n, existing) {
+        if (existing) { return window.dash_clientside.no_update; }
+        return "t" + Date.now().toString(36) +
+               Math.floor(Math.random() * 1e9).toString(36);
+    }
+    """,
+    Output("analyze-status-token", "data"),
+    Input("analyze-btn", "n_clicks"),
+    State("analyze-status-token", "data"),
+)
+
+# (2) Analyze clicked -> show the status line where the caption was, start
+# polling. The Python analyze callback fires on the same click and starts
+# publishing stage messages under (token, n_clicks).
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks || n_clicks === 0) {
+            var nu = window.dash_clientside.no_update;
+            return [nu, nu, nu];
+        }
+        return [
+            {"display": "flex", "alignItems": "center",
+             "justifyContent": "center", "gap": "7px", "marginTop": "8px",
+             "fontFamily": "Arial, sans-serif", "fontSize": "13px"},
+            {"display": "none"},
+            false
+        ];
+    }
+    """,
+    Output("analyze-status-line",     "style"),
+    Output("analyze-caption",         "style"),
+    Output("analyze-status-interval", "disabled"),
+    Input("analyze-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+# (4) Analysis finished (any outcome writes data-summary-output) -> hide the
+# status line, bring the caption back, stop polling, reset for the next run.
+app.clientside_callback(
+    """
+    function(_children) {
+        return [
+            {"display": "none"},
+            {"fontSize": "13px", "color": "#475569", "marginTop": "6px",
+             "textAlign": "center", "fontFamily": "Arial, sans-serif"},
+            true,
+            "Starting analysis…",
+            ""
+        ];
+    }
+    """,
+    Output("analyze-status-line",     "style",    allow_duplicate=True),
+    Output("analyze-caption",         "style",    allow_duplicate=True),
+    Output("analyze-status-interval", "disabled", allow_duplicate=True),
+    Output("analyze-status-text",     "children", allow_duplicate=True),
+    Output("analyze-status-elapsed",  "children", allow_duplicate=True),
+    Input("data-summary-output", "children"),
+    prevent_initial_call=True,
+)
+
+
+# (3) Mirror the published stage message into the status line.
+@app.callback(
+    Output("analyze-status-text",    "children"),
+    Output("analyze-status-elapsed", "children"),
+    Input("analyze-status-interval", "n_intervals"),
+    State("analyze-status-token",    "data"),
+    State("analyze-btn",             "n_clicks"),
+    prevent_initial_call=True,
+)
+def poll_analyze_status(_n, token, n_clicks):
+    rec = _analyze_status_get(_analyze_status_key(token, n_clicks))
+    if not rec or not rec.get("message"):
+        # First tick can beat the analyze callback's first publish — keep the
+        # layout's "Starting analysis…" placeholder rather than blanking.
+        return dash.no_update, dash.no_update
+    elapsed = int(time.time() - rec.get("started_at", time.time()))
+    return rec["message"], (f"{elapsed}s" if elapsed >= 1 else "")
+
+
+# =============================================================================
 # CALLBACK — DATA UPLOAD & PARSE  (UNCHANGED logic, restyled output)
 # =============================================================================
 @app.callback(
@@ -6120,11 +6317,13 @@ app.clientside_callback(
     State("dataframe-store",      "data"),
     State("data-source-store",    "data"),
     State("stored-data-file-name","data"),
+    State("analyze-status-token", "data"),
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
         analyze_clicks, example_clicks_1, example_clicks_2, example_clicks_3,
-        contents, filename, stored_df_json, data_source, stored_file_name):
+        contents, filename, stored_df_json, data_source, stored_file_name,
+        status_token):
 
     trigger = ctx.triggered_id
 
@@ -6162,18 +6361,28 @@ def analyze_uploaded_data_callback(
 
     # Analyze clicked
     if trigger == "analyze-btn":
+        # Live status line: publish stage messages under this run's key; the
+        # analyze-status-interval poll mirrors them into the UI while this
+        # callback is still executing (see the status-line callback block).
+        _status_key = _analyze_status_key(status_token, analyze_clicks)
+
+        def _status(msg):
+            _analyze_status_set(_status_key, msg)
+
+        _status("Reading your data…")
+
         # Parsing (which includes an LLM column-identification call) is capped at
         # STEP_TIMEOUT_S so a malformed file can't hang the UI indefinitely.
         try:
             if data_source == "upload" and contents is not None:
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
-                    parse_contents, contents, filename, timeout=ANALYZE_TIMEOUT_S)
+                    parse_contents, contents, filename, progress=_status, timeout=ANALYZE_TIMEOUT_S)
                 if df is None:
                     return summary_table, {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, []
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
-                    parse_contents, df=df, timeout=ANALYZE_TIMEOUT_S)
+                    parse_contents, df=df, progress=_status, timeout=ANALYZE_TIMEOUT_S)
             else:
                 return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
                         {}, None, "", False, "Analyze Data", None, "", filename, None, [])
@@ -6185,6 +6394,7 @@ def analyze_uploaded_data_callback(
             return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
                     {}, None, "", False, "Analyze Data", dash.no_update, dash.no_update, stored_file_name, None, [])
 
+        _status("Packaging your dataset…")
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
@@ -6196,6 +6406,7 @@ def analyze_uploaded_data_callback(
         duration_store = round(duration_years, 3) if duration_years is not None else None
 
         # Figures (also capped — large frames can make plotting slow).
+        _status("Rendering data preview…")
         figures_output = html.Div()
         try:
             if df is not None and mapped_variables_dict:
@@ -6207,6 +6418,8 @@ def analyze_uploaded_data_callback(
                                       style={"color": ACCENT})
         except Exception:
             figures_output = html.Div("Figure generation failed.", style={"color": ACCENT})
+
+        _status("Finishing up…")
 
         # Missing-variable warnings (no irradiance / temperature / voltage /
         # current → what each implies, incl. "no PVPRO") are rendered INLINE

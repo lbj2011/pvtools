@@ -380,3 +380,45 @@
     background: #0064AB !important;
     box-shadow: 0 1px 3px rgba(0, 100, 171, 0.25) !important;
 }
+/* ------------------------------------------------------------------ */
+/* Analyze "thinking" status line                                      */
+/* A light band sweeps through the stage text (Claude-style shimmer)   */
+/* while the Analyze pipeline narrates what it is doing right now.     */
+/* The spans live in #analyze-status-line under the Analyze button and */
+/* on the Simple-mode _working_banner message.                         */
+/* ------------------------------------------------------------------ */
+@keyframes pvcopilot-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@keyframes pvcopilot-spark-pulse {
+    0%, 100% { opacity: 0.45; transform: scale(0.92); }
+    50%      { opacity: 1;    transform: scale(1.1); }
+}
+.pvcopilot-root .analyze-status-spark {
+    color: #0064AB;
+    font-size: 14px;
+    line-height: 1;
+    animation: pvcopilot-spark-pulse 1.6s ease-in-out infinite;
+}
+/* Fallback for browsers without background-clip: text — plain slate. */
+.pvcopilot-root .analyze-status-text {
+    color: #475569;
+    font-size: 13px;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .pvcopilot-root .analyze-status-text {
+        background: linear-gradient(90deg,
+            #475569 0%, #475569 35%, #b9d2ef 50%, #475569 65%, #475569 100%);
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        animation: pvcopilot-shimmer 2.2s linear infinite;
+    }
+}
+.pvcopilot-root .analyze-status-elapsed {
+    color: #94a3b8;
+    font-size: 12px;
+}

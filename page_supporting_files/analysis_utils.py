@@ -244,18 +244,31 @@ def _looks_like_time(series, sample=20, min_frac=0.8):
 # Read data
 # ================================
 
-def parse_contents(contents=None, filename=None, df=None):
+def parse_contents(contents=None, filename=None, df=None, progress=None):
     """
     Parses uploaded file OR an existing DataFrame (example dataset),
     identifies PV variables via LLM, and returns:
 
         (df, summary_table_div, mapped_variables_dict, code_read)
+
+    `progress` is an optional callable taking a single human-readable
+    message; it is invoked at each stage boundary so the UI can show a
+    live "what am I doing right now" status line while this runs.
     """
+
+    def _p(message):
+        if progress is not None:
+            try:
+                progress(message)
+            except Exception:
+                pass  # a broken status line must never break parsing
 
     # -----------------------------
     # 1. Load dataframe
     # -----------------------------
     if df is None:
+
+        _p("Reading your file…")
 
         if contents is None:
             return None, html.Div("Please upload a file to analyze."), {}, None, []
@@ -295,6 +308,7 @@ def parse_contents(contents=None, filename=None, df=None):
     # ----------------------------------
     # 1.5 Detect if time is in index
     # ----------------------------------
+    _p("Checking timestamps…")
     time_in_index = False
 
     if isinstance(df.index, pd.DatetimeIndex):
@@ -496,6 +510,7 @@ def parse_contents(contents=None, filename=None, df=None):
         # exact column-signature if we've seen it. temperature=0/seed=0 alone is
         # NOT enough (the gateway doesn't honor the seed), so the cache is what
         # guarantees the same file maps the same way every run.
+        _p("Identifying data columns…")
         cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         raw_candidates = _llm_cache_get(cache_key)
         # Only SAVE the mapping once the dataset is confirmed GOOD downstream.
@@ -505,6 +520,7 @@ def parse_contents(contents=None, filename=None, df=None):
         _cache_miss = raw_candidates is None
 
         if _cache_miss:
+            _p("Asking AI to identify your columns…")
             # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
             # Some models reject these params -- fall back to a plain call if so.
             try:
@@ -638,6 +654,7 @@ def parse_contents(contents=None, filename=None, df=None):
             return None, None
 
         # Voltage / Current (needed for PVPRO and for V*I power).
+        _p("Mapping variables to columns…")
         v_col, v_side = _resolve_dc_ac("DC Voltage", "AC Voltage", "voltage")
         i_col, i_side = _resolve_dc_ac("DC Current", "AC Current", "current")
 
@@ -825,6 +842,7 @@ def parse_contents(contents=None, filename=None, df=None):
             (cache_key, raw_candidates) if _cache_miss else None)
 
         # Build the read-only mapping table for display (canonical roles).
+        _p("Building data summary…")
         display_roles = ["Time", "DC Power", "DC Voltage", "DC Current",
                          "Irradiance", "Module temperature"]
         mapping_df = pd.DataFrame(
