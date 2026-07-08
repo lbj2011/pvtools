@@ -2591,7 +2591,7 @@ def build_hero(eyebrow, sub_children):
                 "letterSpacing": "0.12em",
                 "marginBottom": "12px",
             }),
-            html.H1("Drop your data, get the degradation rate.", style={
+            html.H1("Agentic PV Degradation Analysis", style={
                 "fontSize": "40px",
                 "fontFamily": "Arial, sans-serif",
                 "fontWeight": "700",
@@ -2651,7 +2651,7 @@ _common_hero_bullets = html.Ul(
 common_header = html.Div(
     html.Div(
         [
-            html.Div("AGENTIC PV DEGRADATION ANALYSIS", style={
+            html.Div("LLM-EMPOWERED ANALYSIS", style={
                 "fontSize": "15px",
                 "color": ACCENT,
                 "fontFamily": "Arial, sans-serif",
@@ -2660,7 +2660,7 @@ common_header = html.Div(
                 "letterSpacing": "0.12em",
                 "marginBottom": "12px",
             }),
-            html.H1("Drop your data, get the degradation rate.", style={
+            html.H1("Agentic PV Degradation Analysis", style={
                 "fontSize": "40px",
                 "fontFamily": "Arial, sans-serif",
                 "fontWeight": "700",
