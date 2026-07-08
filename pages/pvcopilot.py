@@ -1865,7 +1865,11 @@ shared_upload_header = html.Div(
             }
         ),
 
-        html.Div(id="upload-status-output", style={"marginTop": "10px"}),
+        html.Div(
+            html.Div("Awaiting file…",
+                     style={"color": INK_SOFT, "fontSize": "13px",
+                            "fontFamily": "Arial, sans-serif"}),
+            id="upload-status-output", style={"marginTop": "10px"}),
 
         # Example buttons
         html.Div(
@@ -3766,7 +3770,7 @@ app.clientside_callback(
     Output("data-summary-output",  "children"),
     Output("stored-data-file-name","data"),
     Input("upload-data", "filename"),
-    prevent_initial_call=False
+    prevent_initial_call=True
 )
 def update_upload_status(filename):
     if filename:
