@@ -2349,6 +2349,37 @@ stat_metric_options  = [o for o in metric_options if o["value"] != "PVPRO"]
 pvpro_metric_options = [o for o in metric_options if o["value"] == "PVPRO"]
 
 
+# Minimum dataset span (years) before YoY is offered. YoY compares each day to
+# the same day one year earlier, so it strictly needs data spanning more than a
+# year to yield any comparison. Set to 1.0 per request; raise toward 2.0 for
+# more robust YoY (a ~1-year span yields very few comparison points).
+_MIN_YEARS_FOR_YOY = 1.0
+
+
+def _duration_years(df):
+    """Time span of a datetime-indexed frame, in years. Returns None if it
+    can't be determined (non-datetime index, empty frame, etc.)."""
+    try:
+        idx = pd.to_datetime(df.index)
+        return (idx.max() - idx.min()).days / 365.25
+    except Exception:
+        return None
+
+
+def build_stat_metric_options(disable_yoy=False):
+    """Return the statistical-method radio options, optionally greying out YoY.
+
+    For datasets shorter than _MIN_YEARS_FOR_YOY, YoY is disabled (and the
+    gating callback falls the selection back to LR)."""
+    opts = []
+    for o in stat_metric_options:
+        if disable_yoy and o["value"] == "YOY":
+            opts.append({**o, "disabled": True})
+        else:
+            opts.append(o)
+    return opts
+
+
 def _metric_category_heading(text):
     """Small uppercase, letter-spaced heading used to introduce each category
     of degradation method in the radio group."""
@@ -2383,7 +2414,7 @@ calc_agent_body = html.Div([
         dcc.RadioItems(
             id="metric-stat-radio",
             value="YOY",
-            options=stat_metric_options,
+            options=build_stat_metric_options(disable_yoy=False),
             labelStyle={"display": "block", "marginBottom": "10px",
                         "cursor": "pointer", "color": "inherit"},
             labelClassName="metric-radio-label",
@@ -2391,6 +2422,8 @@ calc_agent_body = html.Div([
                         "accentColor": NAVY},
             style={"marginBottom": "0"},
         ),
+        # Populated by gate_yoy_by_duration() when the dataset is too short.
+        html.Div(id="yoy-disabled-note", style={"display": "none"}),
 
         # Visual separator between the two categories.  Stepped up from
         # the BORDER token (#e2e8f0) to slate-400 because lighter shades
@@ -3759,6 +3792,47 @@ app.clientside_callback(
     Input("metric-stat-radio",  "value"),
     Input("metric-pvpro-radio", "value"),
 )
+
+
+# =============================================================================
+# CALLBACK — DISABLE YoY FOR SHORT DATASETS (< _MIN_YEARS_FOR_YOY)
+#
+# YoY pairs each day with the same calendar day one year earlier, so it needs a
+# span longer than a year to yield any comparison. When the analyzed dataset is
+# shorter, grey out the YoY option and, if it was selected, fall the selection
+# back to LR (the clientside sync above then mirrors it into the hidden master
+# radio). Fires whenever a new dataset is analyzed (dataframe-store changes).
+# =============================================================================
+@app.callback(
+    Output("metric-stat-radio", "options", allow_duplicate=True),
+    Output("metric-stat-radio", "value",   allow_duplicate=True),
+    Output("yoy-disabled-note", "children"),
+    Output("yoy-disabled-note", "style"),
+    Input("dataframe-store",     "data"),
+    State("metric-stat-radio",   "value"),
+    prevent_initial_call=True,
+)
+def gate_yoy_by_duration(df_json, current_value):
+    try:
+        df = _df_from_store(df_json) if df_json else None
+    except Exception:
+        df = None
+    duration_years = _duration_years(df) if df is not None else None
+
+    disable_yoy = duration_years is not None and duration_years < _MIN_YEARS_FOR_YOY
+    options = build_stat_metric_options(disable_yoy=disable_yoy)
+    if disable_yoy:
+        new_value = "LR" if current_value == "YOY" else dash.no_update
+        note = (f"YoY needs at least {_MIN_YEARS_FOR_YOY:g} year"
+                f"{'s' if _MIN_YEARS_FOR_YOY != 1 else ''} of data; "
+                "it's disabled for this dataset.")
+        note_style = {"fontSize": "12px", "color": "#92400e", "fontStyle": "italic",
+                      "marginTop": "8px", "fontFamily": "Arial, sans-serif"}
+    else:
+        new_value = dash.no_update
+        note = ""
+        note_style = {"display": "none"}
+    return options, new_value, note, note_style
 
 
 # =============================================================================
@@ -5167,8 +5241,100 @@ _MAP_METRICS = [
 _REQUIRED_FOR_DEGRADATION = {"DC Power", "Time"}
 
 
+# -----------------------------------------------------------------------------
+# Inline notices shown UNDER each mapping row: quiet grays, hairline borders;
+# color is reserved for a single small status dot on the missing-variable
+# notices (red = blocks degradation, amber = caveat only).
+# -----------------------------------------------------------------------------
+_HINT_FONT = ("-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', "
+              "Roboto, Helvetica, Arial, sans-serif")
+_HINT_INK = "#1d1d1f"          # primary text
+_HINT_INK_SOFT = "#86868b"     # secondary text
+_HINT_HAIRLINE = "#d2d2d7"     # pill border
+_HINT_FILL = "#ffffff"         # pill fill
+
+
+def _col_chip(name):
+    """A column name as a quiet, hairline pill."""
+    return html.Span(name, style={
+        "fontFamily": "SFMono-Regular, ui-monospace, Menlo, monospace",
+        "fontSize": "11px", "color": _HINT_INK,
+        "background": _HINT_FILL,
+        "border": f"1px solid {_HINT_HAIRLINE}",
+        "borderRadius": "980px", "padding": "2.5px 10px",
+        "whiteSpace": "nowrap", "display": "inline-block",
+    })
+
+
+def _alt_hint(others):
+    """A quiet one-line notice listing the other valid columns for a role,
+    shown under that row's dropdown. Returns "" when there's nothing to add."""
+    if not others:
+        return ""
+    return html.Div(
+        [html.Span("Also detected", style={
+            "fontSize": "11px", "color": _HINT_INK_SOFT,
+            "fontWeight": "500", "flex": "0 0 auto",
+        })] + [_col_chip(c) for c in others],
+        title="These columns also look valid for this variable — "
+              "switch above if the selected one isn't right.",
+        className="var-alt-hint",
+        style={
+            "marginTop": "7px", "display": "flex", "flexWrap": "wrap",
+            "alignItems": "center", "gap": "6px",
+            "fontFamily": _HINT_FONT, "lineHeight": "1.4",
+        },
+    )
+
+
+# What a MISSING variable means for the analysis, shown inline under its row.
+# (message, is_required): required variables block degradation entirely (red);
+# the rest only reduce accuracy or disable PVPRO (amber).
+_MISSING_HINT = {
+    "DC Power": ("Degradation can't run without power. Select a power column — "
+                 "or pick voltage + current and it's derived as V × I.", True),
+    "Time": ("Degradation can't run without timestamps. Select the time "
+             "column.", True),
+    "DC Voltage": ("PVPRO physics analysis can't be run — it needs both "
+                   "voltage and current.", False),
+    "DC Current": ("PVPRO physics analysis can't be run — it needs both "
+                   "voltage and current.", False),
+    "Irradiance": ("The rate won't be weather-normalized, so it's less "
+                   "reliable.", False),
+    "Module temperature": ("No temperature correction will be applied.", False),
+}
+
+
+def _missing_hint(metric):
+    """A quiet inline notice under a row whose variable wasn't detected: a small
+    status dot (red = blocks degradation, amber = caveat only) and one line of
+    muted text explaining what the absence means."""
+    entry = _MISSING_HINT.get(metric)
+    if not entry:
+        return ""
+    msg, required = entry
+    dot = "#ff3b30" if required else "#ff9f0a"      # red (blocker) / amber (caveat)
+    lead = "Required" if required else "Not detected"
+    return html.Div([
+        html.Span(style={
+            "width": "6px", "height": "6px", "borderRadius": "50%",
+            "background": dot, "flex": "0 0 auto", "marginTop": "6px",
+        }),
+        html.Span([
+            html.Span(f"{lead} · ", style={"color": _HINT_INK, "fontWeight": "600"}),
+            html.Span(msg, style={"color": _HINT_INK_SOFT}),
+        ], style={"fontSize": "12px", "lineHeight": "1.45"}),
+    ],
+        className=f"var-missing-hint {'blocking' if required else 'caveat'}",
+        style={
+            "marginTop": "7px", "display": "flex", "gap": "8px",
+            "alignItems": "flex-start", "fontFamily": _HINT_FONT,
+        })
+
+
 def build_variable_mapping_table(mapped_variables_dict, columns,
-                                 time_in_index=False, status_children=None):
+                                 time_in_index=False, status_children=None,
+                                 alternatives=None):
     """Build an editable variable-mapping table.
 
     Args:
@@ -5177,12 +5343,18 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
         time_in_index: whether the Time variable is the DataFrame index.
         status_children: optional element rendered in the status slot (used by
             the Apply callback to show the confirmation/warning after re-render).
+        alternatives: optional {metric: [other valid column names]} — when a role
+            had more than one valid match, the others are pinned at the top of
+            that row's dropdown and listed as a subtle hint under it. Populated
+            from df.attrs["mapping_alternatives"] when parse_contents provides
+            it; safely defaults to none.
 
     Returns:
         A Dash component (the editable table + apply button + status line).
     """
     mapped_variables_dict = mapped_variables_dict or {}
     columns = list(columns or [])
+    alternatives = alternatives or {}
 
     header = html.Div([
         html.Div("Metric", style={
@@ -5200,24 +5372,64 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
     })
 
     rows = []
+    # Friendly group names per metric for the dropdown's pinned section.
+    _ROLE_GROUP = {
+        "DC Power": "Power columns", "DC Voltage": "Voltage columns",
+        "DC Current": "Current columns", "Irradiance": "Irradiance columns",
+        "Module temperature": "Temperature columns", "Time": "Time columns",
+    }
+
+    def _group_header(text, key):
+        """A non-selectable section header inside the dropdown."""
+        return {
+            "label": html.Span(text, style={
+                "fontSize": "10px", "fontWeight": "700", "color": "#86868b",
+                "textTransform": "uppercase", "letterSpacing": "0.08em",
+                "cursor": "default",
+            }),
+            "value": f"__hdr__{key}__", "disabled": True, "search": "",
+        }
+
+    def _valid_opt(c, label=None):
+        """A recognized-for-this-role column: bold, with a small accent dot."""
+        return {
+            "label": html.Span([
+                html.Span(style={
+                    "display": "inline-block", "width": "6px", "height": "6px",
+                    "borderRadius": "50%", "background": ACCENT,
+                    "marginRight": "8px", "verticalAlign": "middle",
+                }),
+                html.Span(label or c, style={"fontWeight": "600", "color": INK}),
+            ]),
+            "value": c, "search": label or c,
+        }
+
     for i, metric in enumerate(_MAP_METRICS):
         current = mapped_variables_dict.get(metric)
 
-        # Time options: offer the index sentinel plus any real columns.
-        if metric == "Time":
-            opts = []
-            if time_in_index or current == "__index__":
-                opts.append({"label": "(use index / __index__)",
-                             "value": "__index__"})
-            opts += [{"label": c, "value": c} for c in columns]
-            # Make sure the current value is selectable even if odd.
-            if current and current not in [o["value"] for o in opts]:
-                opts.insert(0, {"label": current, "value": current})
-        else:
-            opts = [{"label": c, "value": c} for c in columns]
-            if current and current not in columns:
-                # LLM picked something not in the column list — keep it visible.
-                opts.insert(0, {"label": current, "value": current})
+        # Columns recognized as THIS variable: the detected one + any valid
+        # alternatives. They're pinned at the top under a labeled group so the
+        # right candidates are always one glance away.
+        valid = []
+        if metric == "Time" and (time_in_index or current == "__index__"):
+            valid.append("__index__")
+        if current and current not in valid:
+            valid.append(current)
+        for c in alternatives.get(metric, []):
+            if c not in valid:
+                valid.append(c)
+
+        rest = [c for c in columns if c not in valid]
+
+        opts = []
+        if valid:
+            opts.append(_group_header(_ROLE_GROUP.get(metric, metric), metric))
+            for c in valid:
+                opts.append(_valid_opt(
+                    c, label="(use index / __index__)" if c == "__index__" else None))
+            if rest:
+                opts.append(_group_header("All columns", f"{metric}-all"))
+        opts += [{"label": c, "value": c, "search": c} for c in rest]
 
         detected = bool(current)
         dot_color = "#16a34a" if detected else "#d97706"   # green / amber
@@ -5236,7 +5448,7 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                 }),
             ], style={"flex": "0 0 42%", "display": "flex",
                       "alignItems": "center"}),
-            html.Div(
+            html.Div([
                 dcc.Dropdown(
                     id={"type": "var-map-dd", "metric": metric},
                     options=opts,
@@ -5245,10 +5457,13 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     clearable=True,
                     style={"fontSize": "13px"},
                 ),
-                style={"flex": "1"},
-            ),
+                # Inline note under the row: if the variable is missing, what
+                # that means for the analysis; otherwise, other valid columns.
+                _missing_hint(metric) if not detected
+                else _alt_hint(alternatives.get(metric)),
+            ], style={"flex": "1"}),
         ], style={
-            "display": "flex", "alignItems": "center", "gap": "14px",
+            "display": "flex", "alignItems": "flex-start", "gap": "14px",
             "padding": "8px 4px",
             "background": "#ffffff" if i % 2 else "#f1f5f9",
             "borderRadius": "6px",
@@ -5335,18 +5550,22 @@ def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns
             style={"marginBottom": "0", "fontSize": "13px"},
         )
 
-    # Rebuild the mapping panel so the dots match the applied state.
-    time_in_index = new_mapping.get("Time") == "__index__"
-    panel = build_variable_mapping_table(
-        new_mapping, data_columns or [],
-        time_in_index=time_in_index, status_children=status,
-    )
-
     # Redraw figures from the new mapping — unselected variables are not drawn.
     try:
         df = _df_from_store(df_json) if df_json else None
     except Exception:
         df = None
+
+    # Rebuild the mapping panel so the dots match the applied state, keeping the
+    # same "also detected" alternatives (if parse_contents provided them).
+    time_in_index = new_mapping.get("Time") == "__index__"
+    alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
+    panel = build_variable_mapping_table(
+        new_mapping, data_columns or [],
+        time_in_index=time_in_index, status_children=status,
+        alternatives=alternatives,
+    )
+
     figures = _build_overview_figures_div(df, new_mapping)
 
     return new_mapping, panel, figures
@@ -5404,13 +5623,13 @@ def analyze_uploaded_data_callback(
     # Analyze clicked
     if trigger == "analyze-btn":
         if data_source == "upload" and contents is not None:
-            df, summary_table, mapped_variables_dict, code_read = parse_contents(contents, filename)
+            df, summary_table, mapped_variables_dict, code_read, mapping_notes = parse_contents(contents, filename)
             if df is None:
                 return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
         elif data_source == "example" and stored_df_json is not None:
             try:
                 df = _df_from_store(stored_df_json)
-                df, summary_table, mapped_variables_dict, code_read = parse_contents(df=df)
+                df, summary_table, mapped_variables_dict, code_read, mapping_notes = parse_contents(df=df)
             except Exception as e:
                 return (html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
                         {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
@@ -5436,12 +5655,41 @@ def analyze_uploaded_data_callback(
         figures_output = _build_overview_figures_div(df, mapped_variables_dict)
 
         # Editable variable-mapping table (defaults to LLM detection; user can
-        # override any row, or fill in rows the LLM missed).
+        # override any row, or fill in rows the LLM missed). When a role had
+        # several valid matches, the others are pinned in that row's dropdown
+        # and shown inline — parse_contents stashes them on df.attrs if it
+        # supports it; otherwise this is simply empty.
+        alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
         editable_mapping = build_variable_mapping_table(
             mapped_variables_dict, data_columns, time_in_index=time_in_index,
+            alternatives=alternatives,
         )
 
+        # Transformation caveats from parse_contents (AC fallback, DC Power
+        # computed as V×I, gappy columns, time-from-values). Shown once, above
+        # the mapping table; empty list -> nothing rendered.
+        notes_block = None
+        if mapping_notes:
+            notes_block = html.Div(
+                [html.Div("data notes", style={
+                    "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                    "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "8px",
+                    "fontFamily": "Arial, sans-serif",
+                })] + [
+                    html.Div("• " + n, style={
+                        "fontSize": "13px", "color": INK, "lineHeight": "1.5",
+                        "fontFamily": "Arial, sans-serif", "marginBottom": "3px",
+                    }) for n in mapping_notes
+                ],
+                style={
+                    "padding": "12px 16px", "marginBottom": "16px",
+                    "background": "#fffbeb", "border": "1px solid #fcd34d",
+                    "borderRadius": "10px",
+                },
+            )
+
         combined_output = html.Div([
+            notes_block if notes_block is not None else "",
             html.Div([
                 html.Div("identified variables", style={
                     "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
@@ -6900,10 +7148,10 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
     try:
         if data_source == "example" and stored_df_json:
             df_raw = _df_from_store(stored_df_json)
-            df, summary_table, mapped, code_read = parse_contents(df=df_raw)
+            df, summary_table, mapped, code_read, mapping_notes = parse_contents(df=df_raw)
             source_name = _EXAMPLE_FRIENDLY.get(stored_file_name, "Example data")
         elif data_source == "upload" and contents is not None:
-            df, summary_table, mapped, code_read = parse_contents(contents, filename)
+            df, summary_table, mapped, code_read, mapping_notes = parse_contents(contents, filename)
             source_name = filename or "your file"
         else:
             return _simple_fail(_no_data_alert(

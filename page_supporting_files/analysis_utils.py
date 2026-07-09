@@ -4,6 +4,8 @@ import io
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 import base64, os, json
+import hashlib
+import threading
 import openai
 # import rdtools
 import ast
@@ -40,28 +42,209 @@ client = openai.OpenAI(
     api_key= OPENAI_API_KEY
 )
 
+# Model used for column identification. (Kept as a constant so parse_contents
+# and any future caller reference one place.)
+LLM_MODEL = "gpt-5.4-nano"
+
+# ---------------------------------------------------------------------------
+# Deterministic LLM column-identification cache.
+#
+# The LLM (even at temperature=0 / seed=0) does NOT return the same candidate
+# lists every call, so the SAME file could map to different columns run-to-run.
+# The prompt depends only on the column NAMES (not the data), so we hash it and
+# cache the result on disk: the first run for a given column-signature calls the
+# LLM; every run after that reuses it. Delete the cache file to force a refresh.
+# (The mapping is only committed once the caller confirms a good run — see
+# commit_llm_cache — so a wrong mapping from a bad dataset is never locked in.)
+# ---------------------------------------------------------------------------
+_LLM_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               ".llm_id_cache.json")
+_LLM_CACHE_LOCK = threading.Lock()
+_LLM_CACHE = None  # loaded lazily
+
+
+def _llm_cache_load():
+    global _LLM_CACHE
+    if _LLM_CACHE is None:
+        try:
+            with open(_LLM_CACHE_PATH, "r") as f:
+                _LLM_CACHE = json.load(f)
+        except Exception:
+            _LLM_CACHE = {}
+    return _LLM_CACHE
+
+
+def _llm_cache_get(key):
+    with _LLM_CACHE_LOCK:
+        return _llm_cache_load().get(key)
+
+
+def _llm_cache_put(key, value):
+    # Load-modify-write under a lock, with an atomic replace, so parallel
+    # workers can't corrupt the file.
+    with _LLM_CACHE_LOCK:
+        cache = _llm_cache_load()
+        cache[key] = value
+        try:
+            tmp = _LLM_CACHE_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(cache, f)
+            os.replace(tmp, _LLM_CACHE_PATH)
+        except Exception:
+            pass
+
+
+def commit_llm_cache(df):
+    """Save the column-mapping the LLM produced for this dataframe to the cache,
+    but ONLY when the caller has decided the run was GOOD. parse_contents stashes
+    the freshly-identified mapping as 'pending' on df.attrs; nothing is written
+    until this is called. A no-op on a cache hit or when nothing is pending."""
+    pending = getattr(df, "attrs", {}).get("_llm_cache_pending") if df is not None else None
+    if pending:
+        key, value = pending
+        _llm_cache_put(key, value)
+
+
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
+
+
+# Column usability is judged by how much REAL data it carries -- both an
+# absolute count and the missingness rate. The ceiling is deliberately high: a
+# column that is, say, 64% missing but still has >1000 real values is usable and
+# must NOT be discarded in favor of a worse fallback. Only genuinely dead /
+# near-empty columns are dropped.
+MAX_MISSING_FRAC = 0.9      # drop only near-dead columns (>90% missing)
+FLAG_MISSING_FRAC = 0.05    # flag columns 5-90% missing as gappy
+MIN_VALID_POINTS = 10       # absolute floor: fewer real values than this -> drop
+# Min plausible irradiance peak (95th pct, W/m^2). Below this the column is the
+# wrong units / a dead sensor, so we ignore it rather than void every row.
+MIN_IRRADIANCE_PEAK = 50.0
+
+
+# A per-device channel names a specific inverter / mppt / string / combiner /
+# meter / zone by NUMBER (inv1, mppt_2, ...). A system-level column has no such
+# device index; for whole-system degradation the system total is preferred.
+_DEVICE_LEVEL_RE = re.compile(
+    r'(?:inv|inverter|mppt|string|combiner|cb|ch|meter|zone|block|array)[\s_]*\d',
+    re.I)
+
+
+def _is_device_level(col):
+    """True if a column name targets one numbered device (inv1, mppt_2, ...)."""
+    return bool(_DEVICE_LEVEL_RE.search(str(col)))
+
+
+def _missing_frac(df, col):
+    """Fraction of a column that is missing (non-numeric/blank counts as missing)."""
+    if col not in df.columns or len(df) == 0:
+        return 1.0
+    return float(pd.to_numeric(df[col], errors="coerce").isna().mean())
+
+
+def _best_by_data(df, cols):
+    """Pick the column that actually carries data among candidate column names.
+
+    A candidate is usable only if it is at most MAX_MISSING_FRAC missing, has at
+    least MIN_VALID_POINTS real values, and isn't all-zero/constant (nunique<=1).
+    A name match is NOT enough. Among the usable ones, prefer system-level over
+    per-device, then most non-null values, then highest variance, then order.
+
+    Returns (best_col_or_None, viable_cols).
+    """
+    total = len(df)
+    viable, stats = [], {}
+    for c in cols or []:
+        if c not in df.columns:
+            continue
+        s = pd.to_numeric(df[c], errors="coerce")
+        non_null = int(s.notna().sum())
+        missing_frac = 1.0 - (non_null / total) if total else 1.0
+        if missing_frac > MAX_MISSING_FRAC:     # too sparse -> drop
+            continue
+        if non_null < MIN_VALID_POINTS:         # absolute floor for tiny frames
+            continue
+        nunique = int(s.nunique(dropna=True))
+        if nunique <= 1:            # drops constant / all-zero (all-NaN handled above)
+            continue
+        viable.append(c)
+        stats[c] = (non_null, float(s.var(skipna=True) or 0.0))
+    if not viable:
+        return None, []
+    order = {c: i for i, c in enumerate(cols)}
+    best = min(viable, key=lambda c: (
+        _is_device_level(c),        # False(0) = system-level sorts first
+        -stats[c][0],               # more non-null first
+        -stats[c][1],               # higher variance first
+        order.get(c, 1 << 30),      # then the candidate's listed order
+    ))
+    return best, viable
+
+
+_TIME_NAME_RE = re.compile(
+    r'(?:^|[^a-z])(timestamp|datetime|measured_on|meas_on|date|time|utc|epoch)(?:[^a-z]|$)',
+    re.I)
+
+_IRR_NAME_RE = re.compile(
+    r'irradian|irrad|poa|ghi|dni|pyran|insol|solar|g_poa|ref_cell|isc_ref', re.I)
+
+
+def _name_looks_like_time(name):
+    """True if a column NAME reads like a timestamp, matched as whole tokens so
+    'update'/'runtime' don't false-positive."""
+    return bool(_TIME_NAME_RE.search(str(name)))
+
+
+def _looks_like_time(series, sample=20, min_frac=0.8):
+    """True if a column's VALUES look like timestamps: sample the first non-null
+    values, parse as datetimes, require most to parse AND not all identical.
+
+    Numeric columns are rejected outright -- pd.to_datetime would read integers
+    as nanoseconds-since-epoch. A datetime-typed column passes immediately.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return False
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series.dropna().nunique() > 1
+    vals = series.dropna().head(sample)
+    if len(vals) == 0:
+        return False
+    parsed = pd.to_datetime(vals, errors="coerce")
+    frac_ok = parsed.notna().mean()
+    return bool(frac_ok >= min_frac and parsed.nunique(dropna=True) > 1)
 
 # ================================
 # Read data
 # ================================
 
-def parse_contents(contents=None, filename=None, df=None):
+def parse_contents(contents=None, filename=None, df=None, progress=None):
     """
     Parses uploaded file OR an existing DataFrame (example dataset),
     identifies PV variables via LLM, and returns:
 
         (df, summary_table_div, mapped_variables_dict, code_read)
+
+    `progress` is an optional callable taking a single human-readable
+    message; it is invoked at each stage boundary so the UI can show a
+    live "what am I doing right now" status line while this runs.
     """
+
+    def _p(message):
+        if progress is not None:
+            try:
+                progress(message)
+            except Exception:
+                pass  # a broken status line must never break parsing
 
     # -----------------------------
     # 1. Load dataframe
     # -----------------------------
     if df is None:
 
+        _p("Reading your file…")
+
         if contents is None:
-            return None, html.Div("Please upload a file to analyze."), {}, None
+            return None, html.Div("Please upload a file to analyze."), {}, None, []
 
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
@@ -83,13 +266,13 @@ def parse_contents(contents=None, filename=None, df=None):
                 return None, html.Div(
                     f"Unsupported file type: {filename}",
                     className="alert alert-danger"
-                ), {}, None
+                ), {}, None, []
 
         except Exception as e:
             return None, html.Div(
                 f"There was an error processing the file: {e}",
                 className="alert alert-danger"
-            ), {}, None
+            ), {}, None, []
 
     else:
         # Example dataset case
@@ -98,12 +281,18 @@ def parse_contents(contents=None, filename=None, df=None):
     # ----------------------------------
     # 1.5 Detect if time is in index
     # ----------------------------------
+    _p("Checking timestamps…")
     time_in_index = False
 
     if isinstance(df.index, pd.DatetimeIndex):
         time_in_index = True
-    else:
-        # Try converting index to datetime (non-destructive check)
+    elif not pd.api.types.is_numeric_dtype(df.index):
+        # Try converting index to datetime (non-destructive check).
+        # Guard: only attempt this for a NON-numeric index. A plain integer
+        # RangeIndex (0,1,2,...) -- which pd.read_csv produces for every
+        # uploaded CSV whose time lives in a column -- would otherwise be
+        # parsed by pd.to_datetime as nanoseconds-since-epoch, collapsing every
+        # row onto 1970-01-01 and discarding the real time column.
         try:
             converted_index = pd.to_datetime(df.index, errors='coerce')
             if converted_index.notna().sum() > 0.9 * len(df):
@@ -128,7 +317,7 @@ def parse_contents(contents=None, filename=None, df=None):
             "Uploaded file does not contain valid column names. "
             "Column names must include descriptive text (e.g. 'power', 'time').",
             className="alert alert-danger"
-        ), {}, None
+        ), {}, None, []
 
     # ----------------------------------
     # 3. Prepare LLM identification
@@ -137,16 +326,28 @@ def parse_contents(contents=None, filename=None, df=None):
     # method (it does single-diode-model fitting on V and I).  They are NOT
     # required by YoY / LR / HW / ARIMA / CSD (those only need DC Power), so
     # they may safely come back as "N/A" without blocking the workflow.
-    required_vars = [
+    # Canonical roles the rest of the app keys on. (DC Voltage/Current are only
+    # required by PVPRO; they may be absent for the statistical methods.)
+    canonical_vars = [
         "DC Power",
         "DC Voltage",
         "DC Current",
         "Irradiance",
         "Module temperature",
     ]
-
     if not time_in_index:
-        required_vars.insert(1, "Time")
+        canonical_vars.insert(1, "Time")
+
+    # Roles we ask the LLM about -- includes the AC counterparts so we can fall
+    # back to AC when no DC column exists.
+    llm_roles = [
+        "DC Power", "AC Power",
+        "DC Voltage", "AC Voltage",
+        "DC Current", "AC Current",
+        "Irradiance", "Module temperature",
+    ]
+    if not time_in_index:
+        llm_roles.append("Time")
 
     prompt = f"""
     You are identifying physical quantities from PV (photovoltaic) system data
@@ -154,9 +355,14 @@ def parse_contents(contents=None, filename=None, df=None):
 
     {colnames}
 
-    Map each of these physical quantities to the column name that represents
-    it (or "N/A" if no column matches):
-    {', '.join(required_vars)}.
+    For each physical quantity below, list the columns that could represent it,
+    best match first, AT MOST 3 per quantity (empty list if none match):
+    {', '.join(llm_roles)}.
+
+    List more than one only when a file genuinely has several channels for the
+    same quantity (per inverter / string / MPPT); otherwise a single best match
+    is fine. Keep DC and AC strictly separate (see rules below). Irradiance,
+    Module temperature, and Time have no AC/DC distinction. Be concise.
 
     =======================================================================
     NAMING CONVENTIONS YOU MUST KNOW
@@ -200,9 +406,9 @@ def parse_contents(contents=None, filename=None, df=None):
         p_array, p_string, inv1_input_power, inv1_dc_power,
         inverter1_dc_power, mppt_power, panel_power, string_power.
 
-    NOTE: We do NOT need AC Power, AC Voltage, or AC Current for this
-    workflow.  If a column is on the AC side (output / grid / inverter
-    output), do NOT map it to any of the required variables -- skip it.
+    AC columns (output / grid / inverter output) belong under the AC roles
+    (AC Power / AC Voltage / AC Current) -- list them there, NOT under the DC
+    roles. We prefer DC and only fall back to AC when no DC column exists.
 
     Patterns for Irradiance (plane-of-array):
         poa, poa_irradiance, ghi, dni, irr, irrad, irradiance, g_poa,
@@ -239,80 +445,107 @@ def parse_contents(contents=None, filename=None, df=None):
     4) UNITS HINTS. If the column name carries units (e.g. `*_V`, `*_kV`,
        `*_A`, `*_kA`, `*_W`, `*_kW`, `*_kWh`, `*_W_m2`, `*_degC`), use them
        to disambiguate quantity type (V -> voltage, A -> current, W -> power,
-       W/m^2 -> irradiance, degC/C -> temperature).
+       W/m^2 -> irradiance, degC/C -> temperature), I is also current, remember this, 
+       since there is an equation that is V = IR.
 
-    5) DON'T GUESS. If after applying rules 1-4 you genuinely cannot tell,
-       return "N/A". Returning a wrong column is worse than returning N/A.
+    5) DON'T GUESS THE QUANTITY TYPE. If you genuinely cannot tell what a column
+       is, leave it out. But DO list every column you ARE confident matches a
+       role -- multiple matches are expected and wanted.
 
     =======================================================================
     OUTPUT FORMAT
     =======================================================================
 
-    Return ONLY a JSON object — no prose, no markdown fences:
+    Return ONLY a JSON object — no prose, no markdown fences. Each value is a
+    list of matching column names, best match first (use [] if none match):
 
     {{
-      "variable_mapping": [
-        {{"Metric": "DC Power", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "DC Voltage", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "DC Current", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Irradiance", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Module temperature", "Variable Name": "column_name_or_N/A"}},
-        {{"Metric": "Time", "Variable Name": "column_name_or_N/A"}}
-      ]
+      "candidates": {{
+        "DC Power": ["col", ...],
+        "AC Power": ["col", ...],
+        "DC Voltage": ["col", ...],
+        "AC Voltage": ["col", ...],
+        "DC Current": ["col", ...],
+        "AC Current": ["col", ...],
+        "Irradiance": ["col", ...],
+        "Module temperature": ["col", ...],
+        "Time": ["col", ...]
+      }}
     }}
     """
 
     # Default return values
     mapped_variables_dict = {}
+    mapping_notes = []   # AC-fallback / ambiguous-column / time-by-value warnings
 
     try:
-        # Call LLM
-        response = client.chat.completions.create(
-            # model="openai/gpt-5.4-nano",
-            model = "gpt-5.4-nano",
-            messages=[{"role": "user", "content": prompt}],
-            # max_tokens=500,
-        )
+        # Deterministic identification: reuse the cached candidate lists for this
+        # exact column-signature if we've seen it. temperature=0/seed=0 alone is
+        # NOT enough (the gateway doesn't honor the seed), so the cache is what
+        # guarantees the same file maps the same way every run.
+        _p("Identifying data columns…")
+        cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        raw_candidates = _llm_cache_get(cache_key)
+        # Only SAVE the mapping once the dataset is confirmed GOOD downstream.
+        # On a miss we hold the freshly-identified result "pending" and let the
+        # caller commit it (commit_llm_cache) iff the run was clean -- so a wrong
+        # mapping from a failed/iffy dataset never gets locked into the cache.
+        _cache_miss = raw_candidates is None
 
-        res_text = response.choices[0].message.content.strip()
-        cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
+        if _cache_miss:
+            _p("Asking AI to identify your columns…")
+            # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
+            # Some models reject these params -- fall back to a plain call if so.
+            try:
+                response = client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    seed=0,
+                )
+            except (openai.BadRequestError, openai.UnprocessableEntityError):
+                # Only retry without the params when the model REJECTS them (a 4xx).
+                # A timeout / connection / rate-limit error must NOT trigger a second
+                # full call here -- that would stack another timeout on top.
+                response = client.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-        result = json.loads(cleaned)
-        mapping_data = result.get("variable_mapping", [])
+            res_text = response.choices[0].message.content.strip()
+            cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
+            result = json.loads(cleaned)
+            raw_candidates = result.get("candidates", {}) or {}
+            # NOTE: deliberately NOT saved here -- see commit_llm_cache().
 
-        mapping_df = pd.DataFrame(mapping_data)
+        def _cands(role):
+            """Candidate column names the LLM proposed for a role (best-first),
+            keeping only real, non-'N/A' strings."""
+            v = raw_candidates.get(role, [])
+            if isinstance(v, str):
+                v = [v]
+            return [c for c in v if isinstance(c, str) and c and c != "N/A"]
+        # Per-role list of the OTHER valid columns the user could switch to
+        # (keyed by the canonical mapping-table role). Surfaced inline under the
+        # matching dropdown in Advanced mode.
+        alternatives = {}
+        _CANON_ROLE = {"AC Power": "DC Power", "AC Voltage": "DC Voltage",
+                       "AC Current": "DC Current"}
 
-        # ----------------------------------
-        # If time is in index, override mapping
-        # ----------------------------------
-        # inject index time
-        if time_in_index:
-            mapping_df = mapping_df[mapping_df["Metric"] != "Time"]
-
-            index_name = df.index.name
-            display_name = index_name if index_name not in [None, ""] else "__index__"
-
-            mapping_df.loc[len(mapping_df)] = {
-                "Metric": "Time",
-                "Variable Name": display_name
-            }
-
-        # ----------------------------------
-        # Ensure all required variables appear (fill missing with N/A)
-        # ----------------------------------
-        existing_metrics = set(mapping_df["Metric"].tolist())
-
-        for rv in required_vars:
-            if rv not in existing_metrics:
-                mapping_df.loc[len(mapping_df)] = {"Metric": rv, "Variable Name": "N/A"}
+        def _ambiguity_note(role, chosen, viable, ac=False):
+            # Record the OTHER valid columns for this role. These are surfaced
+            # ONLY inline under the matching dropdown in Advanced mode -- we
+            # deliberately do NOT add them to mapping_notes (the consolidated
+            # warning panel), so the message lives in exactly one place.
+            if chosen and len(viable) > 1:
+                alternatives[_CANON_ROLE.get(role, role)] = [c for c in viable if c != chosen]
 
         # ----------------------------------
         # Deterministic safety net: pair up DC Voltage / DC Current.
         #
-        # If the LLM identified one of {DC Voltage, DC Current} but not the
-        # other, try to find the partner by simple name-pattern substitution
-        # on the identified column. This handles the very common case where
-        # both DC sensors are named consistently (e.g. inv1_input_current ↔
+        # If only one of {DC Voltage, DC Current} resolved, try to find the
+        # partner by simple name-pattern substitution on the identified column.
+        # Handles consistently-named sensor pairs (inv1_input_current ↔
         # inv1_input_voltage, vdc ↔ idc, v_mp ↔ i_mp, ...).
         # ----------------------------------
         def _pair_partner(known_col, want):
@@ -374,42 +607,221 @@ def parse_contents(contents=None, filename=None, df=None):
                         return c
             return None
 
-        def _set_metric(metric_name, value):
-            mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"] = value
-
-        def _get_metric(metric_name):
-            rows = mapping_df.loc[mapping_df["Metric"] == metric_name, "Variable Name"]
-            return rows.iloc[0] if len(rows) else "N/A"
-
-        dc_v_now = _get_metric("DC Voltage")
-        dc_i_now = _get_metric("DC Current")
-
-        if dc_v_now == "N/A" and dc_i_now != "N/A":
-            partner = _pair_partner(dc_i_now, want="voltage")
-            if partner:
-                _set_metric("DC Voltage", partner)
-                print(f"[parse_contents] DC Voltage recovered by pairing: "
-                      f"{dc_i_now!r} -> {partner!r}")
-
-        if dc_i_now == "N/A" and dc_v_now != "N/A":
-            partner = _pair_partner(dc_v_now, want="current")
-            if partner:
-                _set_metric("DC Current", partner)
-                print(f"[parse_contents] DC Current recovered by pairing: "
-                      f"{dc_v_now!r} -> {partner!r}")
-
         # ----------------------------------
-        # Build dict of recognized variables (skip N/A)
+        # Resolve each role: prefer the candidate with the MOST REAL DATA, fall
+        # back DC -> AC for the electrical quantities, and warn on ambiguity.
         # ----------------------------------
-        mapped_variables_dict = {
-            row["Metric"]: row["Variable Name"]
-            for _, row in mapping_df.iterrows()
-            if row["Variable Name"] != "N/A"
-        }
+        def _resolve_dc_ac(dc_role, ac_role, label):
+            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC."""
+            best, viable = _best_by_data(df, _cands(dc_role))
+            if best:
+                _ambiguity_note(dc_role, best, viable)
+                return best, "dc"
+            best, viable = _best_by_data(df, _cands(ac_role))
+            if best:
+                mapping_notes.append(
+                    f"No usable DC {label} column — using AC {label} '{best}' "
+                    f"(includes inverter effects, so it's an approximation).")
+                _ambiguity_note(ac_role, best, viable, ac=True)
+                return best, "ac"
+            return None, None
 
-        # The "Identified Variables" eyebrow is rendered by the consumer
-        # (pvcopilot.py wraps this table in a card with its own heading), so
-        # we don't add a second H5 here.
+        # Voltage / Current (needed for PVPRO and for V*I power).
+        _p("Mapping variables to columns…")
+        v_col, v_side = _resolve_dc_ac("DC Voltage", "AC Voltage", "voltage")
+        i_col, i_side = _resolve_dc_ac("DC Current", "AC Current", "current")
+
+        # Pair recovery: if exactly one of V/I is still missing, try the name-swap.
+        if v_col and not i_col:
+            p = _pair_partner(v_col, want="current")
+            if p:
+                i_col, i_side = p, v_side
+        elif i_col and not v_col:
+            p = _pair_partner(i_col, want="voltage")
+            if p:
+                v_col, v_side = p, i_side
+
+        # Power: DC direct -> DC V*I -> AC direct -> AC V*I.
+        best_dc_p, viable_dc_p = _best_by_data(df, _cands("DC Power"))
+        p_col, p_side = None, None
+        if best_dc_p:
+            p_col, p_side = best_dc_p, "dc"
+            _ambiguity_note("DC Power", best_dc_p, viable_dc_p)
+        elif v_col and i_col and v_side == "dc" and i_side == "dc":
+            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                       * pd.to_numeric(df[i_col], errors="coerce"))
+            p_col, p_side = "computed_dc_power", "dc"
+            mapping_notes.append("DC Power computed as Voltage × Current (no direct power column).")
+        else:
+            best_ac_p, viable_ac_p = _best_by_data(df, _cands("AC Power"))
+            if best_ac_p:
+                p_col, p_side = best_ac_p, "ac"
+                mapping_notes.append(
+                    f"No usable DC power column — using AC power '{best_ac_p}' "
+                    f"(includes inverter effects, so it's an approximation).")
+                _ambiguity_note("AC Power", best_ac_p, viable_ac_p, ac=True)
+            elif v_col and i_col:
+                df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                           * pd.to_numeric(df[i_col], errors="coerce"))
+                p_col, p_side = "computed_dc_power", "ac"
+                mapping_notes.append("Power computed as Voltage × Current on the AC side "
+                                     "(no DC power) — includes inverter effects, approximate.")
+
+        # Fill the third electrical quantity from the other two (P = V * I).
+        # Exact on the DC side; on the AC side it's approximate (ignores power
+        # factor) but consistent with the rest of the AC fallback. Only derive
+        # from a SAME-SIDE partner so we never mix DC and AC. Only matters for
+        # PVPRO. Division guards: zero/near-zero denominators -> NaN (dropped).
+        if p_col:
+            _pnum = pd.to_numeric(df[p_col], errors="coerce")
+            if v_col is None and i_col is not None and i_side == p_side:
+                df["computed_dc_voltage"] = _pnum / pd.to_numeric(
+                    df[i_col], errors="coerce").replace(0, np.nan)
+                v_col, v_side = "computed_dc_voltage", p_side
+                mapping_notes.append(
+                    "DC Voltage computed as Power / Current." if p_side == "dc"
+                    else "Voltage computed as AC Power / AC Current — approximate "
+                         "(ignores power factor).")
+            elif i_col is None and v_col is not None and v_side == p_side:
+                df["computed_dc_current"] = _pnum / pd.to_numeric(
+                    df[v_col], errors="coerce").replace(0, np.nan)
+                i_col, i_side = "computed_dc_current", p_side
+                mapping_notes.append(
+                    "DC Current computed as Power / Voltage." if p_side == "dc"
+                    else "Current computed as AC Power / AC Voltage — approximate "
+                         "(ignores power factor).")
+
+        # Irradiance. The filters assume W/m^2 (clear-sky peaks ~800-1200), so a
+        # column whose peak is far below that is the wrong units / a dead sensor
+        # and would void every row. Many sites expose several irradiance channels
+        # at different scales, so: (1) prefer an LLM candidate that's in plausible
+        # W/m^2 units; (2) if none are, scan ALL irradiance-named columns for a
+        # properly-scaled one; (3) only if nothing is usable, drop irradiance and
+        # fall back to the power-only path.
+        def _irr_peak(c):
+            return pd.to_numeric(df[c], errors="coerce").quantile(0.95)
+
+        def _wm2_ok(c):
+            return c in df.columns and np.isfinite(_irr_peak(c)) and _irr_peak(c) >= MIN_IRRADIANCE_PEAK
+
+        # Consider EVERY irradiance column -- the LLM's candidates plus a scan of
+        # all irradiance-named columns -- but keep only the ones actually in W/m^2.
+        # Pick the one with the most data; the ambiguity warning then offers ONLY
+        # the other VALID columns as alternatives (never the mis-scaled ones).
+        irr_named = [c for c in df.columns if _IRR_NAME_RE.search(str(c))]
+        all_irr = list(dict.fromkeys([c for c in _cands("Irradiance") if c in df.columns]
+                                     + irr_named))
+        valid_irr = [c for c in all_irr if _wm2_ok(c)]
+        irr_col, irr_viable = _best_by_data(df, valid_irr)
+
+        if irr_col is not None:
+            # Warn (with ONLY the valid alternatives) when more than one works.
+            _ambiguity_note("Irradiance", irr_col, irr_viable)
+            # If the LLM's own picks were mis-scaled and we recovered a valid one,
+            # say so (so a single valid column is still explained).
+            if not any(_wm2_ok(c) for c in _cands("Irradiance") if c in df.columns):
+                mapping_notes.append(
+                    f"Auto-selected irradiance '{irr_col}' (in W/m²); other irradiance "
+                    "columns were the wrong units and were skipped.")
+        elif all_irr:
+            # Irradiance-named columns exist but none were usable. Say WHY: a
+            # column in the right W/m² range that still got dropped was too
+            # sparse (mostly missing); otherwise it was the wrong units.
+            if valid_irr:
+                mapping_notes.append(
+                    "Irradiance column(s) present and in W/m² but too sparse "
+                    "(mostly missing) — ignoring irradiance and using raw power.")
+            else:
+                mapping_notes.append(
+                    "Irradiance column(s) present but not in W/m² (wrong units / dead sensor) "
+                    "— ignoring irradiance and using raw power.")
+        temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
+        _ambiguity_note("Module temperature", temp_col, temp_viable)
+
+        # Time: detect BY NAME first (the LLM's name-based pick, then any column
+        # whose name reads like time); only if no time-like NAME exists, fall
+        # back to scanning column VALUES for one that parses as datetimes.
+        if time_in_index:
+            time_col = df.index.name if df.index.name not in [None, ""] else "__index__"
+        else:
+            # A time column must also actually contain timestamps -- a name match
+            # on an empty column is not enough.
+            def _has_time_data(col):
+                return (col in df.columns
+                        and pd.to_datetime(df[col], errors="coerce").notna().sum() >= MIN_VALID_POINTS)
+
+            time_col = None
+            # 1) BY NAME — trust the LLM's Time candidate if it's a real, populated column.
+            for c in _cands("Time"):
+                if _has_time_data(c):
+                    time_col = c
+                    break
+            # 2) BY NAME — backup: any column whose NAME looks like time AND has data.
+            if time_col is None:
+                for c in df.columns:
+                    if _name_looks_like_time(c) and _has_time_data(c):
+                        time_col = c
+                        break
+            # 3) BY VALUE — no time-like name with data; scan values.
+            if time_col is None:
+                for c in df.columns:
+                    if _looks_like_time(df[c]):
+                        time_col = c
+                        mapping_notes.append(f"Time column detected from values: '{c}'.")
+                        break
+
+        # Canonical mapping (keys stay DC-named so downstream is unchanged; the
+        # chosen column may be an AC column when DC was absent).
+        mapped_variables_dict = {}
+        if time_col:
+            mapped_variables_dict["Time"] = time_col
+        if p_col:
+            mapped_variables_dict["DC Power"] = p_col
+        if v_col:
+            mapped_variables_dict["DC Voltage"] = v_col
+        if i_col:
+            mapped_variables_dict["DC Current"] = i_col
+        if irr_col:
+            mapped_variables_dict["Irradiance"] = irr_col
+        if temp_col:
+            mapped_variables_dict["Module temperature"] = temp_col
+
+        # Flag kept-but-gappy columns (5-50% missing): usable, but the user
+        # should treat the result carefully. (>50% missing was already dropped.)
+        for _role, _col in mapped_variables_dict.items():
+            if _role == "Time" or _col == "computed_dc_power":
+                continue
+            _mf = _missing_frac(df, _col)
+            if _mf > FLAG_MISSING_FRAC:
+                mapping_notes.append(
+                    f"{_role} column '{_col}' is {_mf:.0%} missing — kept, but treat "
+                    "the result carefully (gaps were filled/skipped).")
+
+        # Promote a time COLUMN to the DatetimeIndex (downstream operates on the
+        # index). Computed power already lives in df; nothing else to add.
+        if not time_in_index and time_col and time_col in df.columns:
+            df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+            df = df.dropna(subset=[time_col]).set_index(time_col)
+
+        # Stash the per-role alternatives on the frame so the Advanced UI can
+        # render them inline under each dropdown (set AFTER any re-index so it
+        # lands on the final df object the caller receives).
+        df.attrs["mapping_alternatives"] = {
+            r: cols for r, cols in alternatives.items() if cols}
+
+        # Hold a freshly-identified (not-yet-cached) mapping as "pending" so the
+        # caller can commit it to the cache only if the run is GOOD.
+        df.attrs["_llm_cache_pending"] = (
+            (cache_key, raw_candidates) if _cache_miss else None)
+
+        # Build the read-only mapping table for display (canonical roles).
+        _p("Building data summary…")
+        display_roles = ["Time", "DC Power", "DC Voltage", "DC Current",
+                         "Irradiance", "Module temperature"]
+        mapping_df = pd.DataFrame(
+            [{"Metric": r, "Variable Name": mapped_variables_dict.get(r, "N/A")}
+             for r in display_roles])
+
         summary_table = html.Div([
             html.Table(
                 [
@@ -427,9 +839,9 @@ def parse_contents(contents=None, filename=None, df=None):
         # Check for missing Power/Time
         # ----------------------------------
         missing_msgs = []
-        if mapping_df.loc[mapping_df["Metric"] == "DC Power", "Variable Name"].iloc[0] == "N/A":
+        if "DC Power" not in mapped_variables_dict:
             missing_msgs.append("⚠️ Power column not identified.")
-        if mapping_df.loc[mapping_df["Metric"] == "Time", "Variable Name"].iloc[0] == "N/A":
+        if "Time" not in mapped_variables_dict:
             missing_msgs.append("⚠️ Time column not identified.")
 
         if missing_msgs:
@@ -448,8 +860,9 @@ def parse_contents(contents=None, filename=None, df=None):
             className="alert alert-warning"
         )
         mapped_variables_dict = {}
+        mapping_notes = []
 
-    return df, summary_table, mapped_variables_dict, code_read
+    return df, summary_table, mapped_variables_dict, code_read, mapping_notes
 
 
 # ================================
