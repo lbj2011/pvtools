@@ -3,6 +3,7 @@
 # =========================
 figures/
 out.csv
+.pptx
 
 # old / test folders
 test*
