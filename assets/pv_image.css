@@ -165,7 +165,7 @@ html, body { overflow-x: hidden; }
     position: relative !important;
     width: 100%;
     max-width: 580px;
-    height: 540px !important;
+    height: 468px !important;
     margin: 0 auto;
 }
 
@@ -390,7 +390,7 @@ html, body { overflow-x: hidden; }
 
 /* Compact stage on small screens */
 @media (max-width: 480px) {
-    .pv-stage { height: 440px !important; }
+    .pv-stage { height: 386px !important; }
     .pv-thumb { width: 72px; height: 72px; border-radius: 16px; border-width: 3px; }
     .pv-upload-zone, .pv-center-preview {
         top: 130px !important;

@@ -110,10 +110,15 @@ def render_example_thumbnails(selected_id=None):
     return clusters
 
 def encode_image_as_upload_format(image_path):
-    """Read local file and return as upload-style base64 image string"""
+    """Read local file and return as upload-style base64 image string,
+    with the correct MIME type for the file (jpeg / png / ...)."""
+    import mimetypes
+    mime, _ = mimetypes.guess_type(image_path)
+    if mime is None:
+        mime = 'image/jpeg'
     with open(image_path, 'rb') as f:
         encoded = base64.b64encode(f.read()).decode()
-    return f"data:image/jpeg;base64,{encoded}"
+    return f"data:{mime};base64,{encoded}"
 
 # Table data
 table_header = [
@@ -309,7 +314,7 @@ layout = dbc.Container([
                     options=[
                         {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
                         {'label': 'Gemini 2.5 Flash', 'value': 'google/gemini-2.5-flash'},
-                        {'label': 'Claude Haiku 4.5', 'value': 'anthropic/claude-haiku-4.5'},
+                        {'label': 'Claude Opus 4.7', 'value': 'anthropic/claude-opus-4-7'},
                     ],
                     value='openai/gpt-5.1',
                     className='pv-model-radio',
@@ -573,13 +578,33 @@ def build_warning_card(title, summary, detail=None):
     })
 
 
+def _sniff_image_mime(base64_image):
+    """Detect the actual image format from the file's magic bytes, so the
+    declared media type always matches the real content. Anthropic models
+    reject requests where the two disagree (e.g. a PNG labeled image/jpeg)."""
+    try:
+        head = base64.b64decode(base64_image[:64], validate=False)[:16]
+    except Exception:
+        return 'image/jpeg'
+    if head.startswith(b'\x89PNG'):
+        return 'image/png'
+    if head.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if head.startswith(b'GIF8'):
+        return 'image/gif'
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        return 'image/webp'
+    return 'image/jpeg'
+
+
 def analyze_image(base64_image, model="openai/gpt-5.1"):
+    mime = _sniff_image_mime(base64_image)
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "user", "content": [
                 {"type": "text", "text": question},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64_image}"}}
             ]}
         ],
         max_tokens=1000,
