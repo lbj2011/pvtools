@@ -41,47 +41,73 @@ client = openai.OpenAI(
 def get_layout():
     return layout
 
-# Map valid IDs to real image file names
+# Map valid IDs to real image file names (in assets/example images/)
+# Adjust the display names in image_name_map if a label doesn't match a file.
 image_map = {
-    'example1': 'example1.jpg',
-    'example2': 'example2.jpg',
-    'example3': 'example3.png',
-    'example4': 'example4.jpg',
-    'example5': 'example5.png',
-    'example6': 'example6.jpg'
+    'example1': 'example images/visible_1.jpg',
+    'example2': 'example images/visible_2.jpg',
+    'example3': 'example images/visible_3.png',
+    'example4': 'example images/el_1.png',
+    'example5': 'example images/el_2.jpg',
+    'example6': 'example images/el_3.jpg',
+    'example7': 'example images/ir_1.png',
+    'example8': 'example images/ir_2.jpg',
+    'example9': 'example images/ir_3.jpg',
 }
 
 image_name_map = {
     'example1': 'Visible image (snow)',
     'example2': 'Visible image (bird dropping)',
-    'example3': 'EL image (healthy)',
-    'example4': 'EL image (crack)',
-    'example5': 'IR image (healthy)',
-    'example6': 'IR image (hotspot)'
+    'example3': 'Visible image (hail damage)',
+    'example4': 'EL image (healthy)',
+    'example5': 'EL image (crack)',
+    'example6': 'EL image (cracks)',
+    'example7': 'IR image (healthy)',
+    'example8': 'IR image (hotspot)',
+    'example9': 'IR image (hotspots)',
 }
 
+# Example images arranged as three clusters scattered around the upload zone
+EXAMPLE_CLUSTERS = [
+    ('Example visible images', 'pv-cluster-visible',
+     ['example1', 'example2', 'example3']),
+    ('Example EL images', 'pv-cluster-el',
+     ['example4', 'example5', 'example6']),
+    ('Example IR images', 'pv-cluster-ir',
+     ['example7', 'example8', 'example9']),
+]
+
+
 def render_example_thumbnails(selected_id=None):
-    """Render clickable thumbnails, highlighting the selected one"""
-    return [
-        html.Img(
-            src=f'/assets/{filename}',
-            id=example_id,
-            n_clicks=0,
-            className='pv-thumb pv-thumb-selected' if example_id == selected_id else 'pv-thumb',
-            style={
-                'width': '48px',
-                'height': '48px',
-                'objectFit': 'cover',
-                'margin': '3px',
-                'cursor': 'pointer',
-                'borderRadius': '6px',
-                'boxShadow': '0 2px 4px rgba(0,0,0,0.15)',
-                'border': '2px solid #0070C0' if example_id == selected_id else '2px solid transparent',
-                'transition': 'all 0.18s ease',
-            }
-        )
-        for example_id, filename in image_map.items()
-    ]
+    """Three floating image clusters positioned around the central upload zone.
+
+    Each cluster = a light label + two slightly overlapping square images,
+    each bobbing on its own phase (`pv-float-N`, see pv_image.css).
+    Click IDs stay on the <img> elements, so the callback is unchanged.
+    """
+    clusters = []
+    float_idx = 0
+    for label, cluster_cls, ids in EXAMPLE_CLUSTERS:
+        imgs = []
+        for example_id in ids:
+            float_idx += 1
+            selected = (example_id == selected_id)
+            imgs.append(html.Div(
+                html.Img(
+                    src=f"/assets/{image_map[example_id]}",
+                    id=example_id,
+                    n_clicks=0,
+                    title=image_name_map[example_id],  # tooltip on hover
+                    className=('pv-thumb pv-thumb-selected'
+                               if selected else 'pv-thumb'),
+                ),
+                className=f'pv-float pv-float-{float_idx}',
+            ))
+        clusters.append(html.Div([
+            html.Div(label, className='pv-cluster-label'),
+            html.Div(imgs, className='pv-stack'),
+        ], className=f'pv-cluster {cluster_cls}'))
+    return clusters
 
 def encode_image_as_upload_format(image_path):
     """Read local file and return as upload-style base64 image string"""
@@ -182,266 +208,176 @@ Return ONLY the JSON dictionary. Do not include markdown code fences, prose, or 
 # app = dash.Dash(__name__)
 
 layout = dbc.Container([
-    html.Div([
-        html.Hr(),
+
+    # ==================== FULL-BLEED HERO SECTION ====================
+    html.Div(html.Div([
+
+        # ---------------- Header ----------------
         html.Div([
-            html.H1("Unified LLM-Based PV Image Diagnostic Framework (Demo)"),
-        ], style={
-            # 'background-color': 'lightblue',
-            'width': '100%',
-            'padding-left': '10px',
-            'padding-right': '10px',
-            'textAlign': 'center'}),
-        html.Hr(),
-
-        html.P(''),
-        dbc.Row([
-            
-            dbc.Col([
-                dcc.Markdown(
-                    textwrap.dedent("""
-                    This demo showcases a unified LLM-based framework for automated PV image diagnostics across heterogeneous images.
-
-                    **1. Test your own PV image:**  
-                    You can upload a **visible**, **electroluminescence (EL)**, or **infrared (IR)** image of a PV module or array. The LLM (ChatGPT-5.1) will instantly analyze the image and return diagnostic results based on the following categories:
-
-                    - **Visible images** – Detects: *Clean*, *Soiling*, *Hail Damage*, *Snow Coverage*, *Bird Droppings*  
-                    - **EL images** – Detects: *Healthy*, *Cell Crack*  
-                    - **IR images** – Detects: *Healthy*, *Hotspot*
-
-                    **2. Review current LLM performance:**  
-                    A summary table shows the **F1 scores** of various LLMs on a curated PV image dataset containing visible, EL, and IR images. The results reflect performance across both binary and multi-class diagnostic tasks.
-                    """)
-                )
-            ], xs=12, sm=12, md=12, lg=9, xl=9),
-
-            dbc.Col([
-                html.Img(src=app.get_asset_url('llm_logo.jpg'),
-                style={'width': '80%'}),
-            ], xs=9, sm=8, md=6, lg=3, xl=3, className="text-end"),
-        ]),
-        dbc.Alert(
-            [
-                html.Strong("Note: "),
-                "This tool is currently under ",
-                html.Strong("active development"),
-                ". If you encounter issues, have suggestions, or would like to collaborate, please",
-                html.A(
-                    " contact us",
-                    href="mailto:baojieli@lbl.gov",
-                    style={"fontWeight": "bold"}
-                ),
-                "."
-            ],
-            color="primary",
-            className="mt-2"
-        ),
-        html.P(''),
-        dbc.Card([
-            dbc.CardHeader(html.H4("1. Test your own PV image")),
-
-            dbc.CardBody([
-                dbc.Row([
-                    # ============================ STEP 1 ============================
-                    dbc.Col([
-                        html.Div([
-                            html.Span('1', className='pv-step-badge'),
-                            html.Span('Provide an image', className='pv-step-title'),
-                        ], className='pv-step-header'),
-
-                        dcc.Upload(
-                            id='upload-image',
-                            children=html.Div([
-                                html.Div('⬆', style={
-                                    'fontSize': '1.5em',
-                                    'color': '#0070C0',
-                                    'lineHeight': '1',
-                                    'marginBottom': '4px',
-                                }),
-                                html.Div([
-                                    html.Span('Drop an image here, or '),
-                                    html.A('browse files', style={
-                                        'color': '#0070C0',
-                                        'fontWeight': '600',
-                                        'textDecoration': 'underline',
-                                    }),
-                                ], style={'fontSize': '0.9em', 'color': '#333'}),
-                            ], style={'textAlign': 'center'}),
-                            className='pv-upload-box',
-                            style={
-                                'width': '100%',
-                                'padding': '16px 10px',
-                                'borderWidth': '2px',
-                                'borderStyle': 'dashed',
-                                'borderColor': '#B8D4EA',
-                                'borderRadius': '12px',
-                                'backgroundColor': '#F8FBFD',
-                                'textAlign': 'center',
-                                'marginBottom': '6px',
-                                'cursor': 'pointer',
-                                'transition': 'all 0.2s ease',
-                            },
-                            accept='image/*',
-                            multiple=False
-                        ),
-                        html.Div(
-                            'Accepts visible, EL, or IR images (JPEG / PNG)',
-                            style={'fontSize': '0.78em', 'color': '#7A7A7A', 'marginBottom': '14px'}
-                        ),
-
-                        html.Div('Or pick an example:', style={
-                            'fontSize': '0.85em',
-                            'fontWeight': '600',
-                            'color': '#444',
-                            'marginBottom': '6px',
-                        }),
-
-                        html.Div(
-                            children=render_example_thumbnails(),
-                            id='example-image-container',
-                            style={
-                                'display': 'flex',
-                                'flexWrap': 'wrap',
-                                'marginBottom': '10px',
-                                'padding': '6px',
-                                'backgroundColor': '#FAFBFC',
-                                'borderRadius': '10px',
-                                'border': '1px solid #ECEFF3',
-                            }
-                        ),
-
-                        html.Div(id='upload-status', style={'marginTop': '6px'}),
-                        dcc.Store(id='image-display-flag', data=False),
-                        dcc.Store(id='image-content-store'),
-                        html.Div(id='output-image-upload')
-                    ], xs=12, md=6, lg=4, className='mb-3 pv-col-step1'),
-
-                    # ============================ STEP 2 ============================
-                    dbc.Col([
-                        html.Div([
-                            html.Span('2', className='pv-step-badge'),
-                            html.Span('Choose a model', className='pv-step-title'),
-                        ], className='pv-step-header'),
-
-                        html.Div(
-                            'Pick which LLM should analyze the image:',
-                            style={'fontSize': '0.85em', 'color': '#555', 'marginBottom': '10px'}
-                        ),
-
-                        dcc.RadioItems(
-                            id='model-selector',
-                            # === OLD (CBORG model names) ===
-                            # options=[
-                            #     {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
-                            #     {'label': 'Gemini Flash', 'value': 'gemini-flash'},
-                            #     {'label': 'Claude Opus', 'value': 'claude-opus'},
-                            # ],
-                            # value='openai/gpt-5.1',
-
-                            # === NEW (OpenRouter model IDs) ===
-                            options=[
-                                {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
-                                {'label': 'Gemini 2.5 Flash', 'value': 'google/gemini-2.5-flash'},
-                                {'label': 'Claude Haiku 4.5', 'value': 'anthropic/claude-haiku-4.5'},
-                            ],
-                            value='openai/gpt-5.1',
-                            className='pv-model-radio',
-                            inputStyle={'marginRight': '10px'},
-                            labelStyle={
-                                'display': 'flex',
-                                'alignItems': 'center',
-                                'marginBottom': '10px',
-                                'cursor': 'pointer',
-                                'fontSize': '0.95em',
-                                'color': '#333',
-                            },
-                        ),
-                    ], xs=12, md=6, lg=4, className='mb-3 pv-col-step2'),
-
-                    # ============================ STEP 3 ============================
-                    dbc.Col([
-                        html.Div([
-                            html.Span('3', className='pv-step-badge'),
-                            html.Span('Run & view results', className='pv-step-title'),
-                        ], className='pv-step-header'),
-
-                        html.Button(
-                            'Click to run the analysis',
-                            id='analyze-button',
-                            n_clicks=0,
-                            className='pv-run-button',
-                            style={
-                                'marginBottom': '6px',
-                                'padding': '10px 22px',
-                                'backgroundColor': '#0070C0',
-                                'color': 'white',
-                                'fontWeight': 'bold',
-                                'borderRadius': '10px',
-                                'border': 'none',
-                                'cursor': 'pointer',
-                                'boxShadow': '0 2px 6px rgba(0,112,192,0.25)',
-                                'transition': 'all 0.18s ease',
-                            }
-                        ),
-                        html.Div(
-                            '(It takes about 3–8 seconds)',
-                            style={'fontSize': '0.82em', 'color': 'gray', 'marginBottom': '14px'}
-                        ),
-                        dcc.Loading(id='loading-progress', type='default',
-                                    children=html.Div(id='image-analysis-result'))
-                    ], xs=12, md=12, lg=4, className='mb-3 pv-col-step3'),
-                ], className='g-4')
-
-            ])
-        ], className="my-4"),
-
-        html.P(''),
-
-        dbc.Card([
-            dbc.CardHeader(html.H4("2. Dataset and Performance")),
-
-            dbc.CardBody([
-                dbc.Row([
-                    # Left: PV image and link
-                    dbc.Col([
-                        html.H5("PV Image Test Dataset"),
-                        html.A(
-                            html.Img(
-                                src="/assets/images.png",
-                                style={"width": "90%", "height": "auto", "marginBottom": "10px"}
-                            ),
-                            href="https://github.com/DuraMAT/PV-LLM",
-                            target="_blank"
-                        ),
+            html.H1('Unified LLM-Based PV Image Diagnostic Framework',
+                    className='pv-hero-title'),
+            html.P('Fault detection from visible, EL & IR module imagery — '
+                   'benchmarked across multimodal language models.',
+                   className='pv-hero-sub'),
+            html.Details([
+                html.Summary('About this demo'),
+                html.Div([
+                    html.Div([
                         html.P([
-                            "Example image from the test dataset. Learn more at ",
-                            html.A("DuraMAT/PV-LLM", href="https://github.com/DuraMAT/PV-LLM", target="_blank")
-                        ], style={'fontSize': '0.9em', 'color': 'gray'})
-                    ], md=6),
-
-                    # Right: Table
-                    dbc.Col([
-                        html.H5("LLM Performance"),
-
+                            'Upload a ', html.Strong('visible'), ', ',
+                            html.Strong('EL'), ', or ', html.Strong('IR'),
+                            ' image of a PV module — a multimodal LLM identifies the '
+                            'image type, classifies its condition, and explains the call.',
+                        ], className='pv-about-lead'),
                         html.Div([
-                            html.Table(
-                                table_header + [table_body],
-                                className="table table-bordered table-striped",
-                                style={'fontSize': '0.9em', 'minWidth': '700px'}
-                            )
-                        ], style={'overflowX': 'auto'}),  # Enables horizontal scrolling on small screens
+                            html.Div([
+                                html.Span('Visible', className='pv-mod-name'),
+                                html.Span('clean · soiling · hail · snow · bird droppings',
+                                          className='pv-mod-cats'),
+                            ], className='pv-mod'),
+                            html.Div([
+                                html.Span('EL', className='pv-mod-name'),
+                                html.Span('healthy · cell crack', className='pv-mod-cats'),
+                            ], className='pv-mod'),
+                            html.Div([
+                                html.Span('IR', className='pv-mod-name'),
+                                html.Span('healthy · hotspot', className='pv-mod-cats'),
+                            ], className='pv-mod'),
+                        ], className='pv-mods'),
+                        html.P([
+                            'The result table below reports F1 scores of each model on a '
+                            'curated test set — methodology and full results in ',
+                            html.A('our paper in Solar Energy',
+                                   href='https://www.sciencedirect.com/science/article/pii/S0038092X26004895',
+                                   target='_blank'),
+                            '. This tool is under active development — ',
+                            html.A('contact us', href='mailto:baojieli@lbl.gov'),
+                            ' with feedback or to collaborate.',
+                        ], className='pv-about-foot'),
+                    ], className='pv-about-text'),
+                    html.Img(src=app.get_asset_url('llm_logo.jpg'),
+                             className='pv-about-logo'),
+                ], className='pv-about-body'),
+            ], className='pv-about'),
+        ], className='pv-header'),
 
-                        html.P("(Updated on 2026/2/6)", style={'fontSize': '0.9em', 'color': 'gray'})
-                    ], md=6)
-                ])
-            ])
-        ], className="my-4")  # Adds spacing above and below the outer card
+        # ---------------- Workspace: stage (left) + steps 2-3 (right) ----------------
+        dbc.Row([
 
-        ], style={
-    })
-])
+            # ======== LEFT: the constellation stage ========
+            dbc.Col([
+                html.Div('Step 1 · Choose an image', className='pv-step-label'),
+                html.Div([
+                    # Floating image clusters (rebuilt by the callback)
+                    html.Div(
+                        children=render_example_thumbnails(),
+                        id='example-image-container',
+                        className='pv-cluster-layer',
+                    ),
+                    # Central upload square
+                    dcc.Upload(
+                        id='upload-image',
+                        children=html.Div([
+                            html.Div('↑', className='pv-upload-icon'),
+                            html.Div('Upload an image', className='pv-upload-title'),
+                            html.Div(['Drop a file here, or tap', html.Br(),
+                                      'a sample around it'],
+                                     className='pv-upload-text'),
+                        ]),
+                        className='pv-upload-zone',
+                        accept='image/*',
+                        multiple=False,
+                    ),
+                    # Selected / uploaded preview fills the central square
+                    html.Div(id='output-image-upload',
+                             className='pv-center-preview-slot'),
+                    # Clear (✕) button — shown only when an image is loaded
+                    html.Button('✕', id='clear-image-btn', n_clicks=0,
+                                className='pv-clear-btn',
+                                style={'display': 'none'}),
+                ], className='pv-stage'),
+                html.Div(id='upload-status', className='pv-status'),
+                dcc.Store(id='image-display-flag', data=False),
+                dcc.Store(id='image-content-store'),
+            ], xs=12, lg=7, className='mb-4'),
 
+            # ======== RIGHT: model + run + results ========
+            dbc.Col([
+                html.Div('Step 2 · Model', className='pv-step-label'),
+                dcc.RadioItems(
+                    id='model-selector',
+                    options=[
+                        {'label': 'ChatGPT-5.1', 'value': 'openai/gpt-5.1'},
+                        {'label': 'Gemini 2.5 Flash', 'value': 'google/gemini-2.5-flash'},
+                        {'label': 'Claude Haiku 4.5', 'value': 'anthropic/claude-haiku-4.5'},
+                    ],
+                    value='openai/gpt-5.1',
+                    className='pv-model-radio',
+                    inputStyle={'marginRight': '12px', 'marginTop': '4px'},
+                    labelStyle={'cursor': 'pointer', 'fontSize': '0.95em'},
+                ),
+                html.Button('Run the analysis', id='analyze-button', n_clicks=0,
+                            className='pv-run-button'),
+                html.Div('Takes about 3–8 seconds', className='pv-hint',
+                         style={'textAlign': 'center'}),
 
+                html.Div('Step 3 · Results', className='pv-step-label pv-step-results'),
+                dcc.Loading(id='loading-progress', type='default',
+                            children=html.Div(id='image-analysis-result')),
+            ], xs=12, lg={'size': 4, 'offset': 1}, className='mb-4'),
+
+        ], className='g-5'),
+
+    ], className='pv-inner'), className='pv-page'),
+
+    # ==================== FULL-BLEED BOTTOM BAND ====================
+    html.Div(html.Div(
+        dbc.Row([
+
+            dbc.Col(html.Div([
+                html.Div('Image dataset', className='pv-card-title'),
+                html.Div('Curated visible / EL / IR PV images',
+                         className='pv-card-sub'),
+                html.A(
+                    html.Img(src='/assets/images.png', className='pv-dataset-img'),
+                    href='https://github.com/DuraMAT/PV-LLM',
+                    target='_blank',
+                ),
+                html.P([
+                    'Example images from the test dataset. Learn more at ',
+                    html.A('DuraMAT/PV-LLM',
+                           href='https://github.com/DuraMAT/PV-LLM',
+                           target='_blank'),
+                ], className='pv-hint mt-2 mb-0'),
+            ], className='pv-card'), xs=12, lg=5, className='mb-4 mb-lg-0'),
+
+            dbc.Col(html.Div([
+                html.Div([
+                    html.Span('Result table · LLM performance',
+                              className='pv-card-title'),
+                    html.Span('Updated 2026/2/6', className='pv-card-date'),
+                ], className='pv-card-titlerow'),
+                html.Div('F1 scores · binary and multi-class tasks',
+                         className='pv-card-sub'),
+                html.Div([
+                    html.Table(
+                        table_header + [table_body],
+                        className='table pv-table',
+                        style={'fontSize': '0.88em', 'minWidth': '640px'},
+                    ),
+                ], style={'overflowX': 'auto'}),
+                html.P([
+                    'Reference: ',
+                    html.A('our paper in Solar Energy',
+                           href='https://www.sciencedirect.com/science/article/pii/S0038092X26004895',
+                           target='_blank'),
+                ], className='pv-hint mb-0'),
+            ], className='pv-card'), xs=12, lg=7, className='mb-4 mb-lg-0'),
+
+        ], className='g-4'),
+        className='pv-inner'), className='pv-band'),
+
+], fluid=True, className='px-0')
 
 
 # -----------------------------------------------------------------------------
@@ -498,7 +434,7 @@ def _confidence_descriptor(p):
 
 
 def build_result_panel(result):
-    """Render a polished, card-style analysis panel from the LLM result."""
+    """Compact, refined result panel: headline + probability bars + why."""
     pv_image_type = result.get('pv_image_type', 'other')
     prob_dict = result.get('probabilities', {}) or {}
     explanation = (result.get('explanation') or '').strip()
@@ -520,194 +456,57 @@ def build_result_panel(result):
         predicted_category, predicted_category.replace('_', ' ').title()
     )
 
-    # Header strip: image type pill + predicted category pill (no icons)
-    header = html.Div([
+    # --- Headline: prediction + confidence, with the image type as meta ---
+    headline = html.Div([
+        html.Div(f'{type_label} image', className='pv-res-meta'),
         html.Div([
-            html.Span('Image type: ', style={'color': SUBTLE_TEXT_COLOR}),
-            html.Span(type_label, style={'fontWeight': '700', 'color': ACCENT_COLOR}),
-        ], style={
-            'display': 'inline-block',
-            'backgroundColor': '#F4F8FB',
-            'padding': '4px 10px',
-            'borderRadius': '999px',
-            'border': f'1px solid {ACCENT_COLOR}33',
-            'marginRight': '8px',
-            'marginBottom': '6px',
-            'fontSize': '0.85em',
-        }),
-        html.Div([
-            html.Span('Predicted: ', style={'color': SUBTLE_TEXT_COLOR}),
-            html.Span(cat_label, style={'fontWeight': '700', 'color': ACCENT_COLOR}),
-        ], style={
-            'display': 'inline-block',
-            'backgroundColor': f'{ACCENT_COLOR}15',
-            'padding': '4px 10px',
-            'borderRadius': '999px',
-            'border': f'1px solid {ACCENT_COLOR}66',
-            'marginBottom': '6px',
-            'fontSize': '0.85em',
-        }),
-    ], style={'marginBottom': '10px'})
+            html.Span(cat_label, className='pv-res-cat'),
+            html.Span(f'{top_prob * 100:.0f}%', className='pv-res-pct'),
+            html.Span(conf_label, className='pv-res-chip'),
+        ], className='pv-res-headrow'),
+    ], className='pv-res-head')
 
-    # Compact result card: predicted category + confidence on one row
-    big_card = html.Div([
-        html.Div([
-            html.Span(cat_label, style={
-                'fontSize': '1.05em',
-                'fontWeight': '700',
-                'color': ACCENT_COLOR,
-                'marginRight': '10px',
-            }),
-            html.Span(f'{top_prob*100:.0f}%', style={
-                'fontSize': '1.35em',
-                'fontWeight': '800',
-                'color': ACCENT_COLOR,
-                'marginRight': '10px',
-            }),
-            html.Span(conf_label, style={
-                'display': 'inline-block',
-                'padding': '2px 8px',
-                'borderRadius': '999px',
-                'backgroundColor': f'{ACCENT_COLOR}1F',
-                'color': ACCENT_COLOR,
-                'fontWeight': '600',
-                'fontSize': '0.78em',
-                'verticalAlign': 'middle',
-            }),
-        ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap'}),
-    ], style={
-        'background': f'{ACCENT_COLOR}0A',
-        'border': f'1px solid {ACCENT_COLOR}40',
-        'borderLeft': f'4px solid {ACCENT_COLOR}',
-        'borderRadius': '10px',
-        'padding': '10px 14px',
-        'marginBottom': '10px',
-    })
+    # --- Slim horizontal probability bars, sorted high to low ---
+    bar_rows = []
+    for cat, p in sorted(prob_dict.items(), key=lambda kv: -float(kv[1])):
+        p = float(p)
+        label = CATEGORY_LABELS.get(cat, cat.replace('_', ' ').title())
+        winner = (cat == predicted_category)
+        bar_rows.append(html.Div([
+            html.Div(label, className='pv-bar-label'),
+            html.Div(
+                html.Div(
+                    className='pv-bar-fill' + (' pv-bar-win' if winner else ''),
+                    style={'width': f'{max(p * 100, 2):.0f}%'},
+                ),
+                className='pv-bar-track',
+            ),
+            html.Div(f'{p * 100:.0f}%', className='pv-bar-val'),
+        ], className='pv-bar-row'))
+    bars_block = html.Div(bar_rows, className='pv-res-bars')
 
-    # Bar chart — single accent color for the winner, muted blue for others.
-    # Slimmer height + constrained bar width + bold axis labels.
-    categories = list(prob_dict.keys())
-    probabilities = [float(prob_dict[c]) for c in categories]
-    pretty_categories = [CATEGORY_SHORT_LABELS.get(c, c.replace('_', ' ').title()) for c in categories]
-    bar_colors = [
-        ACCENT_COLOR if c == predicted_category else MUTED_BAR_COLOR
-        for c in categories
-    ]
-
-    # Cap bar width so 2-category charts (EL/IR) don't render comically wide.
-    n_bars = len(categories)
-    if n_bars <= 2:
-        bargap = 0.7
-    elif n_bars == 3:
-        bargap = 0.55
-    else:
-        bargap = 0.45
-
-    fig = go.Figure(go.Bar(
-        x=pretty_categories,
-        y=probabilities,
-        marker=dict(
-            color=bar_colors,
-            line=dict(color='rgba(0,0,0,0.08)', width=1),
-        ),
-        text=[f'{p*100:.0f}%' for p in probabilities],
-        textposition='outside',
-        textfont=dict(size=11, color='#333'),
-        hovertemplate='<b>%{x}</b><br>Probability: %{y:.2f}<extra></extra>',
-        cliponaxis=False,
-    ))
-    # Many short labels use <br> to wrap to two lines, so we always keep them
-    # horizontal. Slightly more bottom room when there are 4+ categories.
-    bottom_margin = 55 if len(categories) >= 4 else 40
-
-    fig.update_layout(
-        height=240,
-        bargap=bargap,
-        margin=dict(l=50, r=20, t=20, b=bottom_margin),
-        autosize=True,
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        yaxis=dict(
-            range=[0, 1.08],
-            title=dict(text='Probability', font=dict(size=12, color=TEXT_COLOR)),
-            tickfont=dict(size=11, color=TEXT_COLOR),
-            gridcolor='#EEE',
-            zerolinecolor='#DDD',
-        ),
-        xaxis=dict(
-            title=None,
-            tickangle=0,
-            tickfont=dict(size=11, color=TEXT_COLOR),
-            automargin=True,
-        ),
-        showlegend=False,
-    )
-
-    chart_card = html.Div([
-        html.Div('Probability across all categories', style={
-            'fontWeight': '600', 'color': TEXT_COLOR,
-            'marginBottom': '2px', 'fontSize': '0.85em',
-        }),
-        dcc.Graph(figure=fig, config={'displayModeBar': False}),
-    ], style={
-        'border': '1px solid #E5E9EF',
-        'borderRadius': '10px',
-        'padding': '8px 12px',
-        'marginBottom': '10px',
-        'backgroundColor': 'white',
-    })
-
-    # Explanation panel — same accent color, no icon.
+    # --- Short "why" block ---
     if explanation:
-        explanation_card = html.Div([
-            html.Div('LLM explanation', style={
-                'fontWeight': '700', 'color': ACCENT_COLOR,
-                'marginBottom': '6px', 'fontSize': '0.9em',
-            }),
-            html.Div(explanation, style={
-                'color': TEXT_COLOR,
-                'lineHeight': '1.5',
-                'fontSize': '0.9em',
-                'whiteSpace': 'pre-wrap',
-            }),
-        ], style={
-            'borderRadius': '10px',
-            'padding': '10px 14px',
-            'marginBottom': '10px',
-            'backgroundColor': f'{ACCENT_COLOR}0A',
-            'border': f'1px solid {ACCENT_COLOR}33',
-            'borderLeft': f'4px solid {ACCENT_COLOR}',
-        })
+        why_block = html.Div([
+            html.Div('Why', className='pv-res-why-label'),
+            html.Div(explanation, className='pv-res-why-text'),
+        ], className='pv-res-why')
     else:
-        explanation_card = html.Div()
+        why_block = html.Div()
 
-    # Collapsible raw JSON
+    # --- Collapsible raw model output ---
     raw_payload = {
         'pv_image_type': pv_image_type,
         'predicted_category': predicted_category,
         'probabilities': {k: round(float(v), 3) for k, v in prob_dict.items()},
     }
     raw_section = html.Details([
-        html.Summary('Show raw model output', style={
-            'cursor': 'pointer', 'color': SUBTLE_TEXT_COLOR,
-            'fontSize': '0.85em', 'marginBottom': '4px',
-        }),
-        html.Pre(
-            json.dumps(raw_payload, indent=2),
-            style={
-                'backgroundColor': '#F7F8FA',
-                'border': '1px solid #E5E9EF',
-                'borderRadius': '8px',
-                'padding': '8px 12px',
-                'color': '#444',
-                'fontSize': '0.8em',
-                'marginTop': '4px',
-                'whiteSpace': 'pre-wrap',
-            }
-        ),
-    ])
+        html.Summary('Show raw model output', className='pv-raw-summary'),
+        html.Pre(json.dumps(raw_payload, indent=2), className='pv-raw-pre'),
+    ], className='pv-raw')
 
-    return html.Div([header, big_card, chart_card, explanation_card, raw_section])
+    return html.Div([headline, bars_block, why_block, raw_section],
+                    className='pv-result')
 
 
 # Yellow accent for warning/error cards
@@ -808,49 +607,48 @@ def analyze_image(base64_image, model="openai/gpt-5.1"):
      Output('image-analysis-result', 'children'),
      Output('example-image-container', 'children'),
      Output('image-display-flag', 'data'),
-     Output('image-content-store', 'data')],   # ✅ new output
+     Output('image-content-store', 'data'),
+     Output('clear-image-btn', 'style')],      # ✅ show/hide the ✕ button
     [Input('upload-image', 'contents'),
      Input('analyze-button', 'n_clicks'),
+     Input('clear-image-btn', 'n_clicks'),     # ✅ clear the selection
      Input('example1', 'n_clicks'),
      Input('example2', 'n_clicks'),
      Input('example3', 'n_clicks'),
      Input('example4', 'n_clicks'),
      Input('example5', 'n_clicks'),
-     Input('example6', 'n_clicks')],
+     Input('example6', 'n_clicks'),
+     Input('example7', 'n_clicks'),
+     Input('example8', 'n_clicks'),
+     Input('example9', 'n_clicks')],
     [State('upload-image', 'contents'),
     State('image-display-flag', 'data'),
     State('image-content-store', 'data'),
     State('model-selector', 'value')]     # ✅ selected model
 )
-def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_image, image_displayed, stored_image, selected_model):
+def unified_callback(upload_content, n_clicks, clear_clicks, n1, n2, n3, n4, n5, n6, n7, n8, n9, uploaded_image, image_displayed, stored_image, selected_model):
 
     trigger_id = ctx.triggered_id
 
     status_msg = dash.no_update
     image_display = dash.no_update
+    clear_btn_style = dash.no_update
     analysis_output = dash.no_update
     thumbnails = render_example_thumbnails()
 
     # Case 1: new image uploaded
     if trigger_id == 'upload-image' and upload_content:
-        status_msg = html.Span(
-            'Status: Your image is successfully uploaded',
-            style={'color': 'gray', 'fontStyle': 'italic'}
-        )
+        status_msg = html.Span('Your image is loaded — press "Run the analysis"',
+                               className='pv-status-msg')
         image_display = html.Div([
-            html.P(''),
-            html.Div(html.Strong('Your image')),
-            html.Img(
-                src=upload_content,
-                style={
-                    'width': '180px',
-                    'height': '180px',
-                    'objectFit': 'cover',
-                    'marginTop': '10px',
-                    'borderRadius': '12px'
-                }
-            )
-        ])
+            html.Img(src=upload_content, className='pv-center-preview',
+                     title='Your uploaded image'),
+            html.Div([
+                html.Div('Your image', className='pv-preview-name'),
+                html.Div('ready to analyze', className='pv-preview-sub'),
+            ], className='pv-preview-cap'),
+        ], className='pv-preview-wrap')
+        clear_btn_style = {'display': 'flex'}
         image_displayed = True  # ✅ set image display flag
         stored_image = upload_content  # ✅ store uploaded image content
         analysis_output = ''  # ✅ clear results
@@ -862,30 +660,33 @@ def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_
         encoded_image = encode_image_as_upload_format(img_path)
         app._example_base64 = encoded_image  # simulate upload
 
-        status_msg = html.Span(
-            f'Status: Example image "{image_name_map[trigger_id]}" selected',
-            style={'color': 'gray', 'fontStyle': 'italic'}
-        )
+        status_msg = html.Span(f'Selected: {image_name_map[trigger_id]} — press "Run the analysis"',
+                               className='pv-status-msg')
         image_display = html.Div([
-            html.P(''),
-            html.Div(html.Strong(f'Example image: {image_name_map[trigger_id]}')),
-            html.Img(
-                src=encoded_image,
-                style={
-                    'width': '180px',
-                    'height': '180px',
-                    'objectFit': 'cover',
-                    'marginTop': '10px',
-                    'borderRadius': '12px'
-                }
-            )
-        ])
+            html.Img(src=encoded_image, className='pv-center-preview',
+                     title=image_name_map[trigger_id]),
+            html.Div([
+                html.Div(image_name_map[trigger_id], className='pv-preview-name'),
+                html.Div('ready to analyze', className='pv-preview-sub'),
+            ], className='pv-preview-cap'),
+        ], className='pv-preview-wrap')
+        clear_btn_style = {'display': 'flex'}
         image_displayed = True  # ✅ set image display flag
         stored_image = encoded_image  # ✅ store clicked image content
         analysis_output = ''  # ✅ clear results
         thumbnails = render_example_thumbnails(selected_id=trigger_id)
 
-    # Case 3: Analyze clicked
+    # Case 3: ✕ clear button clicked — reset the stage
+    elif trigger_id == 'clear-image-btn':
+        status_msg = ''
+        image_display = ''
+        analysis_output = ''
+        thumbnails = render_example_thumbnails()
+        image_displayed = False
+        stored_image = None
+        clear_btn_style = {'display': 'none'}
+
+    # Case 4: Analyze clicked
     elif trigger_id == 'analyze-button' and n_clicks > 0:
         image_data = stored_image
 
@@ -928,7 +729,7 @@ def unified_callback(upload_content, n_clicks, n1, n2, n3, n4, n5, n6, uploaded_
                     detail=err_text,
                 )
 
-    return status_msg, image_display, analysis_output, thumbnails, image_displayed, stored_image
+    return status_msg, image_display, analysis_output, thumbnails, image_displayed, stored_image, clear_btn_style
 
 
 if __name__ == '__main__':

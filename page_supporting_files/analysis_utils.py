@@ -44,7 +44,7 @@ client = openai.OpenAI(
 
 # Model used for column identification. (Kept as a constant so parse_contents
 # and any future caller reference one place.)
-LLM_MODEL = "gpt-5.4-nano"
+LLM_MODEL = "gpt-5.4-mini"
 
 # ---------------------------------------------------------------------------
 # Deterministic LLM column-identification cache.
@@ -179,6 +179,100 @@ def _best_by_data(df, cols):
         order.get(c, 1 << 30),      # then the candidate's listed order
     ))
     return best, viable
+
+
+# Deterministic power-column name scan — a safety net for when the (small,
+# non-deterministic) LLM omits an obvious power column from its candidates.
+# Mirrors the irradiance name-scan below. A name matches "power" if it contains
+# 'power'/'pwr' or a p-symbol token (pdc, p_dc, pmp, ppv, p_array, ...); it's AC
+# if it carries an AC/output/grid marker, otherwise DC.
+_POWER_NAME_RE = re.compile(
+    r'power|pwr|(?:^|[^a-z])p_?(?:dc|ac|mpp?|pv|out|in|array|string)(?:[^a-z]|$)',
+    re.I)
+_AC_MARKER_RE = re.compile(r'(?:^|[^a-z])ac(?:[^a-z]|$)|out|grid|phase', re.I)
+
+
+def _scan_power_names(df):
+    """Return (dc_power_cols, ac_power_cols) found purely by column name."""
+    dc, ac = [], []
+    for c in df.columns:
+        if not _POWER_NAME_RE.search(str(c)):
+            continue
+        (ac if _AC_MARKER_RE.search(str(c)) else dc).append(c)
+    return dc, ac
+
+
+def _least_bad(df, cols):
+    """Fallback for when NO candidate passes the strict quality gates in
+    _best_by_data, but the role still has a proposed column present in the data.
+
+    The strict gates are there to CHOOSE among several candidates — but when a
+    role has only a poor column (or a single low-quality one), dropping it
+    leaves the role unmapped and the user sees nothing. Instead we keep the
+    least-bad candidate (most data, then most distinct values, then variance),
+    so it's still shown, and return a reason the caller surfaces as a data-
+    quality warning. Requires at least one real numeric value (a fully dead /
+    all-text column is still unusable). Returns (col_or_None, reason)."""
+    present = []
+    for c in cols or []:
+        if c not in df.columns:
+            continue
+        if int(pd.to_numeric(df[c], errors="coerce").notna().sum()) < 1:
+            continue                     # totally dead / non-numeric — unusable
+        present.append(c)
+    if not present:
+        return None, None
+
+    def _key(c):
+        s = pd.to_numeric(df[c], errors="coerce")
+        return (_is_device_level(c), -int(s.notna().sum()),
+                -int(s.nunique(dropna=True)), -float(s.var(skipna=True) or 0.0))
+
+    best = min(present, key=_key)
+    s = pd.to_numeric(df[best], errors="coerce")
+    non_null = int(s.notna().sum())
+    nunique = int(s.nunique(dropna=True))
+    mf = _missing_frac(df, best)
+    if nunique <= 1:
+        reason = "is constant / all-zero"
+    elif non_null < MIN_VALID_POINTS:
+        reason = f"has only {non_null} valid values"
+    elif mf > MAX_MISSING_FRAC:
+        reason = f"is {mf:.0%} missing"
+    else:
+        reason = "is low quality"
+    return best, reason
+
+
+def _quality_tag(df, col, role=None):
+    """A short parenthetical quality/context label for a candidate column, shown
+    after its name in the mapping dropdown (e.g. 'all-zero', '94% missing',
+    'per-device', 'wrong units'). Returns None for a clean, system-level column
+    that needs no annotation."""
+    if not col or col == "__index__" or col not in df.columns:
+        return None
+    s = pd.to_numeric(df[col], errors="coerce")
+    non_null = int(s.notna().sum())
+    if non_null == 0:
+        return "no numeric data"
+    # Irradiance must be in W/m^2 — flag a mis-scaled channel.
+    if role == "Irradiance":
+        peak = s.quantile(0.95)
+        if not (np.isfinite(peak) and peak >= MIN_IRRADIANCE_PEAK):
+            return "wrong units"
+    nunique = int(s.nunique(dropna=True))
+    if nunique <= 1:
+        return "all-zero" if float(s.max()) == 0 else "constant"
+    if non_null < MIN_VALID_POINTS:
+        return f"only {non_null} pts"
+    mf = _missing_frac(df, col)
+    if mf > MAX_MISSING_FRAC:
+        return f"{mf:.0%} missing"
+    if mf > FLAG_MISSING_FRAC:
+        return f"{mf:.0%} missing"
+    if _is_device_level(col):
+        return "per-device"
+    return None
 
 
 _TIME_NAME_RE = re.compile(
@@ -406,6 +500,12 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         p_array, p_string, inv1_input_power, inv1_dc_power,
         inverter1_dc_power, mppt_power, panel_power, string_power.
 
+    IMPORTANT — DO NOT MISS POWER. A column whose name contains "power" (or
+    "pwr", or a p-symbol like pdc/p_dc/pmp/ppv) is a POWER column and MUST be
+    listed under DC Power (or AC Power if it carries an AC/output/grid marker).
+    Never leave DC Power empty when such a column exists. This is the single
+    most important quantity — err toward including a plausible power column.
+
     AC columns (output / grid / inverter output) belong under the AC roles
     (AC Power / AC Voltage / AC Current) -- list them there, NOT under the DC
     roles. We prefer DC and only fall back to AC when no DC column exists.
@@ -624,6 +724,19 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note(ac_role, best, viable, ac=True)
                 return best, "ac"
+            # Lenient fallback: nothing passed the quality gates, but if a
+            # candidate column exists, keep the least-bad one (shown + warned)
+            # rather than leaving the role unmapped.
+            lb, reason = _least_bad(df, _cands(dc_role))
+            side = "dc"
+            if lb is None:
+                lb, reason = _least_bad(df, _cands(ac_role))
+                side = "ac"
+            if lb is not None:
+                mapping_notes.append(
+                    f"{label.capitalize()} column '{lb}' {reason} — kept anyway "
+                    f"so you can review it; results may be unreliable.")
+                return lb, side
             return None, None
 
         # Voltage / Current (needed for PVPRO and for V*I power).
@@ -641,31 +754,68 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             if p:
                 v_col, v_side = p, i_side
 
-        # Power: DC direct -> DC V*I -> AC direct -> AC V*I.
-        best_dc_p, viable_dc_p = _best_by_data(df, _cands("DC Power"))
+        # Power resolution priority (DC preferred; real/good preferred over
+        # computed or low-quality; role never left empty when a column exists):
+        #   1 strict DC  ->  2 DC V×I  ->  3 lenient DC (low-quality, shown+warned)
+        #   -> 4 strict AC  ->  5 AC V×I  ->  6 lenient AC.
+        # Supplement the LLM's candidates with a deterministic name scan so an
+        # obvious column like 'dc_power' is caught even when the LLM omits it.
+        scan_dc_p, scan_ac_p = _scan_power_names(df)
+        dc_p_cands = list(dict.fromkeys(_cands("DC Power") + scan_dc_p))
+        ac_p_cands = list(dict.fromkeys(_cands("AC Power") + scan_ac_p))
+
+        def _compute_power(side):
+            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                       * pd.to_numeric(df[i_col], errors="coerce"))
+            return "computed_dc_power", side
+
         p_col, p_side = None, None
+
+        # 1) strict DC direct
+        best_dc_p, viable_dc_p = _best_by_data(df, dc_p_cands)
         if best_dc_p:
             p_col, p_side = best_dc_p, "dc"
             _ambiguity_note("DC Power", best_dc_p, viable_dc_p)
-        elif v_col and i_col and v_side == "dc" and i_side == "dc":
-            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
-                                       * pd.to_numeric(df[i_col], errors="coerce"))
-            p_col, p_side = "computed_dc_power", "dc"
+
+        # 2) computed DC (V×I) from good V/I
+        if p_col is None and v_col and i_col and v_side == "dc" and i_side == "dc":
+            p_col, p_side = _compute_power("dc")
             mapping_notes.append("DC Power computed as Voltage × Current (no direct power column).")
-        else:
-            best_ac_p, viable_ac_p = _best_by_data(df, _cands("AC Power"))
+
+        # 3) lenient DC: a single low-quality DC power column is still shown + warned
+        if p_col is None:
+            lb, reason = _least_bad(df, dc_p_cands)
+            if lb is not None:
+                p_col, p_side = lb, "dc"
+                mapping_notes.append(
+                    f"DC Power column '{lb}' {reason} — kept anyway so you can "
+                    f"review it; results may be unreliable.")
+
+        # 4) strict AC direct
+        if p_col is None:
+            best_ac_p, viable_ac_p = _best_by_data(df, ac_p_cands)
             if best_ac_p:
                 p_col, p_side = best_ac_p, "ac"
                 mapping_notes.append(
                     f"No usable DC power column — using AC power '{best_ac_p}' "
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note("AC Power", best_ac_p, viable_ac_p, ac=True)
-            elif v_col and i_col:
-                df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
-                                           * pd.to_numeric(df[i_col], errors="coerce"))
-                p_col, p_side = "computed_dc_power", "ac"
-                mapping_notes.append("Power computed as Voltage × Current on the AC side "
-                                     "(no DC power) — includes inverter effects, approximate.")
+
+        # 5) computed AC (V×I)
+        if p_col is None and v_col and i_col:
+            p_col, p_side = _compute_power("ac")
+            mapping_notes.append("Power computed as Voltage × Current on the AC side "
+                                 "(no DC power) — includes inverter effects, approximate.")
+
+        # 6) lenient AC: last resort, low-quality AC power column shown + warned
+        if p_col is None:
+            lb, reason = _least_bad(df, ac_p_cands)
+            if lb is not None:
+                p_col, p_side = lb, "ac"
+                mapping_notes.append(
+                    f"AC Power column '{lb}' {reason} — kept anyway so you can "
+                    f"review it; results may be unreliable (AC also includes "
+                    f"inverter effects).")
 
         # Fill the third electrical quantity from the other two (P = V * I).
         # Exact on the DC side; on the AC side it's approximate (ignores power
@@ -737,6 +887,13 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                     "— ignoring irradiance and using raw power.")
         temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
         _ambiguity_note("Module temperature", temp_col, temp_viable)
+        if temp_col is None:
+            lb, reason = _least_bad(df, _cands("Module temperature"))
+            if lb is not None:
+                temp_col = lb
+                mapping_notes.append(
+                    f"Module temperature column '{lb}' {reason} — kept anyway; "
+                    f"temperature correction may be unreliable.")
 
         # Time: detect BY NAME first (the LLM's name-based pick, then any column
         # whose name reads like time); only if no time-like NAME exists, fall
@@ -803,11 +960,38 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             df = df.dropna(subset=[time_col]).set_index(time_col)
 
-        # Stash the per-role alternatives on the frame so the Advanced UI can
-        # render them inline under each dropdown (set AFTER any re-index so it
-        # lands on the final df object the caller receives).
-        df.attrs["mapping_alternatives"] = {
-            r: cols for r, cols in alternatives.items() if cols}
+        # Comprehensive per-role candidate lists for the UI: EVERY relevant
+        # column (LLM picks + name-scan), INCLUDING low-quality ones, so they all
+        # appear under "LLM-detected {role}" rather than being hidden. Each gets
+        # a short quality tag (e.g. 'all-zero', '94% missing', 'per-device') the
+        # UI appends after the name.
+        _role_cands = {
+            "DC Power":           dc_p_cands + ac_p_cands,
+            "DC Voltage":         _cands("DC Voltage") + _cands("AC Voltage"),
+            "DC Current":         _cands("DC Current") + _cands("AC Current"),
+            "Irradiance":         all_irr,
+            "Module temperature": _cands("Module temperature"),
+            "Time":               ([c for c in _cands("Time") if c in df.columns]
+                                   + [c for c in df.columns if _name_looks_like_time(c)]),
+        }
+        comprehensive_alts, quality_tags = {}, {}
+        for _role, _cand_list in _role_cands.items():
+            seen = []
+            for c in _cand_list:
+                if c in df.columns and c not in seen:
+                    seen.append(c)
+            if seen:
+                comprehensive_alts[_role] = seen
+                for c in seen:
+                    t = _quality_tag(df, c, _role)
+                    if t:
+                        quality_tags[c] = t
+
+        # Stash the per-role candidates + quality tags on the frame so the
+        # Advanced UI can render them under each dropdown (set AFTER any re-index
+        # so it lands on the final df object the caller receives).
+        df.attrs["mapping_alternatives"] = comprehensive_alts
+        df.attrs["mapping_quality_tags"] = quality_tags
 
         # Hold a freshly-identified (not-yet-cached) mapping as "pending" so the
         # caller can commit it to the cache only if the run is GOOD.

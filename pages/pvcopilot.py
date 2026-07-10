@@ -1,5 +1,6 @@
 import dash
 from dash import dcc, html, Input, Output, dash_table, ALL
+import dash_mantine_components as dmc
 from dash.dependencies import Input, Output, State
 import plotly.express as px
 import pandas as pd
@@ -24,6 +25,37 @@ import threading
 import uuid
 import copy
 import collections
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+# =============================================================================
+# TIMEOUT GUARD FOR SYNCHRONOUS STEPS
+#
+# Analyze and the fast degradation methods run synchronously inside their Dash
+# callbacks. A malformed dataset can make them run effectively forever and hang
+# the UI. We cap them by running the pure computation in a worker and waiting on
+# its result; if it overruns, the callback aborts and surfaces a clear error
+# instead of leaving the user staring at a spinner.
+#
+# PVPRO is deliberately NOT guarded here — it has its own background-job
+# infrastructure below and legitimately takes 1–3 minutes.
+#
+# Caveat: a timed-out worker keeps running to completion in the background
+# (Python can't force-kill a thread). That's acceptable — the only requirement
+# is that the *UI* stops waiting and reports the problem.
+# =============================================================================
+_TIMEOUT_POOL = ThreadPoolExecutor(max_workers=8)
+STEP_TIMEOUT_S = 10
+# Analyze makes an LLM column-identification call, which legitimately takes a
+# few seconds and can retry once on a busy gateway — give it more headroom than
+# the pure-pandas steps so a slow-but-fine call isn't reported as a timeout.
+ANALYZE_TIMEOUT_S = 25
+
+
+def _run_with_timeout(fn, *args, timeout=STEP_TIMEOUT_S, **kwargs):
+    """Run fn(*args, **kwargs), raising FutureTimeout if it exceeds `timeout` s."""
+    fut = _TIMEOUT_POOL.submit(fn, *args, **kwargs)
+    return fut.result(timeout=timeout)
+
 
 # =============================================================================
 # PVPRO BACKGROUND-JOB INFRASTRUCTURE
@@ -203,6 +235,54 @@ def _pvpro_make_job():
             _PVPRO_JOBS[job_id] = job
     _pvpro_debug("make_job", job_id=job_id[:8])
     return job_id
+
+
+# -----------------------------------------------------------------------------
+# LIVE ANALYZE STATUS  (reuses the PVPRO job cache as a tiny message bus)
+#
+# The Analyze callback publishes a stage message under a key derived from a
+# per-tab token + n_clicks; a dcc.Interval poll (served by any worker thread)
+# reads the same key and mirrors it into the UI while the callback is still
+# running. Nothing depends on these records for correctness — a lost message
+# just means the status line skips a beat.
+# -----------------------------------------------------------------------------
+_ANALYZE_STATUS_PREFIX = "analyze-status:"
+_ANALYZE_STATUS_TTL_S = 600
+
+
+def _analyze_status_key(token, n_clicks):
+    return f"{_ANALYZE_STATUS_PREFIX}{token}:{n_clicks}"
+
+
+def _analyze_status_set(key, message):
+    """Publish the current Analyze stage message. started_at persists from the
+    first write so the poll can show a running elapsed counter."""
+    now = time.time()
+    if _PVPRO_USE_DISKCACHE:
+        rec = _PVPRO_JOB_CACHE.get(key) or {"started_at": now}
+        rec["message"] = message
+        _PVPRO_JOB_CACHE.set(key, rec, expire=_ANALYZE_STATUS_TTL_S)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            rec = _PVPRO_JOBS.get(key) or {"started_at": now}
+            rec["message"] = message
+            _PVPRO_JOBS[key] = rec
+            # In-memory dict has no TTL — prune stale status entries here.
+            stale = [k for k, v in _PVPRO_JOBS.items()
+                     if isinstance(k, str) and k.startswith(_ANALYZE_STATUS_PREFIX)
+                     and now - v.get("started_at", now) > _ANALYZE_STATUS_TTL_S]
+            for k in stale:
+                _PVPRO_JOBS.pop(k, None)
+
+
+def _analyze_status_get(key):
+    """Snapshot of {'message', 'started_at'} for this run, or None."""
+    if _PVPRO_USE_DISKCACHE:
+        rec = _PVPRO_JOB_CACHE.get(key)
+    else:
+        with _PVPRO_JOBS_LOCK:
+            rec = _PVPRO_JOBS.get(key)
+    return None if rec is None else dict(rec)
 
 
 def _pvpro_update_job(job_id, **kwargs):
@@ -755,8 +835,9 @@ def agent_message(agent_key, body, intro=None):
             html.Div(
                 body,
                 style={
-                    "marginLeft": "46px",
-                    "padding": "20px 22px",
+                    # Left-aligned with the header row (no avatar indent) so the
+                    # box's left edge lines up with the "①" badge / agent title.
+                    "padding": "24px 40px",
                     "background": PAPER_RAISED,
                     "border": f"1px solid {BORDER}",
                     "borderRadius": "12px",
@@ -1477,7 +1558,7 @@ def build_sidebar(progress=None):
                         "textAlign": "left",
                     }),
                 ],
-                style={"padding": "20px 18px 24px"}
+                style={"padding": "20px 24px 24px"}
             ),
 
             # Workflow section.  Horizontal padding matches the brand
@@ -1530,7 +1611,7 @@ def build_sidebar(progress=None):
                         }
                     ),
                 ],
-                style={"padding": "0 18px"}
+                style={"padding": "0 24px"}
             ),
 
             # Spacer
@@ -1580,7 +1661,7 @@ def build_sidebar(progress=None):
                         }
                     ),
                 ],
-                style={"padding": "0 18px 20px"}
+                style={"padding": "0 24px 20px"}
             ),
 
             # User / login block
@@ -1665,7 +1746,7 @@ def build_sidebar(progress=None):
                     ),
                 ],
                 style={
-                    "padding": "14px 18px",
+                    "padding": "14px 24px",
                     "borderTop": f"1px solid {BORDER}",
                     "background": "transparent",
                 }
@@ -1735,6 +1816,7 @@ data_agent_body = html.Div([
     ),
     html.Div(
         "Detects variables and previews the raw signal (2–10 seconds)",
+        id="analyze-caption",
         style={
             "fontSize": "13px",
             "color": INK_SOFT,
@@ -1743,6 +1825,21 @@ data_agent_body = html.Div([
             "fontFamily": "Arial, sans-serif",
         }
     ),
+    # Live status line — hidden until Analyze is clicked, then driven by the
+    # analyze-status-interval poll while the callback runs.
+    html.Div(
+        [
+            html.Span("Starting analysis…", id="analyze-status-text",
+                      style={"color": INK, "fontWeight": "500"}),
+            html.Span("", id="analyze-status-elapsed",
+                      style={"color": INK_SOFT, "marginLeft": "2px"}),
+        ],
+        id="analyze-status-line",
+        style={"display": "none"},
+    ),
+    dcc.Store(id="analyze-status-token"),
+    dcc.Interval(id="analyze-status-interval", interval=450,
+                 n_intervals=0, disabled=True),
 
     # Output area — identified variables + raw figures (filled by callback)
     dcc.Loading(
@@ -1890,7 +1987,7 @@ shared_upload_header = html.Div(
         ),
     ],
     style={
-        "padding": "32px 64px 36px",
+        "padding": "32px 40px 36px",
         "background": PAPER_RAISED,
         "border": f"1px solid {BORDER}",
         "borderRadius": "10px",
@@ -2726,7 +2823,7 @@ common_header = html.Div(
                 margin_bottom="0",
             ),
         ],
-        style={"padding": "32px 64px 36px"},
+        style={"padding": "32px 40px 36px"},
     ),
     style={
         "background": PAPER_RAISED,
@@ -3500,7 +3597,7 @@ simple_mode_panel = html.Div(
 # =============================================================================
 # FULL LAYOUT
 # =============================================================================
-layout = html.Div([
+_page_body = html.Div([
 
     # Hidden stores (unchanged)
     dcc.Store(id="mapped-vars-store",     data={}),
@@ -3604,11 +3701,22 @@ layout = html.Div([
                                     # all inside one card matching the others.
                                     html.Div(
                                         [
-                                            html.Div("ANALYZE", style={
-                                                "fontSize": "15px", "color": ACCENT,
-                                                "fontWeight": "800", "fontFamily": "Arial, sans-serif",
-                                                "textTransform": "uppercase", "letterSpacing": "0.12em",
-                                                "marginBottom": "14px",
+                                            html.Div([
+                                                html.Span("ANALYZE", style={
+                                                    "fontSize": "15px", "color": ACCENT,
+                                                    "fontWeight": "800", "fontFamily": "Arial, sans-serif",
+                                                    "textTransform": "uppercase", "letterSpacing": "0.12em",
+                                                }),
+                                                # Filled with the uploaded file name (see callback).
+                                                html.Span(id="analyze-title-file", style={
+                                                    "fontSize": "14px", "color": INK_SOFT,
+                                                    "fontWeight": "600", "fontFamily": "Arial, sans-serif",
+                                                    "marginLeft": "10px",
+                                                }),
+                                            ], style={
+                                                "marginBottom": "14px", "display": "flex",
+                                                "alignItems": "baseline", "flexWrap": "wrap",
+                                                "columnGap": "2px",
                                             }),
                                             html.Div(
                                                 "Pick a mode, then run the analysis on "
@@ -3647,7 +3755,7 @@ layout = html.Div([
                                             ),
                                         ],
                                         style={
-                                            "padding": "32px 64px 36px",
+                                            "padding": "32px 40px 36px",
                                             "background": PAPER_RAISED,
                                             "border": f"1px solid {BORDER}",
                                             "borderRadius": "10px",
@@ -3660,7 +3768,7 @@ layout = html.Div([
                                     html.Div(
                                         html.Div(
                                             ai_assistant_block,
-                                            style={"padding": "32px 64px 32px"},
+                                            style={"padding": "32px 40px 32px"},
                                         ),
                                         style={
                                             "background": PAPER_RAISED,
@@ -3731,6 +3839,12 @@ layout = html.Div([
 ],
 className="pvcopilot-root",
 )
+
+# dmc components (the variable-mapping Selects) need Mantine context. Wrapping
+# this page's body in a MantineProvider supplies it to every descendant,
+# including the Selects the analyze/apply callbacks insert dynamically. (If the
+# app root in app.py already provides one, this nests harmlessly.)
+layout = dmc.MantineProvider(_page_body)
 
 
 # =============================================================================
@@ -3870,6 +3984,31 @@ def update_upload_status(filename):
                         "fontFamily": "Arial, sans-serif"}),
         None, "", None
     ]
+
+
+@app.callback(
+    Output("analyze-title-file", "children"),
+    Input("stored-data-file-name", "data"),
+)
+def show_analyze_filename(filename):
+    """Show the loaded file's name as a pill next to the ANALYZE title.
+    Returns "" (nothing rendered) when no file is loaded, so no empty pill."""
+    if not filename:
+        return ""
+    return html.Span(filename, style={
+        "display": "inline-block",
+        "padding": "3px 12px",
+        "background": "#eef2f7",
+        "border": "1px solid #e2e8f0",
+        "borderRadius": "999px",
+        "fontSize": "13px",
+        "fontWeight": "600",
+        "color": "#334155",
+        "fontFamily": "Arial, sans-serif",
+        "letterSpacing": "0",
+        "textTransform": "none",
+        "lineHeight": "1.4",
+    })
 
 
 # =============================================================================
@@ -5233,8 +5372,9 @@ def _build_overview_figures_div(df, mapped_variables_dict):
 # handled specially because it is usually the DataFrame index ("__index__")
 # rather than a real column.
 _MAP_METRICS = [
-    "DC Power", "DC Voltage", "DC Current",
-    "Irradiance", "Module temperature", "Time",
+    "DC Power", "Time",                    # required — degradation can't run without these
+    "Irradiance", "Module temperature",    # optional refinements (normalization / temp correction)
+    "DC Voltage", "DC Current",            # optional — only used by the PVPRO physics method
 ]
 
 # Metrics required for degradation analysis (used to flag missing selections).
@@ -5254,9 +5394,10 @@ _HINT_HAIRLINE = "#d2d2d7"     # pill border
 _HINT_FILL = "#ffffff"         # pill fill
 
 
-def _col_chip(name):
-    """A column name as a quiet, hairline pill."""
-    return html.Span(name, style={
+def _col_chip(name, tag=None):
+    """A column name as a quiet, hairline pill, with an optional quality tag."""
+    txt = f"{name} ({tag})" if tag else name
+    return html.Span(txt, style={
         "fontFamily": "SFMono-Regular, ui-monospace, Menlo, monospace",
         "fontSize": "11px", "color": _HINT_INK,
         "background": _HINT_FILL,
@@ -5266,17 +5407,20 @@ def _col_chip(name):
     })
 
 
-def _alt_hint(others):
-    """A quiet one-line notice listing the other valid columns for a role,
-    shown under that row's dropdown. Returns "" when there's nothing to add."""
-    if not others:
+def _alt_hint(others, exclude=None, tags=None):
+    """A quiet one-line notice listing the OTHER candidate columns for a role
+    (excluding whatever is currently selected). Plain column names only — the
+    quality tags live on the dropdown options (as right-aligned pills), so we
+    don't repeat them here."""
+    items = [c for c in (others or []) if c and c != exclude]
+    if not items:
         return ""
     return html.Div(
         [html.Span("Also detected", style={
             "fontSize": "11px", "color": _HINT_INK_SOFT,
             "fontWeight": "500", "flex": "0 0 auto",
-        })] + [_col_chip(c) for c in others],
-        title="These columns also look valid for this variable — "
+        })] + [_col_chip(c) for c in items],
+        title="Other columns that could match this variable — "
               "switch above if the selected one isn't right.",
         className="var-alt-hint",
         style={
@@ -5287,67 +5431,84 @@ def _alt_hint(others):
     )
 
 
-# What a MISSING variable means for the analysis, shown inline under its row.
-# (message, is_required): required variables block degradation entirely (red);
-# the rest only reduce accuracy or disable PVPRO (amber).
+# What a MISSING variable means, shown inline under its row. (message, required):
+# required variables (Power, Time) genuinely block the degradation analysis;
+# the rest are OPTIONAL — skipping them only disables an extra method or a
+# refinement, so the copy stays neutral and says the main analysis still runs.
+# The "Required ·" / "Optional ·" lead is added in _missing_hint, so messages
+# begin lowercase.
 _MISSING_HINT = {
-    "DC Power": ("Degradation can't run without power. Select a power column — "
-                 "or pick voltage + current and it's derived as V × I.", True),
-    "Time": ("Degradation can't run without timestamps. Select the time "
-             "column.", True),
-    "DC Voltage": ("PVPRO physics analysis can't be run — it needs both "
-                   "voltage and current.", False),
-    "DC Current": ("PVPRO physics analysis can't be run — it needs both "
-                   "voltage and current.", False),
-    "Irradiance": ("The rate won't be weather-normalized, so it's less "
-                   "reliable.", False),
-    "Module temperature": ("No temperature correction will be applied.", False),
+    "DC Power": ("select a power column, or voltage + current (derived as V × I).",
+                 True),
+    "Time": ("select the timestamp column.", True),
+    "Irradiance": ("enables weather normalization; the rate is less reliable "
+                   "without it.", False),
+    "Module temperature": ("enables temperature correction.", False),
+    "DC Voltage": ("used only by the PVPRO physics method.", False),
+    "DC Current": ("used only by the PVPRO physics method.", False),
 }
 
 
 def _missing_hint(metric):
-    """A quiet inline notice under a row whose variable wasn't detected: a small
-    status dot (red = blocks degradation, amber = caveat only) and one line of
-    muted text explaining what the absence means."""
+    """Inline note under a row with no column selected. Two tiers:
+    - required (Power, Time): red dot, prominent — it blocks the analysis;
+    - optional (the rest): gray dot, smaller and lighter — it only disables an
+      extra method/refinement, so it shouldn't read like an error."""
     entry = _MISSING_HINT.get(metric)
     if not entry:
         return ""
     msg, required = entry
-    dot = "#ff3b30" if required else "#ff9f0a"      # red (blocker) / amber (caveat)
-    lead = "Required" if required else "Not detected"
+    if required:
+        dot = "#dc2626"                              # red — genuine blocker
+        lead, lead_style = "Required", {"color": _HINT_INK, "fontWeight": "600"}
+        msg_style = {"color": _HINT_INK_SOFT}
+        text_style = {"fontSize": "12px", "lineHeight": "1.45"}
+        row_style = {"marginTop": "7px", "display": "flex", "gap": "8px",
+                     "alignItems": "flex-start", "fontFamily": _HINT_FONT}
+        dot_mt = "6px"
+    else:
+        dot = "#c7c7cc"                              # light gray — recedes
+        lead, lead_style = "Optional", {"color": _HINT_INK_SOFT, "fontWeight": "600"}
+        msg_style = {"color": "#a1a1a6"}
+        text_style = {"fontSize": "11px", "lineHeight": "1.4"}
+        row_style = {"marginTop": "6px", "display": "flex", "gap": "7px",
+                     "alignItems": "flex-start", "fontFamily": _HINT_FONT}
+        dot_mt = "5px"
     return html.Div([
         html.Span(style={
             "width": "6px", "height": "6px", "borderRadius": "50%",
-            "background": dot, "flex": "0 0 auto", "marginTop": "6px",
+            "background": dot, "flex": "0 0 auto", "marginTop": dot_mt,
         }),
         html.Span([
-            html.Span(f"{lead} · ", style={"color": _HINT_INK, "fontWeight": "600"}),
-            html.Span(msg, style={"color": _HINT_INK_SOFT}),
-        ], style={"fontSize": "12px", "lineHeight": "1.45"}),
+            html.Span(f"{lead} · ", style=lead_style),
+            html.Span(msg, style=msg_style),
+        ], style=text_style),
     ],
-        className=f"var-missing-hint {'blocking' if required else 'caveat'}",
-        style={
-            "marginTop": "7px", "display": "flex", "gap": "8px",
-            "alignItems": "flex-start", "fontFamily": _HINT_FONT,
-        })
+        className=f"var-missing-hint {'blocking' if required else 'optional'}",
+        style=row_style)
 
 
 def build_variable_mapping_table(mapped_variables_dict, columns,
-                                 time_in_index=False, status_children=None,
-                                 alternatives=None):
+                                 time_in_index=False, alternatives=None,
+                                 status_children=None, detected_map=None,
+                                 quality_tags=None):
     """Build an editable variable-mapping table.
 
     Args:
         mapped_variables_dict: {metric: column_name} currently mapped (N/A omitted).
         columns: list of available DataFrame column names.
         time_in_index: whether the Time variable is the DataFrame index.
-        status_children: optional element rendered in the status slot (used by
-            the Apply callback to show the confirmation/warning after re-render).
+        status_children: optional element rendered in the status slot at the
+            bottom (used by the Apply callback to show its confirmation/warning).
         alternatives: optional {metric: [other valid column names]} — when a role
             had more than one valid match, the others are pinned at the top of
             that row's dropdown and listed as a subtle hint under it. Populated
             from df.attrs["mapping_alternatives"] when parse_contents provides
             it; safely defaults to none.
+        detected_map: optional {metric: column} of the LLM's ORIGINAL detection.
+            Kept separate from the current mapping so the "LLM-detected" group
+            stays populated even after the user clears a row (current would then
+            be empty, but the LLM's pick still belongs in that group).
 
     Returns:
         A Dash component (the editable table + apply button + status line).
@@ -5355,10 +5516,12 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
     mapped_variables_dict = mapped_variables_dict or {}
     columns = list(columns or [])
     alternatives = alternatives or {}
+    detected_map = detected_map or {}
+    quality_tags = quality_tags or {}
 
     header = html.Div([
         html.Div("Metric", style={
-            "flex": "0 0 42%", "fontWeight": "700", "color": INK,
+            "flex": "0 0 30%", "fontWeight": "700", "color": INK,
             "fontFamily": "Arial, sans-serif", "fontSize": "14px",
         }),
         html.Div("Variable Name", style={
@@ -5372,95 +5535,103 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
     })
 
     rows = []
-    # Friendly group names per metric for the dropdown's pinned section.
+    # Short role noun for the "LLM-detected {role}" group label.
     _ROLE_GROUP = {
-        "DC Power": "Power columns", "DC Voltage": "Voltage columns",
-        "DC Current": "Current columns", "Irradiance": "Irradiance columns",
-        "Module temperature": "Temperature columns", "Time": "Time columns",
+        "DC Power": "power", "DC Voltage": "voltage", "DC Current": "current",
+        "Irradiance": "irradiance", "Module temperature": "temperature",
+        "Time": "time",
     }
-
-    def _group_header(text, key):
-        """A non-selectable section header inside the dropdown."""
-        return {
-            "label": html.Span(text, style={
-                "fontSize": "10px", "fontWeight": "700", "color": "#86868b",
-                "textTransform": "uppercase", "letterSpacing": "0.08em",
-                "cursor": "default",
-            }),
-            "value": f"__hdr__{key}__", "disabled": True, "search": "",
-        }
-
-    def _valid_opt(c, label=None):
-        """A recognized-for-this-role column: bold, with a small accent dot."""
-        return {
-            "label": html.Span([
-                html.Span(style={
-                    "display": "inline-block", "width": "6px", "height": "6px",
-                    "borderRadius": "50%", "background": ACCENT,
-                    "marginRight": "8px", "verticalAlign": "middle",
-                }),
-                html.Span(label or c, style={"fontWeight": "600", "color": INK}),
-            ]),
-            "value": c, "search": label or c,
-        }
 
     for i, metric in enumerate(_MAP_METRICS):
         current = mapped_variables_dict.get(metric)
+        detected_col = detected_map.get(metric)
 
-        # Columns recognized as THIS variable: the detected one + any valid
-        # alternatives. They're pinned at the top under a labeled group so the
-        # right candidates are always one glance away.
+        # The "LLM-detected {role}" group = the LLM's original pick + any valid
+        # alternatives + the current selection (if the user changed it). Built
+        # from detected_map (not just current) so clearing a row doesn't empty
+        # this group — the LLM's detection still belongs here.
         valid = []
-        if metric == "Time" and (time_in_index or current == "__index__"):
+        if metric == "Time" and (
+                time_in_index or current == "__index__" or detected_col == "__index__"):
             valid.append("__index__")
-        if current and current not in valid:
-            valid.append(current)
+        for c in (detected_col, current):
+            if c and c != "__index__" and c not in valid:
+                valid.append(c)
         for c in alternatives.get(metric, []):
-            if c not in valid:
+            if c and c not in valid:
                 valid.append(c)
 
         rest = [c for c in columns if c not in valid]
 
-        opts = []
+        def _item(c):
+            if c == "__index__":
+                return {"value": c, "label": "(use index / __index__)",
+                        "quality": ""}
+            return {"value": c, "label": c, "quality": quality_tags.get(c) or ""}
+
+        data = []
         if valid:
-            opts.append(_group_header(_ROLE_GROUP.get(metric, metric), metric))
-            for c in valid:
-                opts.append(_valid_opt(
-                    c, label="(use index / __index__)" if c == "__index__" else None))
-            if rest:
-                opts.append(_group_header("All columns", f"{metric}-all"))
-        opts += [{"label": c, "value": c, "search": c} for c in rest]
+            data.append({"group": "LLM-detected " + _ROLE_GROUP.get(metric, metric),
+                         "items": [_item(c) for c in valid]})
+        if rest:
+            data.append({"group": "Other columns",
+                         "items": [_item(c) for c in rest]})
 
         detected = bool(current)
-        dot_color = "#16a34a" if detected else "#d97706"   # green / amber
-        dot_title = "Detected by AI" if detected else "Not detected — please select"
+        _required = metric in _REQUIRED_FOR_DEGRADATION
+        if detected:
+            dot_color, dot_title = "#16a34a", "Selected"        # green
+        elif _required:
+            dot_color, dot_title = "#dc2626", "Required — please select"   # red
+        else:
+            dot_color, dot_title = "#a1a1aa", "Not selected"    # gray
 
         row = html.Div([
             html.Div([
-                html.Span(style={
-                    "display": "inline-block", "width": "8px", "height": "8px",
-                    "borderRadius": "50%", "background": dot_color,
-                    "marginRight": "8px", "flex": "0 0 auto",
-                }, title=dot_title),
+                html.Span(
+                    id={"type": "var-map-dot", "metric": metric},
+                    style={
+                        "display": "inline-block", "width": "8px", "height": "8px",
+                        "borderRadius": "50%", "background": dot_color,
+                        "marginRight": "8px", "flex": "0 0 auto",
+                    }, title=dot_title),
                 html.Span(metric, style={
                     "color": INK, "fontFamily": "Arial, sans-serif",
                     "fontSize": "14px",
                 }),
-            ], style={"flex": "0 0 42%", "display": "flex",
+            ], style={"flex": "0 0 30%", "display": "flex",
                       "alignItems": "center"}),
             html.Div([
-                dcc.Dropdown(
+                dmc.Select(
                     id={"type": "var-map-dd", "metric": metric},
-                    options=opts,
+                    data=data,
                     value=current if current else None,
                     placeholder="— select column —",
                     clearable=True,
-                    style={"fontSize": "13px"},
+                    searchable=True,
+                    nothingFoundMessage="No matching column",
+                    w="100%",
+                    size="sm",
+                    # Custom option renderer: column name on the left, a small
+                    # quality pill pushed to the right (JS fn in assets/, reads
+                    # each option's "quality" field). Falls back gracefully to a
+                    # plain name if the assets file isn't present.
+                    renderOption={"function": "renderVarMapOption"},
+                    comboboxProps={
+                        "withinPortal": True,
+                        "zIndex": 3000,
+                    },
                 ),
-                # Inline note under the row: if the variable is missing, what
-                # that means for the analysis; otherwise, other valid columns.
-                _missing_hint(metric) if not detected
-                else _alt_hint(alternatives.get(metric)),
+                # Missing-variable note — always in the DOM but shown only while
+                # this row has no column selected. A clientside callback toggles
+                # it live, so clearing a selection surfaces the warning at once
+                # (no need to click Apply first).
+                html.Div(_missing_hint(metric),
+                         id={"type": "var-map-miss", "metric": metric},
+                         style={"display": "block" if not detected else "none"}),
+                # "Also detected" alternatives — static, relevant once selected.
+                _alt_hint(alternatives.get(metric), exclude=current,
+                          tags=quality_tags) if detected else "",
             ], style={"flex": "1"}),
         ], style={
             "display": "flex", "alignItems": "flex-start", "gap": "14px",
@@ -5486,12 +5657,21 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                 },
             ),
             html.Span(
-                "Defaults to AI detection. Adjust any row and click Apply.",
+                "Click Apply to confirm your changes.",
                 style={"marginLeft": "12px", "fontSize": "12px",
                        "color": INK_SOFT, "fontFamily": "Arial, sans-serif"},
             ),
-        ], style={"marginTop": "14px", "display": "flex",
-                  "alignItems": "center"}),
+        ], id="var-map-apply-row",
+           # Hidden until a dropdown differs from the applied/detected state; a
+           # clientside callback (below) toggles this on any selection change.
+           style={"marginTop": "14px", "display": "none", "alignItems": "center"}),
+        # Baseline the "show Apply on change" comparison reads against. Rebuilt
+        # with the table, so after Apply the baseline resets and the button
+        # hides again until the next change.
+        dcc.Store(id="var-map-initial",
+                  data={m: (mapped_variables_dict.get(m) or None)
+                        for m in _MAP_METRICS}),
+        # Apply confirmation/warning renders here, under the button.
         html.Div(status_children if status_children is not None else "",
                  id="var-map-status", style={"marginTop": "8px"}),
     ])
@@ -5519,15 +5699,32 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
     State("data-columns-store", "data"),
     prevent_initial_call=True,
 )
-def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns):
+def apply_variable_mapping_callback(n_clicks, values, ids, df_json, columns_store):
     if not n_clicks:
         raise dash.exceptions.PreventUpdate
 
-    # Rebuild the mapping dict, keeping ONLY non-empty selections.
+    # data-columns-store now carries both the full column list AND the LLM's
+    # alternatives, because df.attrs (where parse_contents stashed them) does
+    # NOT survive the DataFrame's round-trip through dcc.Store as JSON. Reading
+    # them here keeps the "LLM-detected" grouping intact after Apply. (Legacy
+    # list payloads — e.g. from an error path — degrade gracefully.)
+    if isinstance(columns_store, dict):
+        data_columns = columns_store.get("columns", []) or []
+        alternatives = columns_store.get("alternatives", {}) or {}
+        detected_map = columns_store.get("detected", {}) or {}
+        quality_tags = columns_store.get("quality_tags", {}) or {}
+    else:
+        data_columns = columns_store or []
+        alternatives = {}
+        detected_map = {}
+        quality_tags = {}
+
+    # Rebuild the mapping dict, keeping ONLY non-empty real selections
+    # (never a '__hdr__' section-label pseudo-value).
     new_mapping = {}
     for val, id_obj in zip(values, ids):
         metric = id_obj.get("metric")
-        if val:
+        if val and not str(val).startswith("__hdr__"):
             new_mapping[metric] = val
 
     # Flag any required variables that are still unset.
@@ -5556,19 +5753,177 @@ def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns
     except Exception:
         df = None
 
-    # Rebuild the mapping panel so the dots match the applied state, keeping the
-    # same "also detected" alternatives (if parse_contents provided them).
+    # Rebuild the mapping panel so the dots match the applied state (and the
+    # baseline store resets, re-hiding the Apply button until the next change).
     time_in_index = new_mapping.get("Time") == "__index__"
-    alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
     panel = build_variable_mapping_table(
-        new_mapping, data_columns or [],
-        time_in_index=time_in_index, status_children=status,
-        alternatives=alternatives,
+        new_mapping, data_columns,
+        time_in_index=time_in_index, alternatives=alternatives,
+        status_children=status, detected_map=detected_map,
+        quality_tags=quality_tags,
     )
 
     figures = _build_overview_figures_div(df, new_mapping)
 
     return new_mapping, panel, figures
+
+
+# Show the "Apply mapping" row only when at least one dropdown differs from the
+# baseline (the detected/last-applied mapping). Pure clientside — compares the
+# current pattern-matched dropdown values against the var-map-initial store.
+app.clientside_callback(
+    """
+    function(values, ids, initial) {
+        initial = initial || {};
+        var changed = false;
+        for (var i = 0; i < (ids || []).length; i++) {
+            var m = ids[i].metric;
+            var cur = (values[i] === undefined) ? null : values[i];
+            var init = (initial[m] === undefined) ? null : initial[m];
+            if (cur !== init) { changed = true; break; }
+        }
+        var base = {"marginTop": "14px", "alignItems": "center"};
+        base["display"] = changed ? "flex" : "none";
+        return base;
+    }
+    """,
+    Output("var-map-apply-row", "style"),
+    Input({"type": "var-map-dd", "metric": ALL}, "value"),
+    State({"type": "var-map-dd", "metric": ALL}, "id"),
+    State("var-map-initial", "data"),
+)
+
+
+# Live-recolor each row's status dot as the user edits, before Apply: green when
+# a column is selected, red for the required-but-empty ones (DC Power, Time),
+# gray for the optional-but-empty ones. Input and output are the same metric
+# set, so Dash lists them in the same order — values[i] pairs with dot[i].
+app.clientside_callback(
+    """
+    function(values, ids) {
+        var required = {"DC Power": 1, "Time": 1};
+        function real(v){ return (v && String(v).indexOf("__hdr__") !== 0) ? v : null; }
+        return (values || []).map(function(v, i) {
+            var m = ids[i].metric;
+            var color = real(v) ? "#16a34a" : (required[m] ? "#dc2626" : "#a1a1aa");
+            return {"display": "inline-block", "width": "8px", "height": "8px",
+                    "borderRadius": "50%", "background": color,
+                    "marginRight": "8px", "flex": "0 0 auto"};
+        });
+    }
+    """,
+    Output({"type": "var-map-dot", "metric": ALL}, "style"),
+    Input({"type": "var-map-dd", "metric": ALL}, "value"),
+    State({"type": "var-map-dd", "metric": ALL}, "id"),
+)
+
+
+# Show/hide each row's missing-variable note as the user edits, before Apply:
+# visible whenever the row has no column selected, hidden once one is. Makes the
+# warning appear immediately when a selection is cleared.
+app.clientside_callback(
+    """
+    function(values) {
+        return (values || []).map(function(v) {
+            var real = (v && String(v).indexOf("__hdr__") !== 0);
+            return real ? {"display": "none"} : {"display": "block"};
+        });
+    }
+    """,
+    Output({"type": "var-map-miss", "metric": ALL}, "style"),
+    Input({"type": "var-map-dd", "metric": ALL}, "value"),
+)
+
+
+# =============================================================================
+# LIVE ANALYZE STATUS LINE
+#
+# (1) mint a per-tab token on load; (2) on Analyze click, clientside swaps the
+# caption for the status line and starts the poll — no server round-trip;
+# (3) every 450 ms the poll mirrors the stage message the analyze callback
+# published (plus an elapsed counter) into stable spans; (4) when the analyze
+# callback writes data-summary-output (any outcome), a clientside callback hides
+# the line, restores the caption, and stops the poll.
+# =============================================================================
+
+# (1) Mint the per-tab token on page load (n_clicks=0 as the layout mounts).
+app.clientside_callback(
+    """
+    function(_n, existing) {
+        if (existing) { return window.dash_clientside.no_update; }
+        return "t" + Date.now().toString(36) +
+               Math.floor(Math.random() * 1e9).toString(36);
+    }
+    """,
+    Output("analyze-status-token", "data"),
+    Input("analyze-btn", "n_clicks"),
+    State("analyze-status-token", "data"),
+)
+
+# (2) Analyze clicked -> show the status line, start polling.
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks) {
+            var nu = window.dash_clientside.no_update;
+            return [nu, nu, nu];
+        }
+        return [
+            {"display": "flex", "alignItems": "center",
+             "justifyContent": "center", "gap": "7px", "marginTop": "8px",
+             "fontFamily": "Arial, sans-serif", "fontSize": "13px"},
+            {"display": "none"},
+            false
+        ];
+    }
+    """,
+    Output("analyze-status-line",     "style"),
+    Output("analyze-caption",         "style"),
+    Output("analyze-status-interval", "disabled"),
+    Input("analyze-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+# (4) Analysis finished (any outcome writes data-summary-output) -> hide the
+# status line, restore the caption, stop polling, reset for the next run.
+app.clientside_callback(
+    """
+    function(_children) {
+        return [
+            {"display": "none"},
+            {"fontSize": "13px", "color": "#475569", "marginTop": "6px",
+             "textAlign": "center", "fontFamily": "Arial, sans-serif"},
+            true,
+            "Starting analysis…",
+            ""
+        ];
+    }
+    """,
+    Output("analyze-status-line",     "style",    allow_duplicate=True),
+    Output("analyze-caption",         "style",    allow_duplicate=True),
+    Output("analyze-status-interval", "disabled", allow_duplicate=True),
+    Output("analyze-status-text",     "children", allow_duplicate=True),
+    Output("analyze-status-elapsed",  "children", allow_duplicate=True),
+    Input("data-summary-output", "children"),
+    prevent_initial_call=True,
+)
+
+# (3) Mirror the published stage message into the status line.
+@app.callback(
+    Output("analyze-status-text",    "children"),
+    Output("analyze-status-elapsed", "children"),
+    Input("analyze-status-interval", "n_intervals"),
+    State("analyze-status-token",    "data"),
+    State("analyze-btn",             "n_clicks"),
+    prevent_initial_call=True,
+)
+def poll_analyze_status(_n, token, n_clicks):
+    rec = _analyze_status_get(_analyze_status_key(token, n_clicks))
+    if not rec or not rec.get("message"):
+        # First tick can beat the callback's first publish — keep the placeholder.
+        return dash.no_update, dash.no_update
+    elapsed = int(time.time() - rec.get("started_at", time.time()))
+    return rec["message"], (f"{elapsed}s" if elapsed >= 1 else "")
 
 
 # =============================================================================
@@ -5594,11 +5949,13 @@ def apply_variable_mapping_callback(n_clicks, values, ids, df_json, data_columns
     State("dataframe-store",      "data"),
     State("data-source-store",    "data"),
     State("stored-data-file-name","data"),
+    State("analyze-status-token", "data"),
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
         analyze_clicks, example_clicks_1, example_clicks_2, example_clicks_3,
-        contents, filename, stored_df_json, data_source, stored_file_name):
+        contents, filename, stored_df_json, data_source, stored_file_name,
+        status_token):
 
     trigger = ctx.triggered_id
 
@@ -5622,21 +5979,39 @@ def analyze_uploaded_data_callback(
 
     # Analyze clicked
     if trigger == "analyze-btn":
-        if data_source == "upload" and contents is not None:
-            df, summary_table, mapped_variables_dict, code_read, mapping_notes = parse_contents(contents, filename)
-            if df is None:
-                return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
-        elif data_source == "example" and stored_df_json is not None:
-            try:
-                df = _df_from_store(stored_df_json)
-                df, summary_table, mapped_variables_dict, code_read, mapping_notes = parse_contents(df=df)
-            except Exception as e:
-                return (html.Div(f"Error processing stored dataset: {e}", className="alert alert-danger"),
-                        {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
-        else:
-            return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                    {}, None, "", False, "Run prescreening", None, "", filename, [])
+        # Live status: publish stage messages under this run's key; the poll
+        # callback mirrors them into the UI while this callback is still running.
+        _status_key = _analyze_status_key(status_token, analyze_clicks)
 
+        def _status(msg):
+            _analyze_status_set(_status_key, msg)
+
+        _status("Reading your data…")
+        # Parsing (which includes an LLM column-identification call) is capped
+        # so a malformed file can't hang the UI indefinitely. parse_contents
+        # also calls progress() at its own sub-steps.
+        try:
+            if data_source == "upload" and contents is not None:
+                df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
+                    parse_contents, contents, filename, progress=_status, timeout=ANALYZE_TIMEOUT_S)
+                if df is None:
+                    return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
+            elif data_source == "example" and stored_df_json is not None:
+                df = _df_from_store(stored_df_json)
+                df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
+                    parse_contents, df=df, progress=_status, timeout=ANALYZE_TIMEOUT_S)
+            else:
+                return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
+                        {}, None, "", False, "Run prescreening", None, "", filename, [])
+        except FutureTimeout:
+            return (_no_data_alert("This is taking longer than expected — something may be wrong with your "
+                                   "data. Check the file's formatting and columns, then try again."),
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+        except Exception as e:
+            return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+
+        _status("Packaging your dataset…")
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
@@ -5652,7 +6027,9 @@ def analyze_uploaded_data_callback(
         )
 
         # Only plot variables that are actually mapped to a real column.
+        _status("Rendering data preview…")
         figures_output = _build_overview_figures_div(df, mapped_variables_dict)
+        _status("Finishing up…")
 
         # Editable variable-mapping table (defaults to LLM detection; user can
         # override any row, or fill in rows the LLM missed). When a role had
@@ -5660,9 +6037,11 @@ def analyze_uploaded_data_callback(
         # and shown inline — parse_contents stashes them on df.attrs if it
         # supports it; otherwise this is simply empty.
         alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
+        quality_tags = df.attrs.get("mapping_quality_tags", {}) if df is not None else {}
         editable_mapping = build_variable_mapping_table(
             mapped_variables_dict, data_columns, time_in_index=time_in_index,
-            alternatives=alternatives,
+            alternatives=alternatives, detected_map=mapped_variables_dict,
+            quality_tags=quality_tags,
         )
 
         # Transformation caveats from parse_contents (AC fallback, DC Power
@@ -5682,20 +6061,26 @@ def analyze_uploaded_data_callback(
                     }) for n in mapping_notes
                 ],
                 style={
-                    "padding": "12px 16px", "marginBottom": "16px",
+                    "padding": "12px 16px", "marginTop": "14px",
                     "background": "#fffbeb", "border": "1px solid #fcd34d",
                     "borderRadius": "10px",
                 },
             )
 
         combined_output = html.Div([
-            notes_block if notes_block is not None else "",
             html.Div([
-                html.Div("identified variables", style={
-                    "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-                    "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-                    "fontFamily": "Arial, sans-serif",
-                }),
+                html.Div([
+                    html.Span("identified variables", style={
+                        "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                        "letterSpacing": "0.1em", "fontWeight": "600",
+                        "fontFamily": "Arial, sans-serif",
+                    }),
+                    html.Span("(LLM-detected)", style={
+                        "fontSize": "12px", "color": INK_SOFT, "fontStyle": "italic",
+                        "marginLeft": "8px", "fontWeight": "400",
+                        "fontFamily": "Arial, sans-serif",
+                    }),
+                ], style={"marginBottom": "10px"}),
                 # Stable container so the Apply callback can re-render the
                 # mapping table (refreshing the detected/undetected dots).
                 html.Div(editable_mapping, id="var-map-panel",
@@ -5716,6 +6101,9 @@ def analyze_uploaded_data_callback(
                 # Stable container so the Apply callback can redraw figures,
                 # dropping any variable the user de-selected.
                 html.Div(figures_output, id="var-map-figures"),
+                # Data-transformation caveats sit under the figure, inside the
+                # preview block (empty list -> nothing rendered).
+                notes_block if notes_block is not None else "",
             ], style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
@@ -5725,7 +6113,9 @@ def analyze_uploaded_data_callback(
         ], className="slide-in-up")
 
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
-                "Run prescreening", None, "", stored_file_name, data_columns)
+                "Run prescreening", None, "", stored_file_name,
+                {"columns": data_columns, "alternatives": alternatives,
+                 "detected": mapped_variables_dict, "quality_tags": quality_tags})
 
     return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
 

@@ -1,97 +1,676 @@
 /* ==========================================================================
-   pv_image.css — drop this file into your Dash app's `assets/` folder.
-   Dash auto-loads any CSS in `assets/`, no code changes needed.
+   pv_image.css — the ONLY pv stylesheet that should live in `assets/`.
+   ⚠ Delete any older pv css files from assets/ — Dash loads every css file
+   there and stale rules will fight these. Then hard-refresh (Cmd+Shift+R).
+
+   Full-bleed ethereal theme:
+   - Hero gradient + bottom blue band span the full screen width
+   - Step 1: tilted floating clusters around a large central upload square
+     (pixel-anchored geometry so nothing can drift)
+   - Right: minimal model list, gradient run button, compact result panel
    ========================================================================== */
 
-/* ---- Precise column widths on wide screens: 4.1 / 3.8 / 4.1 in twelfths ---- */
-@media (min-width: 992px) {
-    .pv-col-step1,
-    .pv-col-step3 {
-        flex: 0 0 34.17% !important;     /* 4.1 / 12 */
-        max-width: 34.17% !important;
-    }
-    .pv-col-step2 {
-        flex: 0 0 31.66% !important;     /* 3.8 / 12 */
-        max-width: 31.66% !important;
-    }
+/* ---- Tune these two if a white gap shows against your app's nav/footer ---- */
+:root {
+    --pv-gap-top: 24px;        /* hero is pulled up by this much  (0 = off) */
+    --pv-gap-bottom: 64px;     /* band extends down by this much; raise until the white strip above the footer disappears (0 = off) */
 }
 
-/* ---- Step header (badge + title) ---- */
-.pv-step-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #ECEFF3;
+/* Full-bleed breakout: sections span the viewport even inside a container */
+html, body { overflow-x: hidden; }
+.pv-page, .pv-band {
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    margin-left: -50vw;
 }
-.pv-step-badge {
+.pv-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 28px;
+}
+@media (max-width: 576px) { .pv-inner { padding: 0 16px; } }
+
+/* ==========================================================================
+   0. Hero section
+   ========================================================================== */
+.pv-page {
+    background:
+        radial-gradient(1100px 480px at 12% -8%, rgba(0, 112, 192, 0.06), transparent 60%),
+        radial-gradient(900px 420px at 95% 2%, rgba(53, 167, 232, 0.06), transparent 55%),
+        linear-gradient(180deg, #FCFDFE 0%, #F0F4F8 100%);
+    padding: calc(44px + var(--pv-gap-top)) 0 34px;
+    margin-top: calc(-1 * var(--pv-gap-top));
+}
+
+/* ==========================================================================
+   1. Header
+   ========================================================================== */
+.pv-header { text-align: center; margin-bottom: 30px; }
+.pv-hero-title {
+    font-size: clamp(1.5rem, 2.8vw, 2.3rem);
+    font-weight: 800;
+    color: #2E3A46;
+    letter-spacing: -0.015em;
+    margin-bottom: 8px;
+}
+.pv-hero-sub {
+    font-size: 0.95rem;
+    color: #7C8A97;
+    max-width: 960px;
+    margin: 0 auto 14px;
+}
+@media (min-width: 992px) {
+    .pv-hero-sub { white-space: nowrap; max-width: none; }
+}
+.pv-about > summary {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background-color: #0070C0;
-    color: white;
-    font-weight: 700;
-    font-size: 0.95em;
-    flex-shrink: 0;
-    box-shadow: 0 2px 4px rgba(0, 112, 192, 0.25);
+    gap: 8px;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #0070C0;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid #DFE7ED;
+    border-radius: 999px;
+    padding: 7px 18px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.pv-step-title {
-    font-size: 1.15em;
-    font-weight: 700;
-    color: #3A3A3A;             /* dark gray */
-    letter-spacing: 0.01em;
+.pv-about > summary::-webkit-details-marker { display: none; }
+.pv-about > summary::after {
+    content: '▾';
+    font-size: 0.8em;
+    transition: transform 0.2s ease;
 }
-
-/* ---- Run button: hover with distinct color change + lift ---- */
-.pv-run-button {
-    background-color: #0070C0 !important;
+.pv-about[open] > summary::after { transform: rotate(180deg); }
+.pv-about > summary:hover {
+    border-color: #0070C0;
+    box-shadow: 0 2px 10px rgba(0, 112, 192, 0.12);
 }
-.pv-run-button:hover {
-    background-color: #003D6B !important;   /* much darker navy */
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 61, 107, 0.40);
-}
-.pv-run-button:active {
-    background-color: #002A4A !important;
-    transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(0, 61, 107, 0.30);
-}
-.pv-run-button:focus {
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(0, 112, 192, 0.25);
-}
-
-/* ---- Upload drop-zone hover ---- */
-.pv-upload-box:hover {
-    border-color: #0070C0 !important;
-    background-color: #EFF6FB !important;
-    box-shadow: 0 2px 8px rgba(0, 112, 192, 0.08);
-}
-
-/* ---- Example thumbnail hover ---- */
-.pv-thumb:hover {
-    transform: scale(1.08);
-    border-color: #0070C0 !important;
-    box-shadow: 0 4px 10px rgba(0, 112, 192, 0.25) !important;
-    z-index: 2;
+/* Concise About body: text left, logo right */
+.pv-about-body {
     position: relative;
+    z-index: 10;                 /* stays above the stage when open */
+    display: flex;
+    gap: 26px;
+    align-items: center;
+    margin: 14px auto 0;
+    max-width: 880px;
+    text-align: left;
+    background: white;
+    border-radius: 18px;
+    padding: 20px 24px;
+    box-shadow: 0 10px 34px rgba(40, 60, 80, 0.10);
+    animation: pv-fade-up 0.3s ease both;
+}
+.pv-about-text { flex: 1; min-width: 0; }
+.pv-about-lead {
+    font-size: 0.92rem;
+    color: #3C4854;
+    margin-bottom: 12px;
+}
+.pv-mods { margin-bottom: 12px; }
+.pv-mod {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #EEF2F5;
+    font-size: 0.85rem;
+}
+.pv-mod:last-child { border-bottom: none; }
+.pv-mod-name {
+    flex: 0 0 64px;
+    font-weight: 700;
+    color: #0070C0;
+}
+.pv-mod-cats { color: #6B7A87; }
+.pv-about-foot {
+    font-size: 0.82rem;
+    color: #8A97A3;
+    margin: 0;
+}
+.pv-about-logo {
+    flex: 0 0 140px;
+    width: 140px;
+    height: auto;
+}
+@media (max-width: 640px) {
+    .pv-about-body { flex-direction: column; }
+    .pv-about-logo { flex-basis: auto; width: 110px; }
+}
+
+/* ==========================================================================
+   2. Step labels
+   ========================================================================== */
+.pv-step-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #9AA7B3;
+    margin-bottom: 16px;
+}
+.pv-step-results { margin-top: 26px; }
+.pv-hint { font-size: 0.76rem; color: #9AA6B1; margin-top: 8px; }
+
+/* ==========================================================================
+   3. THE CONSTELLATION STAGE — pixel-anchored so nothing can drift.
+      Layers: square (1) < clusters (3) < preview (4) < ✕ button (6)
+   ========================================================================== */
+.pv-stage {
+    position: relative !important;
+    width: 100%;
+    max-width: 580px;
+    height: 540px !important;
+    margin: 0 auto;
+}
+
+.pv-cluster-layer {
+    position: absolute !important;
+    inset: 0 !important;
+    pointer-events: none;
+    z-index: 3;
+}
+.pv-cluster { position: absolute !important; }
+.pv-cluster-visible { top: 0;      left: 50%; transform: translateX(-50%); }
+.pv-cluster-el      { left: -26px; top: 210px; }
+.pv-cluster-ir      { right: -26px; top: 286px; }
+
+.pv-cluster-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #8A97A3;
+    margin-bottom: 10px;
+    line-height: 1.3;
+    text-align: center;            /* centered over each image fan */
+    transition: opacity 0.25s ease;
+}
+.pv-cluster-el .pv-cluster-label,
+.pv-cluster-ir .pv-cluster-label {
+    max-width: 130px;              /* wraps to two lines: "Example / EL images" */
+    margin-left: auto;
+    margin-right: auto;
+}
+.pv-cluster-visible .pv-cluster-label { white-space: nowrap; }
+
+.pv-stack { display: flex; }
+.pv-stack .pv-float:nth-child(2) {
+    margin-left: -24px;
+    margin-top: 38px;
+}
+.pv-stack .pv-float:nth-child(3) {
+    margin-left: -24px;
+    margin-top: 6px;
+}
+
+@keyframes pv-float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-7px); }
+}
+.pv-float {
+    display: inline-block;
+    animation: pv-float 4.6s ease-in-out infinite;
+    will-change: transform;
+    pointer-events: auto;
+}
+.pv-float-1 { --tilt: -7deg;  animation-delay:  0.0s; animation-duration: 4.3s; }
+.pv-float-2 { --tilt:  6deg;  animation-delay: -1.5s; animation-duration: 5.0s; }
+.pv-float-3 { --tilt: -6deg;  animation-delay: -2.8s; animation-duration: 4.5s; }
+.pv-float-4 { --tilt:  8deg;  animation-delay: -0.9s; animation-duration: 5.2s; }
+.pv-float-5 { --tilt: -8deg;  animation-delay: -2.1s; animation-duration: 4.7s; }
+.pv-float-6 { --tilt:  5deg;  animation-delay: -3.4s; animation-duration: 5.4s; }
+.pv-float-7 { --tilt: -5deg;  animation-delay: -1.2s; animation-duration: 4.4s; }
+.pv-float-8 { --tilt:  7deg;  animation-delay: -2.5s; animation-duration: 5.1s; }
+.pv-float-9 { --tilt: -6deg;  animation-delay: -3.8s; animation-duration: 4.8s; }
+
+.pv-thumb {
+    display: block;
+    width: 88px;
+    height: 88px;
+    object-fit: cover;
+    border-radius: 20px;
+    border: 4px solid white;
+    box-shadow: 0 12px 30px rgba(40, 60, 80, 0.18);
+    cursor: pointer;
+    transform: rotate(var(--tilt, 0deg));
+    transition: transform 0.18s ease, box-shadow 0.18s ease,
+                border-color 0.18s ease, opacity 0.25s ease, filter 0.25s ease;
+}
+.pv-thumb:hover {
+    transform: rotate(var(--tilt, 0deg)) scale(1.08);
+    box-shadow: 0 16px 36px rgba(0, 112, 192, 0.28);
 }
 .pv-thumb-selected {
-    transform: scale(1.04);
+    border-color: #7CC0F0;
+    box-shadow: 0 0 0 3px rgba(0, 112, 192, 0.20),
+                0 14px 32px rgba(0, 112, 192, 0.30);
 }
 
-/* ---- Model radio: only the radio dot is themed; no card, no hover effect ---- */
+/* --- Central upload square: fixed pixel anchor --- */
+.pv-upload-zone {
+    position: absolute !important;
+    top: 152px !important;
+    left: 50% !important;
+    margin-left: -118px !important;
+    width: 236px !important;
+    height: 236px !important;
+    border-radius: 34px;
+    background: linear-gradient(170deg, #FDFEFF 0%, #F2F6FA 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    z-index: 1;
+    box-shadow:
+        0 0 0 12px rgba(255, 255, 255, 0.55),
+        0 0 0 13px rgba(210, 224, 236, 0.9),
+        0 22px 50px rgba(40, 60, 80, 0.14);
+    transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+.pv-upload-zone:hover {
+    background: linear-gradient(170deg, #FBFDFF 0%, #ECF3FA 100%);
+    box-shadow:
+        0 0 0 12px rgba(255, 255, 255, 0.65),
+        0 0 0 13px rgba(160, 200, 230, 0.95),
+        0 26px 56px rgba(0, 112, 192, 0.18);
+}
+.pv-upload-icon {
+    width: 58px;
+    height: 58px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #2E93E8, #0070C0);
+    color: white;
+    font-size: 1.5em;
+    font-weight: 700;
+    line-height: 58px;
+    box-shadow: 0 6px 16px rgba(0, 112, 192, 0.35);
+}
+.pv-upload-title {
+    font-size: 1.02em;
+    font-weight: 700;
+    color: #2E3A46;
+    margin-bottom: 4px;
+}
+.pv-upload-text {
+    font-size: 0.8em;
+    color: #8A97A3;
+    line-height: 1.5;
+}
+
+/* --- Focus mode: once an image is chosen (preview present), dim all
+       non-selected thumbnails and labels so only the selection stands out --- */
+.pv-stage:has(.pv-center-preview) .pv-thumb {
+    opacity: 0.38;
+    filter: saturate(0.55);
+}
+.pv-stage:has(.pv-center-preview) .pv-cluster-label { opacity: 0.45; }
+.pv-stage:has(.pv-center-preview) .pv-thumb:hover {
+    opacity: 1;
+    filter: none;
+}
+.pv-stage:has(.pv-center-preview) .pv-thumb-selected {
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+/* --- Preview fills the square; caption below; ✕ on the corner --- */
+@keyframes pv-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.pv-center-preview-slot {
+    position: absolute !important;
+    inset: 0 !important;
+    pointer-events: none;
+    z-index: 4;
+}
+.pv-preview-wrap { position: absolute; inset: 0; }
+.pv-center-preview {
+    position: absolute !important;
+    top: 152px !important;
+    left: 50% !important;
+    margin-left: -118px !important;   /* centering via margin — the fade-up
+                                         animation owns `transform`, so it must
+                                         not be used for centering here */
+    width: 236px !important;
+    height: 236px !important;
+    object-fit: cover;
+    border-radius: 34px;
+    border: 6px solid white;
+    box-shadow:
+        0 0 0 12px rgba(255, 255, 255, 0.55),
+        0 0 0 13px rgba(180, 210, 235, 0.9),
+        0 24px 54px rgba(40, 60, 80, 0.22);
+    animation: pv-fade-up 0.4s ease both;
+}
+.pv-preview-cap {
+    position: absolute;
+    top: 406px;                     /* 152 + 236 + 18 */
+    left: 0;
+    right: 0;
+    text-align: center;
+    animation: pv-fade-up 0.4s ease both;
+}
+.pv-preview-name { font-size: 0.92rem; font-weight: 700; color: #2E3A46; }
+.pv-preview-sub  { font-size: 0.78rem; color: #9AA6B1; }
+
+.pv-clear-btn {
+    position: absolute !important;
+    top: 136px !important;
+    left: calc(50% + 102px) !important;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: white;
+    color: #7A8794;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 6;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(40, 60, 80, 0.22);
+    transition: color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.pv-clear-btn:hover {
+    color: #E24B4A;
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(40, 60, 80, 0.28);
+}
+
+.pv-status { text-align: center; margin-top: 8px; min-height: 22px; }
+.pv-status-msg { font-size: 0.8rem; color: #8A97A3; font-style: italic; }
+
+/* Compact stage on small screens */
+@media (max-width: 480px) {
+    .pv-stage { height: 440px !important; }
+    .pv-thumb { width: 72px; height: 72px; border-radius: 16px; border-width: 3px; }
+    .pv-upload-zone, .pv-center-preview {
+        top: 130px !important;
+        margin-left: -88px !important;
+        width: 176px !important;
+        height: 176px !important;
+        border-radius: 26px;
+    }
+    .pv-upload-icon { width: 46px; height: 46px; line-height: 46px; margin-bottom: 8px; }
+    .pv-preview-cap { top: 320px; }
+    .pv-clear-btn { top: 116px !important; left: calc(50% + 74px) !important; }
+    .pv-cluster-el { left: -12px; top: 176px; }
+    .pv-cluster-ir { right: -12px; top: 232px; }
+    .pv-stack .pv-float:nth-child(2) { margin-left: -18px; margin-top: 28px; }
+    .pv-stack .pv-float:nth-child(3) { margin-left: -18px; margin-top: 4px; }
+}
+
+/* ==========================================================================
+   4. Model picker — clean single-line rows (no subtitles)
+   ========================================================================== */
+.pv-model-radio label {
+    display: flex !important;
+    align-items: center;
+    padding: 13px 4px !important;
+    margin-bottom: 0 !important;
+    border-bottom: 1px solid #E9EEF2;
+    color: #3C4854;
+    font-weight: 600;
+    transition: color 0.15s ease, padding-left 0.15s ease;
+}
+.pv-model-radio label:hover {
+    color: #0070C0;
+    padding-left: 8px !important;
+}
 .pv-model-radio input[type="radio"] {
     accent-color: #0070C0;
-    width: 16px;
-    height: 16px;
+    width: 17px;
+    height: 17px;
 }
-/* Selected option: bold + blue text */
 .pv-model-radio label:has(input[type="radio"]:checked) {
     color: #0070C0 !important;
     font-weight: 700 !important;
+}
+
+/* ==========================================================================
+   5. Run button
+   ========================================================================== */
+#analyze-button.pv-run-button {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    margin-top: 20px;
+    padding: 14px 22px;
+    color: #3C4854 !important;
+    font-size: 1rem;
+    font-weight: 600;
+    border: 1px solid rgba(0, 112, 192, 0.16) !important;
+    border-radius: 999px;
+    cursor: pointer;
+    background: rgba(213, 232, 247, 0.72) !important;
+    background-color: rgba(213, 232, 247, 0.72) !important;
+    backdrop-filter: blur(18px) saturate(1.5);
+    -webkit-backdrop-filter: blur(18px) saturate(1.5);
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.85),
+        0 1px 2px rgba(40, 60, 80, 0.06),
+        0 8px 24px rgba(40, 60, 80, 0.10);
+    transition: background 0.15s ease, transform 0.15s ease,
+                box-shadow 0.15s ease, color 0.15s ease;
+}
+#analyze-button.pv-run-button:hover {
+    background: rgba(222, 239, 252, 0.92) !important;
+    background-color: rgba(222, 239, 252, 0.92) !important;
+    color: #0070C0;
+    transform: translateY(-1px);
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.9),
+        0 2px 4px rgba(40, 60, 80, 0.06),
+        0 12px 30px rgba(40, 60, 80, 0.14);
+}
+#analyze-button.pv-run-button:active {
+    transform: translateY(0) scale(0.99);
+    background: rgba(202, 226, 245, 0.95) !important;
+    background-color: rgba(202, 226, 245, 0.95) !important;
+    box-shadow:
+        inset 0 2px 5px rgba(40, 60, 80, 0.10),
+        0 3px 10px rgba(40, 60, 80, 0.10);
+}
+#analyze-button.pv-run-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 112, 192, 0.30);
+}
+
+/* ==========================================================================
+   6. Result panel — compact and refined
+   ========================================================================== */
+#image-analysis-result > * { animation: pv-fade-up 0.4s ease both; }
+
+.pv-res-meta {
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #9AA6B1;
+    margin-bottom: 4px;
+}
+.pv-res-headrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.pv-res-cat {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #0070C0;
+}
+.pv-res-pct {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #2E3A46;
+}
+.pv-res-chip {
+    align-self: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #0070C0;
+    background: rgba(0, 112, 192, 0.10);
+    border-radius: 999px;
+    padding: 3px 10px;
+}
+.pv-res-head {
+    padding-bottom: 12px;
+    border-bottom: 1px solid #E9EEF2;
+    margin-bottom: 12px;
+}
+
+/* Slim probability bars */
+.pv-bar-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 38px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.pv-bar-label {
+    font-size: 0.8rem;
+    color: #5D6B78;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pv-bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #E9EEF2;
+    overflow: hidden;
+}
+.pv-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: #BFD7EA;
+    transition: width 0.5s ease;
+}
+.pv-bar-win { background: linear-gradient(90deg, #0070C0, #2E93E8); }
+.pv-bar-val {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #5D6B78;
+    text-align: right;
+}
+
+/* Why block */
+.pv-res-why {
+    margin-top: 14px;
+    background: rgba(0, 112, 192, 0.05);
+    border-left: 3px solid #0070C0;
+    border-radius: 0 10px 10px 0;
+    padding: 10px 14px;
+}
+.pv-res-why-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #0070C0;
+    margin-bottom: 4px;
+}
+.pv-res-why-text {
+    font-size: 0.85rem;
+    color: #3C4854;
+    line-height: 1.55;
+}
+
+/* Raw output */
+.pv-raw { margin-top: 10px; }
+.pv-raw-summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: #9AA6B1;
+}
+.pv-raw-pre {
+    margin-top: 6px;
+    background: #F6F8FA;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.75rem;
+    color: #4A5560;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ==========================================================================
+   7. Bottom band — full-bleed light blue with white cards
+   ========================================================================== */
+.pv-band {
+    background: linear-gradient(180deg, #E3EDF7 0%, #DCE8F4 100%);
+    padding: 44px 0 calc(44px + var(--pv-gap-bottom));
+    margin-bottom: calc(-1 * var(--pv-gap-bottom));
+}
+.pv-card {
+    height: 100%;
+    background: white;
+    border-radius: 20px;
+    padding: 22px 24px 18px;
+    box-shadow: 0 10px 32px rgba(40, 60, 80, 0.10);
+}
+.pv-card-titlerow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.pv-card-title { font-size: 1.05rem; font-weight: 800; color: #2E3A46; }
+.pv-card-date  { font-size: 0.76rem; color: #9AA6B1; }
+.pv-card-sub   { font-size: 0.8rem; color: #8A99A8; margin: 2px 0 14px; }
+.pv-dataset-img {
+    width: 100%;
+    border-radius: 14px;
+    border: 1px solid #EDF1F4;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.pv-dataset-img:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px rgba(40, 60, 80, 0.14);
+}
+
+.pv-table { margin-bottom: 10px; }
+.pv-table th, .pv-table td { padding: 9px 12px; border: none !important; }
+.pv-table thead tr:first-child th {
+    background: #F1F6FB;
+    color: #2E3A46;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.pv-table thead tr:first-child th:first-child { border-radius: 10px 0 0 0; }
+.pv-table thead tr:first-child th:last-child  { border-radius: 0 10px 0 0; }
+.pv-table thead tr:nth-child(2) th {
+    background: #F1F6FB;
+    color: #5D6B78;
+    font-weight: 600;
+    font-size: 0.88em;
+    border-bottom: 2px solid #0070C0 !important;
+}
+.pv-table tbody tr:nth-child(even) { background: #F8FAFC; }
+.pv-table tbody tr:hover { background: #EFF6FC; }
+.pv-table tbody td:first-child {
+    font-weight: 700;
+    color: #2E3A46;
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   8. Accessibility
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    .pv-float, .pv-center-preview, .pv-preview-cap,
+    .pv-about-body, #image-analysis-result > * { animation: none !important; }
+    .pv-thumb, .pv-run-button, .pv-model-radio label,
+    .pv-upload-zone, .pv-clear-btn, .pv-dataset-img,
+    .pv-bar-fill { transition: none !important; }
 }
