@@ -1,97 +1,95 @@
 from dash import html, dcc
 
 
-def build_filters(types):
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable multi-select dropdown block (matches the PV Material Pathway page)
+# ─────────────────────────────────────────────────────────────────────────────
+def _dropdown_block(label_text, dropdown_id, options, default_values):
+    return html.Div(
+        [
+            html.Label(
+                label_text,
+                className="filter-label",
+                style={
+                    "fontWeight": "700",
+                    "marginBottom": "8px",
+                    "fontSize": "15px",
+                    "display": "block",
+                    "color": "#1f2937",
+                },
+            ),
+            dcc.Dropdown(
+                id=dropdown_id,
+                options=options,
+                value=default_values,
+                multi=True,
+                clearable=True,
+                placeholder="Select…",
+                className="filter-dropdown",
+                style={"fontSize": "14px"},
+            ),
+        ],
+        style={"flex": "1 1 300px", "minWidth": "260px"},
+    )
+
+
+def build_filters(types, advanced_extra=None):
 
     return html.Div(
 
         [
 
-            html.H4(
-                "Refine Results with Filters",
-                className="section-title"
+            # ------------- BASIC FILTERS (one row of dropdown pills) -------------
+            html.Div(
+                [
+                    _dropdown_block(
+                        "PV Technology",
+                        "pv-tech-filter",
+                        [{"label": t, "value": t} for t in types],
+                        types,
+                    ),
+                    _dropdown_block(
+                        "Climate Zone",
+                        "pv-climate-filter",
+                        [
+                            {"label": "Moderate", "value": "Moderate"},
+                            {"label": "Desert", "value": "Desert"},
+                            {"label": "Hot & Humid", "value": "Hot & Humid"},
+                            {"label": "Snow", "value": "Snow"},
+                        ],
+                        ["Moderate", "Desert", "Hot & Humid", "Snow"],
+                    ),
+                    _dropdown_block(
+                        "Scope of Study",
+                        "scope-filter",
+                        [
+                            {"label": "Module level", "value": "module level"},
+                            {"label": "System level", "value": "system level"},
+                        ],
+                        ["module level", "system level"],
+                    ),
+                ],
+                style={
+                    "display": "flex",
+                    "gap": "20px",
+                    "flexWrap": "wrap",
+                    "alignItems": "flex-start",
+                },
             ),
 
-            # ---------------- BASIC FILTERS ---------------- #
+            # ---------- ADVANCED FILTERS row (AI button left, toggle right) ----------
 
             html.Div(
                 [
-                    html.Label("PV Technology", className="filter-label"),
 
-                    html.Div(
+                    html.Details(
+
                         [
-                            dcc.Checklist(
-                                id="pv-tech-filter",
-                                options=[{"label": t, "value": t} for t in types],
-                                value=types,
-                                inline=True,
-                                className="filter-options"
-                            )
-                        ],
-                        className="filter-controls wrap"
-                    ),
-                ],
-                className="filter-grid-row"
-            ),
 
-            html.Div(
-                [
-                    html.Label("Climate Zone", className="filter-label"),
-
-                    html.Div(
-                        [
-                            dcc.Checklist(
-                                id="pv-climate-filter",
-                                options=[
-                                    {"label": "Moderate", "value": "Moderate"},
-                                    {"label": "Desert", "value": "Desert"},
-                                    {"label": "Hot & Humid", "value": "Hot & Humid"},
-                                    {"label": "Snow", "value": "Snow"},
-                                ],
-                                value=["Moderate", "Desert", "Hot & Humid", "Snow"],
-                                inline=True,
-                                className="filter-options"
-                            )
-                        ],
-                        className="filter-controls wrap"
-                    ),
-                ],
-                className="filter-grid-row"
-            ),
-
-            html.Div(
-                [
-                    html.Label("Scope of Study", className="filter-label"),
-
-                    html.Div(
-                        [
-                            dcc.Checklist(
-                                id="scope-filter",
-                                options=[
-                                    {"label": "Module level", "value": "module level"},
-                                    {"label": "System level", "value": "system level"},
-                                ],
-                                value=["module level", "system level"],
-                                inline=True,
-                                className="filter-options"
-                            )
-                        ],
-                        className="filter-controls wrap"
-                    ),
-                ],
-                className="filter-grid-row"
-            ),
-
-            # ---------------- ADVANCED FILTERS ---------------- #
-
-            html.Details(
-
-                [
-
-                    html.Summary(
-                        "Advanced Filters",
-                        className="advanced-summary"
-                    ),
+                            html.Summary(
+                                "Advanced Filters",
+                                className="advanced-summary"
+                            ),
 
                     html.Div(
 
@@ -231,8 +229,25 @@ def build_filters(types):
                         className="advanced-panel"
                     ),
 
-                ]
+                ],
+                style={"flex": "0 0 auto", "order": 2, "marginLeft": "auto"},
 
+            ),
+
+                    # left-hand slot (e.g. the AI question button)
+                    html.Div(
+                        advanced_extra if advanced_extra is not None else [],
+                        style={"flex": "0 0 auto", "order": 1},
+                    ),
+
+                ],
+                style={
+                    "display": "flex",
+                    "alignItems": "flex-start",
+                    "gap": "16px",
+                    "marginTop": "14px",
+                    "flexWrap": "wrap",
+                },
             ),
 
         ],

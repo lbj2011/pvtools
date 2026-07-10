@@ -165,11 +165,12 @@ input[type="checkbox"] {
 /* ================= LLM PANEL ================= */
 
 .llm-card {
-    background: linear-gradient(45deg, #FFE7F9, #E2F4FF);
+    background: linear-gradient(45deg, #DFF5E8, #E2F4FF);
     padding: 18px;
     border-radius: 12px;
     border: 1px solid #eee;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    margin-top: 12px;
 }
 
 
@@ -177,7 +178,7 @@ input[type="checkbox"] {
 
 .filter-card {
     background-color: #fafafa;
-    padding: 18px;
+    padding: 14px 16px;
     border-radius: 12px;
     border: 1px solid #eee;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
@@ -222,7 +223,7 @@ input[type="checkbox"] {
 }
 
 .filter-input:focus {
-    border-color: #FFC9FF;
+    border-color: #A8E6C5;
 }
 
 
@@ -242,7 +243,7 @@ input[type="checkbox"] {
 
 .advanced-summary {
     cursor: pointer;
-    font-weight: 600;
+    font-weight: 400;
     font-size: 15px;
     margin-bottom: 10px;
 }
@@ -257,7 +258,7 @@ input[type="checkbox"] {
 .chat-input-style{
     height: 42px;
     border-radius: 12px;
-    border: 2px solid #FFC9FF !important;
+    border: 2px solid #A8E6C5 !important;
     background-color: #FFFFFF !important;
     padding: 0 14px !important;
     font-size: 16px !important;
@@ -276,7 +277,7 @@ input[type="checkbox"] {
     padding: 0 18px;
     border-radius: 10px;
     border: 1px solid #d9edf8;
-    background: linear-gradient(135deg, #F0BEED, #00B0F0);
+    background: linear-gradient(135deg, #7FD1A4, #00B0F0);
     color: white;
     font-weight: 600;
     font-size: 16px;
@@ -291,7 +292,7 @@ input[type="checkbox"] {
 }
 
 .send-button:disabled {
-    background: linear-gradient(135deg, #FFE7F9, #A4DEF4);
+    background: linear-gradient(135deg, #DFF5E8, #A4DEF4);
     color: #ffffff;
     cursor: not-allowed;
 }
@@ -338,4 +339,126 @@ input[type="checkbox"] {
     border-radius: 10px;
     margin-bottom: 15px;
     font-size: 15px;
+}
+/* ================= FULL-WIDTH MAP â€” floating panels ================= */
+
+/* Detail panel slides in when a point is clicked (mirrors PV Pathway) */
+#field-map-detail {
+    animation: mapDetailIn 0.28s ease-out;
+}
+
+@keyframes mapDetailIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Links inside the detail panel */
+#field-map-detail a {
+    text-decoration: none;
+}
+#field-map-detail a:hover {
+    text-decoration: underline;
+}
+
+/* Close button hover */
+#field-map-detail #field-map-close-btn:hover {
+    background: rgba(255,255,255,0.95) !important;
+    color: #1f2937 !important;
+}
+
+/* Summary badge gentle fade-in */
+#field-map-summary {
+    animation: mapSummaryIn 0.4s ease-out;
+}
+@keyframes mapSummaryIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ================= AI TOGGLE BUTTON ================= */
+.ai-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(90deg, #C9F2D8, #BFE6F5);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 22px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a1a1a;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    box-shadow: 0 2px 8px rgba(150,200,210,0.30);
+}
+.ai-toggle-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(150,200,210,0.45);
+    filter: saturate(1.08);
+}
+.ai-toggle-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(150,200,210,0.30);
+}
+.ai-toggle-btn .badge {
+    background-color: rgba(0,0,0,0.10) !important;
+    color: #1a1a1a !important;
+}
+
+/* ================= FILTER DROPDOWN PILLS ================= */
+/* Make the multi-select look like the reference: clean rounded box,
+   light-gray rounded value pills, soft focus ring. */
+.filter-dropdown .Select-control,
+.filter-dropdown .is-focused:not(.is-open) > .Select-control {
+    border-radius: 10px;
+    border: 1px solid #e3e6ea;
+    min-height: 44px;
+    box-shadow: none;
+}
+.filter-dropdown .Select-control:hover {
+    border-color: #cdd3da;
+}
+.filter-dropdown.is-focused .Select-control {
+    border-color: #82b9ea;
+    box-shadow: 0 0 0 3px rgba(130,185,234,0.18);
+}
+
+/* selected value pills */
+.filter-dropdown .Select--multi .Select-value {
+    background-color: #eef1f5;
+    border: 1px solid #e0e4ea;
+    color: #374151;
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 3px 4px 0 0;
+}
+.filter-dropdown .Select--multi .Select-value-icon {
+    border-right: 1px solid #d7dce3;
+    color: #9aa3af;
+    padding: 1px 6px;
+}
+.filter-dropdown .Select--multi .Select-value-icon:hover {
+    background-color: #e2e6ec;
+    color: #ef4444;
+}
+.filter-dropdown .Select-value-label {
+    padding: 2px 8px;
+}
+.filter-dropdown .Select-placeholder {
+    color: #9ca3af;
+}
+
+/* dropdown menu options */
+.filter-dropdown .Select-menu-outer {
+    border-radius: 10px;
+    border: 1px solid #e3e6ea;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+    overflow: hidden;
+    margin-top: 4px;
+}
+.filter-dropdown .VirtualizedSelectOption,
+.filter-dropdown .Select-option {
+    font-size: 14px;
+}
+.filter-dropdown .Select-option.is-focused {
+    background-color: #eaf3fb;
 }

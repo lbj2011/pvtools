@@ -186,35 +186,8 @@ def normalize_faults(x):
             return [f.strip() for f in x.split(',')]
     return None
 
-# ─────────────────────────────────────────────────────────────────────
-# Detail-panel + summary-badge styles (mirror the PV Pathway page so the
-# two tools feel like one product). Kept as module constants so the
-# click callback can reuse the exact same look.
-# ─────────────────────────────────────────────────────────────────────
-MAP_DETAIL_STYLE = {
-    "position": "relative",
-    "width": "350px",
-    "maxHeight": "calc(100% - 20px)",
-    "background": "rgba(255,255,255,0.55)",
-    "backdropFilter": "blur(12px)",
-    "WebkitBackdropFilter": "blur(12px)",
-    "border": "1px solid rgba(255,255,255,0.6)",
-    "boxShadow": "0 8px 32px rgba(140,140,140,0.25)",
-    "padding": "16px 18px",
-    "borderRadius": "14px",
-    "color": "#131314",
-    "overflowY": "auto",
-    "zIndex": 999,
-    "pointerEvents": "auto",
-    "userSelect": "text",
-}
-MAP_DETAIL_HIDDEN = {"display": "none"}
-
-
 # Layout
-layout = html.Div([
-
-  dbc.Container([
+layout = dbc.Container([
 
     html.Hr(),
     html.Div([
@@ -225,6 +198,8 @@ layout = html.Div([
     ], className="page-title-container"),
     html.Hr(),
 
+    html.H3("Overview", className="level-2-title"),
+    html.P(''),
     dbc.Row([
         dbc.Col([
             dcc.Markdown("""This tool visualizes **global PV field degradation** extracted from scientific literature using **Large Language Models (LLMs)**.
@@ -253,54 +228,64 @@ layout = html.Div([
         ], xs=9, sm=8, md=6, lg=3, xl=3),
     ]),
 
-    html.H2("Degradation rate map", className="level-1-title",
-            style={"marginTop": "8px", "marginBottom": "6px"}),
-
-    # ── Controls card: structured filters + AI ask-box, above the
-    # full-width map (so the map can use the whole page). ──
+    dbc.Alert(
+        [
+            html.Strong("Note: "),
+            "This tool is currently under ",
+            html.Strong("active development"),
+            ". If you encounter issues, have suggestions, or would like to collaborate, please",
+            html.A(
+                " contact us",
+                href="mailto:baojieli@lbl.gov",
+                style={"fontWeight": "bold"}
+            ),
+            "."
+        ],
+        # color="primary",
+        className="mt-2 custom-alert"
+    ),
+    
+    html.P(''),
+    html.H2("Degradation rate map", className="level-1-title"),
+    html.P(''),
     dbc.Card([
         dbc.CardBody([
-
-            dcc.Store(id="chat-filtered-data"),
-
-            # Structured filters; the AI question button rides on the
-            # Advanced Filters row (far right) to save vertical space.
-            html.Div(
-            [
-                build_filters(
-                    types,
-                    advanced_extra=html.Button(
-                        [
-                            html.Span("Ask Questions to Filter the Data"),
-                            dbc.Badge("Beta", color="#00B0F0",
-                                      className="ms-2",
-                                      style={"verticalAlign": "middle"}),
-                            html.Span(id="ai-toggle-caret", children=" ▸",
-                                      style={"marginLeft": "8px",
-                                             "fontSize": "13px"}),
-                        ],
-                        id="ai-toggle-btn",
-                        n_clicks=0,
-                        className="ai-toggle-btn",
-                    ),
-                )
-            ]),
-
-            # ── Collapsible AI panel (full-width, below the filter card) ──
-            dbc.Collapse(
-                html.Div(
+            html.Div(   
                 [
-                    html.Div(
-                        html.Span(
-                            "(⏱ May take 5–20 seconds)",
-                            style={
-                                "color": "#A6A6A6",
-                                "fontSize": "13px",
-                                "fontWeight": "400",
-                            },
-                        ),
-                        style={"marginBottom": "10px"},
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.H4(
+                                    [
+                                        "Ask Questions to Filter the Data ",
+                                        dbc.Badge("Beta", color="#00B0F0", className="ms-2"),
+                                    ],
+                                    className="section-title mb-0",
+                                    style={"margin": "0"},
+                                ),
+                                xs=12,
+                                md="auto",
+                            ),
+
+                            dbc.Col(
+                                html.Span(
+                                    "(⏱ May take 5–20 seconds)",
+                                    style={
+                                        "color": "#A6A6A6",
+                                        "fontSize": "14px",
+                                        "fontWeight": "400",
+                                    },
+                                ),
+                                xs=12,
+                                md="auto",
+                                className="align-self-center",
+                            ),
+                        ],
+                        align="center",
+                        className="g-2",
                     ),
+                    html.P(''),
+                    dcc.Store(id="chat-filtered-data"),
 
                     # INPUT ROW
                     html.Div(
@@ -428,71 +413,45 @@ layout = html.Div([
                     # "fontFamily": "Inter, system-ui, sans-serif",
                 }
             ),
-                id="ai-collapse",
-                is_open=False,
-            ),
+            html.P(''),
 
-        ]),  # end CardBody
-    ], style={"border": "none", "boxShadow": "none",
-              "backgroundColor": "transparent"}),
-
-  ]),  # ── end first dbc.Container (everything above the map) ──
-
-    # =================================================================
-    # FULL-WIDTH MAP  (breaks out of the container, edge to edge)
-    # A glass summary badge floats top-left; a glass detail panel slides
-    # in on the left when a data point is clicked — same language as the
-    # PV Material Pathway explorer.
-    # =================================================================
-    html.Div(
-        [
-            dcc.Graph(
-                id='field-map',
-                style={"height": "640px", "width": "100%"},
-                config={"displayModeBar": False, "scrollZoom": True},
-            ),
-
-            # overlay layer — constrained to the page's content column
-            # (non-fluid Container) so the panels line up with the filter
-            # card above instead of hugging the screen edge.
-            dbc.Container(
-                html.Div(
-                    [
+            html.Div(
+            [
+                build_filters(types)
+            ]),
+    
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        dcc.Graph(id='map')
+                    ]#, style={'width': '70%', 'display': 'inline-block', 'marginLeft': '0px'}
+                    ),
+                ], xs=12, sm=12, md=12, lg=8, xl=8),
+            
+                dbc.Col([
+                    html.Div([
+                        html.H4("Details", className="section-title-detail"),
+                        html.P("(Select a data point to show)", className="section-subtitle"),
                         html.Div(
-                            id="field-map-detail",
-                            style=MAP_DETAIL_HIDDEN,
-                            children=[
-                                # placeholder so Dash registers the id on load
-                                html.Button(id="field-map-close-btn", n_clicks=0,
-                                            style={"display": "none"})
-                            ],
-                        ),
-                    ],
-                    style={
-                        "position": "absolute",
-                        "top": "16px", "bottom": "16px", "left": "16px",
-                        "display": "flex", "flexDirection": "column", "gap": "12px",
-                        "maxHeight": "calc(100% - 32px)",
-                    },
-                ),
-                fluid=False,
-                style={
-                    "position": "absolute",
-                    "top": 0, "left": 0, "right": 0, "height": "100%",
-                    "pointerEvents": "none", "zIndex": 10,
-                },
+            dash_table.DataTable(
+                id='table',
+                columns=[
+                    {'name': 'Attribute', 'id': 'attribute'},
+                    {'name': 'Value', 'id': 'value', 'presentation': 'markdown'}
+                ],
+                data=[],
+                style_as_list_view=True,
             ),
-        ],
-        style={
-            "position": "relative",
-            "width": "100vw",
-            "marginLeft": "calc(-50vw + 50%)",
-            "marginTop": "16px",
-            "marginBottom": "8px",
-        },
-    ),
+            className="details-table"
+        )
+                    ]
+                    ),
+            ], xs=12, sm=12, md=12, lg=4, xl=4),
+    ], className="g-2")  # Adds spacing between columns
+    ]),
+    ]),
 
-  dbc.Container([   # ── resume container for everything below the map ──
+    html.P(''),
     html.H2('Analysis', className="level-1-title"),
     html.P('(based on filtered data points)',
            style={"color": "#6b7280", "fontFamily": _CHART_FONT,
@@ -677,24 +636,8 @@ layout = html.Div([
     ),
     # Contributor: Baojie Li
     # Project members: Baojie Li, Martin Springer, Dirk Jordan, Anubhav Jain
-
-  ]),  # ── end resumed dbc.Container ──
-
-])      # ── end outer html.Div(layout) ──
-
-
-# ── Toggle the AI question panel open/closed ─────────────────────────
-@app.callback(
-    Output("ai-collapse", "is_open"),
-    Output("ai-toggle-caret", "children"),
-    Input("ai-toggle-btn", "n_clicks"),
-    State("ai-collapse", "is_open"),
-    prevent_initial_call=True,
-)
-def toggle_ai_panel(n_clicks, is_open):
-    new_open = not is_open
-    return new_open, (" ▾" if new_open else " ▸")
-
+    
+])
 
 @app.callback(
     Output("chat-input", "value", allow_duplicate=True),
@@ -856,10 +799,10 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
 
 @app.callback(
     [
-        Output('field-map', 'figure'),
+        Output('map', 'figure'),
         Output('histogram', 'figure'),
         Output("data_info", "children"),
-        Output('rate-duration-scatter', 'figure'),
+        Output('rate-duration-scatter', 'figure')
     ],
     [
         Input('pv-tech-filter', 'value'),
@@ -998,7 +941,7 @@ def update_map_and_histogram(
 
     fig.update_traces(
         marker=dict(
-            size=14,
+            size=10,
             opacity=0.8
         )
     )
@@ -1012,21 +955,17 @@ def update_map_and_histogram(
             bearing=0,
             center=dict(
                 lat=20,
-                lon=0
+                lon=10
             ),
             pitch=0,
-            zoom=2,
+            zoom=0.9,
             style='light'
         ),
-
-        margin=dict(l=0, r=0, t=0, b=0),
+        
+        height=500,
+        margin=dict(l=2, t=10),
         coloraxis_colorbar=dict(
-            title="Rate<br>(%/year)<br>",
-            x=0.99, xanchor="right",
-            y=0.5, len=0.7,
-            thickness=14,
-            bgcolor="rgba(255,255,255,0.6)",
-            outlinewidth=0,
+            title="Rate<br>(%/year)<br>"  # Correct way to set the title
         )
     )
     
@@ -1136,133 +1075,56 @@ def update_map_and_histogram(
         xaxis_title='Exposure length (year)',
         yaxis_title='Degradation Rate (%/year)',
     )
-
     return fig, hist_fig, data_info, duration_fig
 
-# ─────────────────────────────────────────────────────────────────────
-# Floating detail panel — slides in over the map on click, hides on close
-# or when any filter changes. Styled to match the PV Pathway explorer.
-# ─────────────────────────────────────────────────────────────────────
-def _detail_row(label, value, *, is_link=False, href=None):
-    """One label/value line inside the glass detail panel."""
-    if is_link and href:
-        value_el = html.A(value, href=href, target="_blank",
-                          style={"color": "#0a539c", "wordBreak": "break-all"})
-    else:
-        value_el = html.Span(str(value), style={"color": "#1f2d3d"})
-    return html.Div(
-        [
-            html.Span(label, style={
-                "minWidth": "92px", "color": "#5b6b7a",
-                "fontWeight": "600", "fontSize": "12.5px",
-                "marginRight": "10px", "flexShrink": "0",
-            }),
-            html.Span(value_el, style={"fontSize": "12.5px", "lineHeight": "1.4"}),
-        ],
-        style={"display": "flex", "alignItems": "flex-start",
-               "padding": "7px 0", "borderTop": "1px solid rgba(0,0,0,0.06)"},
-    )
-
-
+# Callback to update table
 @app.callback(
-    Output('field-map-detail', 'children'),
-    Output('field-map-detail', 'style'),
+    Output('table', 'data'),
     [
-        Input('field-map', 'clickData'),
-        Input('field-map-close-btn', 'n_clicks'),
+        Input('map', 'clickData'),
         Input('pv-tech-filter', 'value'),
         Input('pv-climate-filter', 'value'),
         Input('rate-min', 'value'),
         Input('rate-max', 'value'),
         Input('duration-min', 'value'),
-        Input('duration-max', 'value'),
-    ],
-    prevent_initial_call=True,
-)
-def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
-                       rate_min, rate_max, duration_min, duration_max):
-
-    placeholder = [html.Button(id="field-map-close-btn", n_clicks=0,
-                               style={"display": "none"})]
-
-    triggered = (dash.callback_context.triggered[0]['prop_id'].split('.')[0]
-                 if dash.callback_context.triggered else None)
-
-    # close button, filter change, or no click → hide panel
-    if triggered != 'field-map' or not clickData:
-        return placeholder, MAP_DETAIL_HIDDEN
-
-    # show info for the clicked point (match on lat/lon as before)
-    point = clickData['points'][0]
-    match = df[(df['longitude'] == point['lon']) &
-               (df['latitude'] == point['lat'])]
-    if match.empty:
-        return placeholder, MAP_DETAIL_HIDDEN
-    sel = match.iloc[0]
-
-    doi = sel['doi']
-    try:
-        cap_kw = f'{sel["system capacity"] / 1000:g} kW'
-    except (TypeError, ValueError):
-        cap_kw = "Not reported"
-
-    children = [
-        # close button (matches pathway page)
-        html.Button(
-            "✕",
-            id="field-map-close-btn",
-            n_clicks=0,
-            style={
-                "position": "absolute", "top": "12px", "right": "12px",
-                "background": "rgba(255,255,255,0.7)",
-                "border": "1px solid rgba(0,0,0,0.12)",
-                "borderRadius": "50%", "width": "26px", "height": "26px",
-                "fontSize": "12px", "color": "#6b7280", "cursor": "pointer",
-                "display": "flex", "alignItems": "center",
-                "justifyContent": "center", "padding": "0",
-                "lineHeight": "1", "zIndex": 1000,
-            },
-        ),
-        html.P("DEGRADATION DATA POINT", style={
-            "fontSize": "11px", "fontWeight": "700", "letterSpacing": "1.3px",
-            "color": "#9ca3af", "margin": "0 0 4px 0",
-        }),
-        html.H5(
-            str(sel.get("title", "Study")),
-            style={
-                "marginBottom": "10px", "paddingRight": "30px",
-                "fontWeight": "600", "fontSize": "15px", "color": "#1f2937",
-                "display": "-webkit-box", "WebkitLineClamp": 3,
-                "WebkitBoxOrient": "vertical", "overflow": "hidden",
-            },
-        ),
-        # headline metric
-        html.Div(
-            [
-                html.Span("Degradation rate", style={
-                    "fontSize": "12px", "color": "#5b6b7a", "fontWeight": "600"}),
-                html.Span(f'{sel["rate"]:.2f} %/year', style={
-                    "fontSize": "20px", "fontWeight": "700", "color": "#0a539c"}),
-            ],
-            style={"display": "flex", "flexDirection": "column", "gap": "1px",
-                   "padding": "10px 12px", "marginBottom": "8px",
-                   "background": "rgba(255,255,255,0.55)", "borderRadius": "10px"},
-        ),
-        # details
-        _detail_row("Year", sel.get("publish year", "N/A")),
-        _detail_row("Type", sel.get("document type", "N/A")),
-        _detail_row("Country", sel.get("country", "N/A")),
-        _detail_row("Climate zone", sel.get("PV zone", "N/A")),
-        _detail_row("PV tech", sel.get("pv tech", "N/A")),
-        _detail_row("Duration", f'{sel.get("duration", "N/A")} years'),
-        _detail_row("System capacity", cap_kw),
-        _detail_row("DOI", doi, is_link=True, href=f"https://doi.org/{doi}"),
-        _detail_row("Note", sel.get("note", "N/A")),
+        Input('duration-max', 'value')
     ]
+)
+def display_click_data(clickData, tech_filter, climate_filter,
+                       rate_min, rate_max, duration_min, duration_max,
+                       ):
 
-    style = dict(MAP_DETAIL_STYLE)
-    style["display"] = "block"
-    return children, style
+    # if no map point clicked → clear the table
+    if not clickData:
+        return []
+
+    # if filters changed, Dash will re-run callback → clear table
+    ctx = dash.callback_context
+    if ctx.triggered and ctx.triggered[0]['prop_id'].split('.')[0] != 'map':
+        return []
+
+    # otherwise: show info for clicked point
+    point = clickData['points'][0]
+    selected_data = df[(df['longitude'] == point['lon']) & 
+                       (df['latitude'] == point['lat'])].iloc[0]
+
+    doi = selected_data['doi']
+    doi_link = f"[{doi}](https://doi.org/{doi})"
+
+    return [
+    {'attribute': 'DOI', 'value': doi_link},
+    {'attribute': 'Year', 'value': selected_data['publish year']},
+    {'attribute': 'Title', 'value': selected_data['title']},
+    {'attribute': 'Type', 'value': selected_data['document type']},
+    {'attribute': 'Country', 'value': selected_data['country']},
+    {'attribute': 'Climate zone', 'value': selected_data['PV zone']}, 
+    # {'attribute': 'Paper ID', 'value': selected_data['paper id']},
+    {'attribute': 'Rate', 'value': f'{selected_data["rate"]}%/year'},
+    {'attribute': 'PV tech', 'value': selected_data['pv tech']},
+    {'attribute': 'Duration', 'value': f'{selected_data["duration"]} years'},
+    {'attribute': 'System capacity', 'value': f'{selected_data["system capacity"]/1000} kW'},
+    {'attribute': 'Note', 'value': selected_data['note']},
+]
 
 @app.callback(
     Output('location-map', 'figure'),
