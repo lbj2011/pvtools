@@ -19,15 +19,29 @@ dmcfuncs.renderVarMapOption = function (input) {
     var name = option.label != null ? option.label : option.value;
     var tag = option.quality || "";
 
-    // Left: the column name.
+    // Left: a small bullet marker, then the column name. The bullet appears on
+    // EVERY option (both groups) so the list reads as a bulleted set of choices.
     var children = [
+        React.createElement(
+            "span",
+            {
+                key: "bullet",
+                "aria-hidden": "true",
+                style: {
+                    flex: "0 0 auto",
+                    color: "#94a3b8",
+                    fontSize: "13px",
+                    lineHeight: "1",
+                },
+            },
+            "\u2022"   // •
+        ),
         React.createElement(
             "span",
             {
                 key: "name",
                 style: {
-                    fontFamily:
-                        "SFMono-Regular, ui-monospace, Menlo, monospace",
+                    fontFamily: "Arial, sans-serif",
                     fontSize: "13px",
                     color: "#1d1d1f",
                     overflow: "hidden",
@@ -41,12 +55,21 @@ dmcfuncs.renderVarMapOption = function (input) {
 
     // Right: a small quality pill, pushed to the far right with an auto margin.
     if (tag) {
-        // "per-device" is context, not a defect -> neutral gray.
-        // Everything else flags a data-quality issue -> muted amber.
-        var isNeutral = /per-device/i.test(tag);
+        // Neutral (gray) = context, not a defect: a single-device channel,
+        // which the renderer labels "one inverter" / "one MPPT" / ... (older
+        // builds used "per-device"). Everything else (all-zero, "94% missing",
+        // "no numeric data", "wrong units", "constant", ...) flags a real
+        // data-quality issue -> muted amber. Test the RAW semantic tag, before
+        // the lead word is added below.
+        var isNeutral = /per-device|^one\s/i.test(tag);
         var fg = isNeutral ? "#57606a" : "#8a6d00";
         var bg = isNeutral ? "#f1f3f5" : "#fff6e0";
         var bd = isNeutral ? "#d7dce0" : "#f0dfa8";
+
+        // Lead word: neutral context reads "Note:", a real data-quality issue
+        // reads "Warning:" — so the pill's severity is clear from the text too,
+        // not just the color.
+        var pillText = (isNeutral ? "Note: " : "Warning: ") + tag;
 
         children.push(
             React.createElement(
@@ -56,9 +79,7 @@ dmcfuncs.renderVarMapOption = function (input) {
                     style: {
                         marginInlineStart: "auto", // <- pushes pill to the right
                         flex: "0 0 auto",
-                        fontFamily:
-                            "-apple-system, BlinkMacSystemFont, 'Segoe UI', " +
-                            "Roboto, Helvetica, Arial, sans-serif",
+                        fontFamily: "Arial, sans-serif",
                         fontSize: "10.5px",
                         fontWeight: "600",
                         lineHeight: "1",
@@ -71,7 +92,7 @@ dmcfuncs.renderVarMapOption = function (input) {
                         whiteSpace: "nowrap",
                     },
                 },
-                tag
+                pillText
             )
         );
     }
@@ -83,7 +104,7 @@ dmcfuncs.renderVarMapOption = function (input) {
                 display: "flex",
                 alignItems: "center",
                 width: "100%",
-                gap: "10px",
+                gap: "8px",
             },
         },
         children

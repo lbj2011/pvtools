@@ -16,6 +16,7 @@ from io import StringIO
 import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
+from page_supporting_files.analysis_utils import estimate_pvpro_params
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 from page_supporting_files.diagnostic_prompts import DIAGNOSTIC_SYSTEM_PROMPT, DIAGNOSTIC_SYSTEM_PROMPT_PVPRO
 import base64
@@ -424,7 +425,7 @@ def _no_data_alert(message):
             "padding": "12px 14px",
             "background": ACCENT_SOFT,
             "border": f"1px solid #bae6fd",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontFamily": "Arial, sans-serif",
         }
     )
@@ -442,7 +443,7 @@ def _success_banner(message, prefix="Note:"):
             "padding": "12px 16px",
             "background": "#ecfdf5",          # light green
             "border": "1px solid #86efac",    # green border
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontSize": "15px",
             "fontFamily": "Arial, sans-serif",
             "marginBottom": "8px",
@@ -524,7 +525,7 @@ def _working_banner(message):
                              "color": INK, "fontWeight": "600"}),
         ],
         style={"padding": "12px 16px", "background": "#eff6ff",
-               "border": "1px solid #bfdbfe", "borderRadius": "10px",
+               "border": "1px solid #bfdbfe", "borderRadius": "16px",
                "fontSize": "14px", "marginBottom": "8px"},
     )
 
@@ -603,11 +604,21 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
         m, s_rem = divmod(s, 60)
         return f"{m}m {s_rem:02d}s"
 
-    stats_text = f"Elapsed: {_fmt_secs(elapsed_s)}"
+    # Elapsed is rendered in PLAIN SECONDS ("Elapsed: Ns") so it matches what
+    # the 1 Hz clientside ticker (assets/pvpro_elapsed_ticker.js) writes; if the
+    # server used the m/s form here, the 2 s re-render and the 1 s tick would
+    # flip-flop between "2m 15s" and "135s". The ticker finds this element by id
+    # and reads data-started-at (ms), so we expose both below.
+    elapsed_int = max(0, int(round(elapsed_s)))
+    started_at_ms = int((time.time() - elapsed_s) * 1000)
+    # The per-window / ETA text is kept SEPARATE from the elapsed text because
+    # the ticker overwrites the elapsed element's whole textContent every second
+    # — anything sharing that element would be wiped.
+    extra_text = ""
     if phase == "fitting" and current and current >= 1 and total and total > current:
         per_window = elapsed_s / max(current, 1)
         eta_secs   = per_window * (total - current)
-        stats_text += (
+        extra_text = (
             f"  ·  ~{per_window:.1f}s/window"
             f"  ·  ETA: {_fmt_secs(eta_secs)}"
         )
@@ -645,9 +656,19 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
                 "fontFamily": "Arial, sans-serif",
             }
         ),
-        # Bottom stats: elapsed + (during fitting) per-window time + ETA.
+        # Bottom stats: the "Elapsed: Ns" span is updated every second by the
+        # clientside ticker, which locates it by id and reads data-started-at
+        # (wall-clock ms). The per-window/ETA text sits in a SEPARATE span so
+        # the ticker's textContent write can't clobber it.
         html.Div(
-            stats_text,
+            [
+                html.Span(
+                    f"Elapsed: {elapsed_int}s",
+                    id="pvpro-elapsed-display",
+                    **{"data-started-at": str(started_at_ms)},
+                ),
+                html.Span(extra_text),
+            ],
             style={
                 "fontSize": "11px", "color": MUTED, "marginTop": "4px",
                 "fontFamily": "Arial, sans-serif",
@@ -657,7 +678,7 @@ def _pvpro_progress_ui(phase, current, total, message, elapsed_s):
         "padding": "16px 18px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginTop": "16px",
     })
 
@@ -804,7 +825,7 @@ def agent_message(agent_key, body, intro=None):
                                     "color": INK_SOFT,
                                     "padding": "2px 8px",
                                     "background": "#e2e8f0",
-                                    "borderRadius": "10px",
+                                    "borderRadius": "16px",
                                     "fontFamily": "Arial, sans-serif",
                                     "letterSpacing": "0.02em",
                                 }
@@ -900,7 +921,7 @@ def locked_placeholder(agent_key, name, step_num, addon=False):
                                     "color": MUTED,
                                     "padding": "2px 8px",
                                     "background": "#e2e8f0",
-                                    "borderRadius": "10px",
+                                    "borderRadius": "16px",
                                     "fontFamily": "Arial, sans-serif",
                                     "letterSpacing": "0.02em",
                                 }
@@ -928,7 +949,7 @@ def locked_placeholder(agent_key, name, step_num, addon=False):
             "marginBottom": "16px",
             "background": "rgba(241, 245, 249, 0.5)",
             "border": f"1px dashed {BORDER_STRONG}",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
         }
     )
 
@@ -971,7 +992,7 @@ def soft_blue_callout(children, icon=None, margin_bottom="14px", margin_top="0")
             "color": "#0c4a6e",       # dark blue, readable on pale BG
             "background": "#eff6ff",  # blue-50
             "border": "1px solid #bfdbfe",   # blue-200
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "padding": "10px 14px",
             "lineHeight": "1.55",
             "fontFamily": "Arial, sans-serif",
@@ -1001,7 +1022,7 @@ def _exp_outer_style():
         "marginTop": "12px",
         "padding": "12px 14px",
         "border": "1px solid #bfdbfe",       # sky-200
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "backgroundColor": "#eff6ff",        # sky-50
         "fontSize": "13px",
         "lineHeight": "1.6",
@@ -1425,7 +1446,7 @@ def stepper_item(num, title, sub, color, state="pending", step_key=None):
             "display": "flex",
             "alignItems": "center",
             "padding": "10px 12px",
-            "borderRadius": "8px",
+            "borderRadius": "12px",
             "background": row_bg,
             "border": row_border,
             "marginBottom": "4px",
@@ -1511,7 +1532,7 @@ def _chat_sidebar_item():
             "display": "flex",
             "alignItems": "center",
             "padding": "12px 14px",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             # Soft pink -> blue gradient, no border.
             "background": "linear-gradient(135deg, #fce7f3 0%, #dbeafe 100%)",
             "border": "none",
@@ -1550,22 +1571,15 @@ def build_sidebar(progress=None):
                             "marginBottom": "8px",
                         }
                     ),
-                    html.Div("Data in. Results out.", style={
-                        "fontSize": "14px",
-                        "color": INK,
-                        "fontFamily": "Arial, sans-serif",
-                        "fontWeight": "700",
-                        "textAlign": "left",
-                    }),
                 ],
                 style={"padding": "20px 24px 24px"}
             ),
 
             # Workflow section.  Horizontal padding matches the brand
             # block above (18px) so the "WORKFLOW" label aligns flush
-            # with the left edge of the "PV Copilot" logo and the
-            # "Data in. Results out." slogan.  (The previous 12px left
-            # padding offset it 6px to the left and read as misaligned.)
+            # with the left edge of the "PV Copilot" logo.  (The previous
+            # 12px left padding offset it 6px to the left and read as
+            # misaligned.)
             html.Div(
                 [
                     section_label("Workflow"),
@@ -1598,7 +1612,7 @@ def build_sidebar(progress=None):
                                 "background": "#f1f5f9",
                                 "color": INK_SOFT,
                                 "border": f"1px solid {BORDER_STRONG}",
-                                "borderRadius": "8px",
+                                "borderRadius": "12px",
                                 "fontSize": "13px",
                                 "fontWeight": "600",
                                 "cursor": "pointer",
@@ -1757,7 +1771,7 @@ def build_sidebar(progress=None):
             "flexShrink": "0",
             "background": SIDEBAR_BG,
             "border": f"1px solid {BORDER}",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "display": "flex",
             "flexDirection": "column",
             "height": "calc(100vh - 110px)",
@@ -1806,7 +1820,7 @@ data_agent_body = html.Div([
             "background": INK,
             "color": PAPER,
             "border": "none",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontSize": "16px",
             "fontWeight": "600",
             "cursor": "pointer",
@@ -1872,7 +1886,7 @@ def _shared_example_btn(btn_id, label):
             "padding": "8px 14px",
             "background": "transparent",
             "border": f"1px solid {BORDER_STRONG}",
-            "borderRadius": "8px",
+            "borderRadius": "12px",
             "fontSize": "14px",
             "color": INK,
             "cursor": "pointer",
@@ -1931,7 +1945,7 @@ shared_upload_header = html.Div(
                         "fontSize": "14px", "color": INK, "paddingLeft": "18px",
                         "lineHeight": "1.7", "marginBottom": "0", "marginTop": "10px",
                         "padding": "12px 14px 12px 32px", "background": "#eff6ff",
-                        "border": "1px solid #bfdbfe", "borderRadius": "10px",
+                        "border": "1px solid #bfdbfe", "borderRadius": "16px",
                         "fontFamily": "Arial, sans-serif",
                     }
                 ),
@@ -1956,7 +1970,7 @@ shared_upload_header = html.Div(
             ),
             style={
                 "width": "100%", "padding": "14px 16px",
-                "border": f"1.5px dashed {BORDER_STRONG}", "borderRadius": "10px",
+                "border": f"1.5px dashed {BORDER_STRONG}", "borderRadius": "16px",
                 "backgroundColor": "#f8fafc", "cursor": "pointer",
                 "transition": "all 0.15s ease",
             }
@@ -1990,7 +2004,7 @@ shared_upload_header = html.Div(
         "padding": "32px 40px 36px",
         "background": PAPER_RAISED,
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginBottom": "16px",
     }
 )
@@ -2038,7 +2052,7 @@ def filter_row(checkbox_id, label, customize_body=None):
                 "padding": "12px 14px",
                 "background": "#f1f5f9",
                 "border": f"1px solid {BORDER}",
-                "borderRadius": "8px",
+                "borderRadius": "12px",
                 "fontSize": "14px",
             })
         ]))
@@ -2058,6 +2072,106 @@ _param_input_style = {
 
 _label_style = {"fontSize": "13px", "fontWeight": "600", "color": INK, "marginBottom": "3px", "fontFamily": "Arial, sans-serif"}
 _help_style  = {"fontSize": "13px", "color": INK_SOFT, "marginBottom": "5px", "lineHeight": "1.4", "fontFamily": "Arial, sans-serif"}
+
+# --- PVPRO numeric stepper -------------------------------------------------
+# Each PVPRO number field is drawn with our own - / + buttons flanking the
+# input, because this Dash version's native number spinners blank the value
+# on click. The native spinner is hidden via the .pvpro-num CSS class (see
+# assets/pvcopilot_styles.css); the _pvpro_step callback below handles clicks.
+_step_btn_style = {
+    "border": f"1px solid {BORDER_STRONG}", "background": "#fff", "cursor": "pointer",
+    "fontSize": "18px", "fontWeight": "700", "color": INK, "lineHeight": "1",
+    "padding": "0 12px", "minWidth": "34px", "flex": "0 0 auto",
+    "fontFamily": "Arial, sans-serif", "boxSizing": "border-box",
+}
+# Per-field (step, min, decimals), keyed by the id suffix.
+_PVPRO_STEP_CFG = {
+    "cells":    (1, 1, 0),
+    "mps":      (1, 1, 0),
+    "ps":       (1, 1, 0),
+    "alphaisc": (0.0001, 0, 4),
+    "days":     (1, 2, 0),
+    "iters":    (1, 2, 0),
+}
+# Middle-input style; module-level so callbacks can restore it or swap in the
+# "auto-filled from your data" highlight variant.
+# The appearance:* keys suppress the browser's native number-input spinner
+# INLINE — this matters because on some engines (notably Firefox/GTK) that
+# spinner renders as − / + buttons flanking the value, which then sits next to
+# our own − / + and looks doubled. Doing it inline (not only via the .pvpro-num
+# CSS in assets/) makes it immune to a stale/cached stylesheet.
+_PVPRO_MID_BASE = {**_param_input_style, "borderRadius": "0", "textAlign": "center",
+                   "minWidth": "0", "flex": "1 1 auto", "boxSizing": "border-box",
+                   "MozAppearance": "textfield", "WebkitAppearance": "textfield",
+                   "appearance": "textfield"}
+_PVPRO_MID_AUTOFILL = {**_PVPRO_MID_BASE, "background": "#eff6ff",
+                       "border": "1px solid #60a5fa", "fontWeight": "600"}
+# Small blue dot shown on a field's LABEL when that field was auto-filled from
+# the data — same 7px #3b82f6 dot as the "Estimated from your data" note, so
+# the marked fields and the note read as the same thing.
+_PVPRO_DOT_ON = {"display": "inline-block", "width": "7px", "height": "7px",
+                 "borderRadius": "50%", "background": "#3b82f6",
+                 "marginRight": "6px", "verticalAlign": "middle"}
+_PVPRO_DOT_OFF = {"display": "none"}
+
+
+def _pvnum(x, default, cast=float):
+    """Coerce a stepper field's value to a number. The stepper inputs are
+    type='text' (so no browser draws a native spinner beside our own - / +
+    buttons), which means their value arrives as a string — this turns it back
+    into a number, falling back to `default` when blank or non-numeric."""
+    try:
+        return cast(float(x))
+    except (TypeError, ValueError):
+        return default
+
+
+def _pvpro_num_field(label, id_suffix, value, prefix="", prefillable=False):
+    """A labelled numeric field with its own - / + buttons flanking the input.
+    `prefix` is "" for Advanced ids (param-pvpro-*) or "simple-" for Simple.
+    `prefillable=True` adds a hidden blue dot to the label that the autofill
+    callback reveals when this field is estimated from the data.
+
+    The input is type='text' ON PURPOSE: a number input makes the browser draw
+    its OWN spinner (on some engines as - / + buttons) right next to ours, which
+    looks doubled and can't be reliably killed from a (cache-prone) stylesheet.
+    A text input never has a spinner, so only our buttons show. Values are
+    coerced back to numbers via _pvnum wherever they're read. (No inputMode prop
+    — this dcc.Input version rejects it.)"""
+    input_id = f"{prefix}param-pvpro-{id_suffix}"
+    step, minv, _decimals = _PVPRO_STEP_CFG[id_suffix]
+    left = {**_step_btn_style, "borderRadius": "6px 0 0 6px", "borderRight": "none"}
+    right = {**_step_btn_style, "borderRadius": "0 6px 6px 0", "borderLeft": "none"}
+    label_children = [label]
+    if prefillable:
+        label_children = [
+            html.Span(id=f"{input_id}-dot", style=dict(_PVPRO_DOT_OFF)),
+            label,
+        ]
+    return html.Div([
+        html.Div(label_children, style=_label_style),
+        html.Div([
+            html.Button("\u2212",  # minus sign
+                        id={"type": "pvpro-step", "target": input_id, "dir": "down"},
+                        n_clicks=0, style=left),
+            dcc.Input(id=input_id, type="text", value=value,
+                      className="pvpro-num", style=dict(_PVPRO_MID_BASE)),
+            html.Button("+",
+                        id={"type": "pvpro-step", "target": input_id, "dir": "up"},
+                        n_clicks=0, style=right),
+        ], style={"display": "flex", "alignItems": "stretch"}),
+    ])
+
+
+# Every stepper input the _pvpro_step callback manages (both modes), in a fixed
+# order that the callback's Output/State lists mirror.
+_PVPRO_STEP_TARGETS = [
+    "param-pvpro-cells", "param-pvpro-mps", "param-pvpro-ps",
+    "param-pvpro-alphaisc", "param-pvpro-days", "param-pvpro-iters",
+    "simple-param-pvpro-cells", "simple-param-pvpro-mps", "simple-param-pvpro-ps",
+    "simple-param-pvpro-alphaisc", "simple-param-pvpro-days", "simple-param-pvpro-iters",
+]
+
 
 
 low_irra_params = html.Div([
@@ -2138,7 +2252,7 @@ filter_agent_body = html.Div([
             "padding": "16px 18px",
             "background": "#f8fafc",
             "border": f"1px solid {BORDER}",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "marginBottom": "14px",
         }
     ),
@@ -2155,7 +2269,7 @@ filter_agent_body = html.Div([
             "background": INK,
             "color": "white",
             "border": "none",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontSize": "16px",
             "fontWeight": "600",
             "cursor": "pointer",
@@ -2194,7 +2308,7 @@ metric_options = [
                     dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7, style={**_param_input_style, "marginBottom": "8px"}),
                     html.Div("IQR multiplier k", style=_label_style),
                     dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5, style=_param_input_style),
-                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "8px", "border": f"1px solid {BORDER}"}),
+                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
         "value": "YOY",
@@ -2217,7 +2331,7 @@ metric_options = [
                 html.Div([
                     html.Div("Seasonal period (months)", style=_label_style),
                     dcc.Input(id="param-hw-period", type="number", value=12, step=1, min=2, style=_param_input_style),
-                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "8px", "border": f"1px solid {BORDER}"}),
+                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
         "value": "HW",
@@ -2245,7 +2359,7 @@ metric_options = [
                     ]),
                     html.Div("Seasonal period s (months)", style=_label_style),
                     dcc.Input(id="param-arima-s", type="number", value=12, step=1, min=2, style=_param_input_style),
-                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "8px", "border": f"1px solid {BORDER}"}),
+                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
         "value": "ARIMA",
@@ -2259,7 +2373,7 @@ metric_options = [
                 html.Div([
                     html.Div("Seasonal period (months)", style=_label_style),
                     dcc.Input(id="param-csd-period", type="number", value=12, step=1, min=2, style=_param_input_style),
-                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "8px", "border": f"1px solid {BORDER}"}),
+                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
         "value": "CSD",
@@ -2320,7 +2434,27 @@ metric_options = [
                 # IMPORTANT disclosure that follows.
                 margin_bottom="12px",
             ),
-            html.Details(
+            html.Div([
+                # "Estimate from data" — sibling of <details> (not inside
+                # <summary>) so a click never toggles the panel. Advanced mode
+                # already identified the columns in Step 1, so this reads the
+                # existing mapping (no re-parse) and estimates mps/ps.
+                html.Button(
+                    [html.Span("\u2726", style={"marginRight": "6px"}),
+                     "Estimate from data"],
+                    id="adv-pvpro-estimate-btn", n_clicks=0,
+                    title=("Estimate Modules per string and Parallel strings "
+                           "from the DC voltage / current identified in Step 1."),
+                    style={
+                        "position": "absolute", "top": "2px", "right": "0",
+                        "zIndex": "2", "fontSize": "12px", "fontWeight": "700",
+                        "fontFamily": "Arial, sans-serif", "color": NAVY,
+                        "background": "#fff", "border": f"1px solid {NAVY}",
+                        "borderRadius": "999px", "padding": "5px 14px",
+                        "cursor": "pointer", "whiteSpace": "nowrap",
+                    },
+                ),
+                html.Details(
                 [
                 html.Summary(
                     [
@@ -2344,45 +2478,33 @@ metric_options = [
                            "color": INK,
                            "fontWeight": "700",
                            "fontFamily": "Arial, sans-serif",
-                           "marginTop": "4px"},
+                           "marginTop": "4px",
+                           "paddingRight": "170px"},
                 ),
                 html.Div([
                     html.Div(style={"display": "flex", "gap": "8px",
                                     "flexWrap": "wrap",
                                     "marginBottom": "8px"}, children=[
-                        html.Div([
-                            html.Div("Cells in series (per module)",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-cells", type="number",
-                                      value=60, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
-                        html.Div([
-                            html.Div("Modules per string",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-mps", type="number",
-                                      value=1, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
-                        html.Div([
-                            html.Div("Parallel strings",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-ps", type="number",
-                                      value=1, step=1, min=1,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("Cells in series (per module)",
+                                             "cells", 60),
+                            style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("Modules per string", "mps", 1,
+                                             prefillable=True),
+                            style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("Parallel strings", "ps", 1,
+                                             prefillable=True),
+                            style={"flex": "1", "minWidth": "140px"}),
                     ]),
                     html.Div(style={"display": "flex", "gap": "8px",
                                     "flexWrap": "wrap",
                                     "marginBottom": "8px"}, children=[
-                        html.Div([
-                            html.Div("alpha_isc (A/°C)",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-alphaisc",
-                                      type="number", value=0.0046,
-                                      step=0.0001, min=0,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("alpha_isc (A/\u00b0C)",
+                                             "alphaisc", 0.0046),
+                            style={"flex": "1", "minWidth": "140px"}),
                         html.Div([
                             html.Div("Technology", style=_label_style),
                             dcc.Dropdown(
@@ -2402,24 +2524,20 @@ metric_options = [
                     ]),
                     html.Div(style={"display": "flex", "gap": "8px",
                                     "flexWrap": "wrap"}, children=[
-                        html.Div([
-                            html.Div("Days per run", style=_label_style),
-                            dcc.Input(id="param-pvpro-days",
-                                      type="number", value=14,
-                                      step=1, min=2,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
-                        html.Div([
-                            html.Div("Iterations per year",
-                                     style=_label_style),
-                            dcc.Input(id="param-pvpro-iters",
-                                      type="number", value=12,
-                                      step=1, min=2,
-                                      style=_param_input_style),
-                        ], style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("Days per run", "days", 14),
+                            style={"flex": "1", "minWidth": "140px"}),
+                        html.Div(
+                            _pvpro_num_field("Iterations per year", "iters", 12),
+                            style={"flex": "1", "minWidth": "140px"}),
                     ]),
-                ], style={"marginTop": "6px", "padding": "12px 14px",
-                          "background": "#f1f5f9", "borderRadius": "8px",
+                    # Filled only when the user clicks "Estimate from data"
+                    # (estimate_pvpro_advanced): says exactly what was estimated
+                    # from the data and from what. Empty otherwise — Advanced
+                    # never auto-estimates.
+                    html.Div(id="pvpro-autofill-note", style={"marginTop": "8px"}),
+                ], style={"marginTop": "18px", "padding": "12px 14px",
+                          "background": "#f1f5f9", "borderRadius": "12px",
                           "border": f"1px solid {BORDER}",
                           "width": "100%",
                           "boxSizing": "border-box"}),
@@ -2430,7 +2548,8 @@ metric_options = [
                 # and on any new-data event.  Start closed (the default radio
                 # value is "YOY", not PVPRO).
                 open=False,
-            ),  # closes html.Details
+                ),  # closes html.Details
+            ], style={"position": "relative"}),
         ], style={"width": "100%"}),
         "value": "PVPRO",
     },
@@ -2572,7 +2691,7 @@ calc_agent_body = html.Div([
         "padding": "16px 18px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginBottom": "14px",
     }),
 
@@ -2588,7 +2707,7 @@ calc_agent_body = html.Div([
             "background": INK,
             "color": "white",
             "border": "none",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontSize": "16px",
             "fontWeight": "600",
             "cursor": "pointer",
@@ -2652,7 +2771,7 @@ code_agent_body = html.Div([
             "background": INK,
             "color": "white",
             "border": "none",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
             "fontSize": "16px",
             "fontWeight": "600",
             "cursor": "pointer",
@@ -2694,7 +2813,7 @@ code_agent_body = html.Div([
             "fontWeight": "500",
             "padding": "10px 14px",
             "border": f"1px solid {BORDER_STRONG}",
-            "borderRadius": "8px",
+            "borderRadius": "12px",
             "background": "white",
             "fontFamily": "Arial, sans-serif",
         }
@@ -2828,7 +2947,7 @@ common_header = html.Div(
     style={
         "background": PAPER_RAISED,
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginBottom": "16px",
     }
 )
@@ -2896,7 +3015,7 @@ chat_stream = html.Div(
                         "padding": "18px 20px",
                         "background": "rgba(241, 245, 249, 0.5)",
                         "border": f"1px dashed {BORDER_STRONG}",
-                        "borderRadius": "10px",
+                        "borderRadius": "16px",
                         "marginBottom": "24px",
                     },
                 ),
@@ -3344,7 +3463,26 @@ def _simple_pvpro_params_block():
     """Collapsible module/array parameters for the Simple-mode PVPRO box.
     Identical fields to the Advanced-mode PVPRO metric, but with distinct
     `simple-param-pvpro-*` ids so the two never collide."""
-    return html.Details(
+    return html.Div([
+        # "Estimate from data" — a SIBLING of <details> (NOT inside <summary>),
+        # so clicking it never toggles the panel. Absolutely positioned onto the
+        # header line at the right. Runs identify-variables -> estimate mps/ps.
+        html.Button(
+            [html.Span("\u2726", style={"marginRight": "6px"}),
+             "Estimate from data"],
+            id="simple-pvpro-estimate-btn", n_clicks=0,
+            title=("Identify the DC voltage / current / power columns in your "
+                   "data, then estimate Modules per string and Parallel strings."),
+            style={
+                "position": "absolute", "top": "2px", "right": "0", "zIndex": "2",
+                "fontSize": "12px", "fontWeight": "700",
+                "fontFamily": "Arial, sans-serif", "color": NAVY,
+                "background": "#fff", "border": f"1px solid {NAVY}",
+                "borderRadius": "999px", "padding": "5px 14px",
+                "cursor": "pointer", "whiteSpace": "nowrap",
+            },
+        ),
+        html.Details(
         [
             html.Summary(
                 [
@@ -3356,39 +3494,36 @@ def _simple_pvpro_params_block():
                     }),
                     html.Span("Provide module & array parameters for PVPRO"),
                 ],
+                # paddingRight reserves room so the header text never slides
+                # under the absolutely-positioned Estimate button.
                 style={"cursor": "pointer", "fontSize": "13px", "color": INK,
                        "fontWeight": "700", "fontFamily": "Arial, sans-serif",
-                       "marginTop": "4px"},
+                       "marginTop": "4px", "paddingRight": "170px"},
             ),
             html.Div([
                 html.Div(style={"display": "flex", "gap": "8px",
                                 "flexWrap": "wrap", "marginBottom": "8px"},
                          children=[
-                    html.Div([
-                        html.Div("Cells in series (per module)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-cells", type="number",
-                                  value=60, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Modules per string", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-mps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Parallel strings", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-ps", type="number",
-                                  value=1, step=1, min=1, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("Cells in series (per module)",
+                                         "cells", 60, prefix="simple-"),
+                        style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("Modules per string", "mps", 1,
+                                         prefix="simple-", prefillable=True),
+                        style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("Parallel strings", "ps", 1,
+                                         prefix="simple-", prefillable=True),
+                        style={"flex": "1", "minWidth": "140px"}),
                 ]),
                 html.Div(style={"display": "flex", "gap": "8px",
                                 "flexWrap": "wrap", "marginBottom": "8px"},
                          children=[
-                    html.Div([
-                        html.Div("alpha_isc (A/°C)", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-alphaisc", type="number",
-                                  value=0.0046, step=0.0001, min=0,
-                                  style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("alpha_isc (A/\u00b0C)", "alphaisc",
+                                         0.0046, prefix="simple-"),
+                        style={"flex": "1", "minWidth": "140px"}),
                     html.Div([
                         html.Div("Technology", style=_label_style),
                         dcc.Dropdown(
@@ -3407,25 +3542,32 @@ def _simple_pvpro_params_block():
                 ]),
                 html.Div(style={"display": "flex", "gap": "8px",
                                 "flexWrap": "wrap"}, children=[
-                    html.Div([
-                        html.Div("Days per run", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-days", type="number",
-                                  value=14, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
-                    html.Div([
-                        html.Div("Iterations per year", style=_label_style),
-                        dcc.Input(id="simple-param-pvpro-iters", type="number",
-                                  value=12, step=1, min=2, style=_param_input_style),
-                    ], style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("Days per run", "days", 14,
+                                         prefix="simple-"),
+                        style={"flex": "1", "minWidth": "140px"}),
+                    html.Div(
+                        _pvpro_num_field("Iterations per year", "iters", 12,
+                                         prefix="simple-"),
+                        style={"flex": "1", "minWidth": "140px"}),
                 ]),
-            ], style={"marginTop": "6px", "padding": "12px 14px",
-                      "background": "#f1f5f9", "borderRadius": "8px",
+                # Spinner shows while "Estimate from data" is identifying
+                # columns + estimating (parse_contents can take a few seconds).
+                dcc.Loading(
+                    html.Div(id="simple-pvpro-autofill-note",
+                             style={"marginTop": "8px"}),
+                    type="circle", color=NAVY,
+                ),
+            ], style={"marginTop": "18px", "padding": "12px 14px",
+                      "background": "#f1f5f9", "borderRadius": "12px",
                       "border": f"1px solid {BORDER}",
                       "boxSizing": "border-box"}),
         ],
-        open=False,
-        style={"marginTop": "12px"},
-    )
+        id="simple-pvpro-params-details",
+        open=True,
+        style={"marginTop": "0"},
+        ),
+    ], style={"position": "relative", "marginTop": "12px"})
 
 
 def _simple_method_radio():
@@ -3526,7 +3668,7 @@ def _simple_pvpro_about():
                        "lineHeight": "1.6", "fontFamily": "Arial, sans-serif",
                        "marginTop": "8px", "padding": "10px 12px",
                        "background": "rgba(241, 245, 249, 0.6)",
-                       "border": f"1px solid {BORDER}", "borderRadius": "8px"},
+                       "border": f"1px solid {BORDER}", "borderRadius": "12px"},
             ),
         ],
         open=False,
@@ -3579,7 +3721,7 @@ simple_mode_panel = html.Div(
                 "padding": "18px 20px",
                 "background": "rgba(241, 245, 249, 0.5)",
                 "border": f"1px dashed {BORDER_STRONG}",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
             },
         ),
 
@@ -3758,7 +3900,7 @@ _page_body = html.Div([
                                             "padding": "32px 40px 36px",
                                             "background": PAPER_RAISED,
                                             "border": f"1px solid {BORDER}",
-                                            "borderRadius": "10px",
+                                            "borderRadius": "16px",
                                             "marginBottom": "16px",
                                         },
                                     ),
@@ -3773,7 +3915,7 @@ _page_body = html.Div([
                                         style={
                                             "background": PAPER_RAISED,
                                             "border": f"1px solid {BORDER}",
-                                            "borderRadius": "10px",
+                                            "borderRadius": "16px",
                                             "marginTop": "20px",
                                         },
                                     ),
@@ -3971,7 +4113,7 @@ def update_upload_status(filename):
                 "padding": "12px 16px",
                 "background": "#ecfdf5",
                 "border": "1px solid #86efac",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
                 "fontSize": "15px",
                 "fontFamily": "Arial, sans-serif",
             },
@@ -4236,7 +4378,7 @@ def run_filter(filter_clicks, upload_clicks,
             style={
                 "background": "#ffffff",
                 "border": f"1px solid {BORDER}",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
                 "padding": "10px 12px",
                 "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.04)",
             },
@@ -4245,7 +4387,7 @@ def run_filter(filter_clicks, upload_clicks,
         "padding": "20px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginTop": "16px",
     })
 
@@ -4327,13 +4469,13 @@ def analyze_uploaded_data_callback(
     if selected_metric == "PVPRO":
         # Snapshot all the user-controlled params into kwargs.
         pvpro_kwargs = dict(
-            cells_in_series   = pvpro_cells     if pvpro_cells     else 60,
-            modules_per_string= pvpro_mps       if pvpro_mps       else 1,
-            parallel_strings  = pvpro_ps        if pvpro_ps        else 1,
-            alpha_isc         = pvpro_alphaisc  if pvpro_alphaisc is not None else 0.0046,
-            technology        = pvpro_tech      if pvpro_tech      else "mono-c-Si",
-            days_per_run      = pvpro_days      if pvpro_days      else 14,
-            iterations_per_year = pvpro_iters   if pvpro_iters     else 12,
+            cells_in_series     = _pvnum(pvpro_cells, 60, int),
+            modules_per_string  = _pvnum(pvpro_mps, 1, int),
+            parallel_strings    = _pvnum(pvpro_ps, 1, int),
+            alpha_isc           = _pvnum(pvpro_alphaisc, 0.0046, float),
+            technology          = pvpro_tech      if pvpro_tech      else "mono-c-Si",
+            days_per_run        = _pvnum(pvpro_days, 14, int),
+            iterations_per_year = _pvnum(pvpro_iters, 12, int),
         )
 
         job_id = _pvpro_make_job()
@@ -4474,7 +4616,7 @@ def analyze_uploaded_data_callback(
         "padding": "20px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginTop": "16px",
     })
 
@@ -4577,7 +4719,7 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
                     "padding": "12px 14px",
                     "background": "#fff7ed",
                     "border": "1px solid #fed7aa",
-                    "borderRadius": "10px",
+                    "borderRadius": "16px",
                     "color": "#7c2d12",
                     "fontSize": "13px",
                     "fontFamily": "Arial, sans-serif",
@@ -4869,7 +5011,7 @@ def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
     card_style = {
         "background": "#ffffff",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "padding": "8px 10px",
         "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.04)",
         "minWidth": "0",          # allow the card to shrink inside the grid
@@ -4926,7 +5068,7 @@ def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
         "padding": "20px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
-        "borderRadius": "10px",
+        "borderRadius": "16px",
         "marginTop": "16px",
     })
 
@@ -4953,14 +5095,17 @@ def _simple_has_dc_vi(mapped):
 @app.callback(
     Output("simple-pvpro-params-wrap", "style"),
     Output("simple-pvpro-about-wrap",  "style"),
+    Output("simple-pvpro-params-details", "open", allow_duplicate=True),
     Input("simple-method-radio", "value"),
     prevent_initial_call=True,
 )
 def simple_toggle_pvpro_params(method):
     if method == "PVPRO":
+        # Reveal the PVPRO panels AND auto-expand the parameters disclosure so
+        # the fields are visible immediately (mirrors Advanced mode).
         return ({"display": "block", "marginTop": "8px"},
-                {"display": "block"})
-    return ({"display": "none"}, {"display": "none"})
+                {"display": "block"}, True)
+    return ({"display": "none"}, {"display": "none"}, dash.no_update)
 
 
 # =============================================================================
@@ -5087,7 +5232,7 @@ def simple_pvpro_poll(_n, job_store, pfiltered):
             "fig": None,
         }
 
-        done_status = _success_banner(f"{src_name} analysis complete (PVPRO)")
+        done_status = ""   # no success banner on completion (per request)
         progress = {"started": True, "data": True, "filter": True,
                     "calc": True, "code": False}
         _pvpro_update_job(job_id, phase="rendered")
@@ -5142,7 +5287,7 @@ app.clientside_callback(
             "padding": "8px 14px",
             "background": "transparent",
             "border": "1px solid #cbd5e1",
-            "borderRadius": "8px",
+            "borderRadius": "12px",
             "fontSize": "14px",
             "color": "#0f172a",
             "cursor": "pointer",
@@ -5617,6 +5762,12 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     # each option's "quality" field). Falls back gracefully to a
                     # plain name if the assets file isn't present.
                     renderOption={"function": "renderVarMapOption"},
+                    # Scoped hook for the group ("category") titles. The dropdown
+                    # renders in a portal at <body>, so .pvcopilot-root CSS can't
+                    # reach it and a bare .mantine-Select-groupLabel rule would
+                    # leak into every other dmc.Select in pvtools. This unique
+                    # class keeps the blue title change local to these dropdowns.
+                    classNames={"groupLabel": "pvcopilot-var-group"},
                     comboboxProps={
                         "withinPortal": True,
                         "zIndex": 3000,
@@ -5651,7 +5802,7 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                 n_clicks=0,
                 style={
                     "background": ACCENT, "color": "#ffffff", "border": "none",
-                    "padding": "8px 18px", "borderRadius": "8px",
+                    "padding": "8px 18px", "borderRadius": "12px",
                     "fontSize": "13px", "fontWeight": "600", "cursor": "pointer",
                     "fontFamily": "Arial, sans-serif",
                 },
@@ -6063,7 +6214,7 @@ def analyze_uploaded_data_callback(
                 style={
                     "padding": "12px 16px", "marginTop": "14px",
                     "background": "#fffbeb", "border": "1px solid #fcd34d",
-                    "borderRadius": "10px",
+                    "borderRadius": "16px",
                 },
             )
 
@@ -6089,7 +6240,7 @@ def analyze_uploaded_data_callback(
                 "padding": "18px 20px",
                 "background": "#f8fafc",
                 "border": f"1px solid {BORDER}",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
                 "marginBottom": "16px",
             }),
             html.Div([
@@ -6108,7 +6259,7 @@ def analyze_uploaded_data_callback(
                 "padding": "18px 20px",
                 "background": "#f8fafc",
                 "border": f"1px solid {BORDER}",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
             }),
         ], className="slide-in-up")
 
@@ -6199,6 +6350,7 @@ def autoopen_pvpro_params_panel(metric):
 # binding marks itself as duplicate-aware.
 # =============================================================================
 @app.callback(
+    # --- Advanced param values (existing) ---
     Output("param-pvpro-cells",    "value", allow_duplicate=True),
     Output("param-pvpro-mps",      "value", allow_duplicate=True),
     Output("param-pvpro-ps",       "value", allow_duplicate=True),
@@ -6207,6 +6359,31 @@ def autoopen_pvpro_params_panel(metric):
     Output("param-pvpro-days",     "value", allow_duplicate=True),
     Output("param-pvpro-iters",    "value", allow_duplicate=True),
     Output("pvpro-params-details", "open",  allow_duplicate=True),
+    # --- Advanced: clear the auto-fill highlight / dots / note ---
+    Output("param-pvpro-mps",      "style", allow_duplicate=True),
+    Output("param-pvpro-ps",       "style", allow_duplicate=True),
+    Output("param-pvpro-mps-dot",  "style", allow_duplicate=True),
+    Output("param-pvpro-ps-dot",   "style", allow_duplicate=True),
+    Output("pvpro-autofill-note",  "children", allow_duplicate=True),
+    # --- Simple: method reverts to the YoY default, params to defaults ---
+    Output("simple-method-radio",         "value", allow_duplicate=True),
+    Output("simple-param-pvpro-cells",    "value", allow_duplicate=True),
+    Output("simple-param-pvpro-mps",      "value", allow_duplicate=True),
+    Output("simple-param-pvpro-ps",       "value", allow_duplicate=True),
+    Output("simple-param-pvpro-alphaisc", "value", allow_duplicate=True),
+    Output("simple-param-pvpro-tech",     "value", allow_duplicate=True),
+    Output("simple-param-pvpro-days",     "value", allow_duplicate=True),
+    Output("simple-param-pvpro-iters",    "value", allow_duplicate=True),
+    # --- Simple: clear the auto-fill highlight / dots / note ---
+    Output("simple-param-pvpro-mps",      "style", allow_duplicate=True),
+    Output("simple-param-pvpro-ps",       "style", allow_duplicate=True),
+    Output("simple-param-pvpro-mps-dot",  "style", allow_duplicate=True),
+    Output("simple-param-pvpro-ps-dot",   "style", allow_duplicate=True),
+    Output("simple-pvpro-autofill-note",  "children", allow_duplicate=True),
+    # Advanced Step-3 metric selection reverts to the YoY default; the
+    # clientside mirror then clears the PVPRO radio and updates the hidden
+    # master. (The short-data gate may afterwards move it off YoY if needed.)
+    Output("metric-stat-radio", "value", allow_duplicate=True),
     Input("upload-data",         "filename"),
     Input("load-example-btn-1",  "n_clicks"),
     Input("load-example-btn-2",  "n_clicks"),
@@ -6214,10 +6391,235 @@ def autoopen_pvpro_params_panel(metric):
     prevent_initial_call=True,
 )
 def reset_pvpro_params_on_new_data(*_):
-    # The defaults below MUST stay in sync with the layout's
-    # dcc.Input(value=...) declarations.  If you change one, change
-    # both, or "reset" stops actually returning to fresh-page state.
-    return 60, 1, 1, 0.0046, "mono-c-Si", 14, 12, False
+    # A fresh dataset invalidates any prior estimate. Reset BOTH modes to the
+    # fresh-page state: Simple mode's method reverts to the YoY default, all
+    # PVPRO fields go back to their defaults, and every auto-fill highlight /
+    # blue dot / "pre-filled" note is cleared. Defaults MUST stay in sync with
+    # the layout's dcc.Input(value=...) / RadioItems(value=...) declarations.
+    base = dict(_PVPRO_MID_BASE)
+    dot_off = dict(_PVPRO_DOT_OFF)
+    return (
+        # advanced values + close advanced disclosure
+        60, 1, 1, 0.0046, "mono-c-Si", 14, 12, False,
+        # advanced highlight/dot/note cleared
+        base, base, dot_off, dot_off, "",
+        # simple method (YoY default) + values
+        "YOY", 60, 1, 1, 0.0046, "mono-c-Si", 14, 12,
+        # simple highlight/dot/note cleared
+        base, base, dot_off, dot_off, "",
+        # advanced Step-3 metric selection back to the YoY default
+        "YOY",
+    )
+
+
+# =============================================================================
+# CALLBACK — AUTO-FILL PVPRO ARRAY PARAMS FROM THE DATA
+#
+# After Analyze (mapped-vars-store updates), estimate what the data implies
+# about the array layout -- modules per string from the median DC operating
+# voltage, parallel strings from the median DC current (or P/V) -- and pre-fill
+# those fields in BOTH Simple and Advanced. Auto-filled inputs get a blue
+# highlight and a note says exactly what was filled and from what, so the user
+# knows to review rather than assume they typed it. Fields that can't be
+# estimated honestly are left untouched at their defaults.
+# =============================================================================
+def _pvpro_autofill_note(filled_bits):
+    """Small blue-dotted 'pre-filled from your data' line under the param grid."""
+    return html.Div([
+        html.Span(style={
+            "display": "inline-block", "width": "7px", "height": "7px",
+            "borderRadius": "50%", "background": "#3b82f6",
+            "marginRight": "8px", "flex": "0 0 auto", "marginTop": "5px"}),
+        html.Span([
+            html.Span("Estimated from your data \u00b7 ", style={
+                "fontWeight": "600", "color": INK}),
+            html.Span("; ".join(filled_bits) + ". Estimates assume a typical "
+                      "crystalline module \u2014 adjust if you know the real layout.",
+                      style={"color": INK_SOFT}),
+        ], style={"fontSize": "12px", "lineHeight": "1.5"}),
+    ], className="pvcopilot-note-float-in",
+       style={"display": "flex", "alignItems": "flex-start", "marginTop": "4px",
+              "fontFamily": _HINT_FONT})
+
+
+# NOTE: the automatic auto-fill callback (formerly `autofill_pvpro_params`,
+# triggered on every mapped-vars-store change) has been REMOVED. PVPRO
+# parameter estimation is now MANUAL only, via the "Estimate from data"
+# buttons in each mode (estimate_pvpro_simple / estimate_pvpro_advanced).
+
+
+# =============================================================================
+# CALLBACK — Simple-mode "Estimate from data" button.
+#
+# On click: IDENTIFY the DC voltage/current/power columns (reuse the mapping
+# already in the store if present, else run the same parse_contents the full
+# Analyze uses), THEN ESTIMATE Modules per string + Parallel strings via
+# estimate_pvpro_params and fill the Simple-mode fields — the same result as
+# the Advanced-mode auto-fill, but on demand and before running the analysis.
+# =============================================================================
+@app.callback(
+    Output("simple-param-pvpro-mps", "value", allow_duplicate=True),
+    Output("simple-param-pvpro-ps",  "value", allow_duplicate=True),
+    Output("simple-param-pvpro-mps", "style", allow_duplicate=True),
+    Output("simple-param-pvpro-ps",  "style", allow_duplicate=True),
+    Output("simple-param-pvpro-mps-dot", "style", allow_duplicate=True),
+    Output("simple-param-pvpro-ps-dot",  "style", allow_duplicate=True),
+    Output("simple-pvpro-autofill-note", "children", allow_duplicate=True),
+    Input("simple-pvpro-estimate-btn", "n_clicks"),
+    State("dataframe-store",          "data"),
+    State("mapped-vars-store",        "data"),
+    State("simple-param-pvpro-cells", "value"),
+    prevent_initial_call=True,
+)
+def estimate_pvpro_simple(n, df_json, mapping, cells):
+    nu = dash.no_update
+
+    def _msg(text):
+        return html.Div(text, className="pvcopilot-note-float-in",
+                        style={"fontSize": "12px", "color": INK_SOFT,
+                               "marginTop": "4px", "lineHeight": "1.5",
+                               "fontFamily": _HINT_FONT})
+
+    if not n or not df_json:
+        return nu, nu, nu, nu, nu, nu, _msg(
+            "Load a dataset first, then click \u201cEstimate from data.\u201d")
+    try:
+        df = _df_from_store(df_json)
+        # Identify variables: reuse an existing mapping if we already have one,
+        # otherwise run the same parser Analyze uses.
+        if not mapping:
+            res = _run_with_timeout(parse_contents, df=df, timeout=ANALYZE_TIMEOUT_S)
+            mapping = res[2] if res else {}
+        est = estimate_pvpro_params(df, mapping or {},
+                                    cells_in_series=_pvnum(cells, 60, int))
+    except Exception:
+        est = {}
+    if not est:
+        return nu, nu, nu, nu, nu, nu, _msg(
+            "Couldn't estimate from this data \u2014 PVPRO estimation needs DC "
+            "voltage + current (or DC power) columns that agree with each other.")
+
+    base = dict(_PVPRO_MID_BASE)
+    dot_off = dict(_PVPRO_DOT_OFF)
+    dot_on = dict(_PVPRO_DOT_ON)
+    mps = est.get("modules_per_string")
+    ps = est.get("parallel_strings")
+    filled_bits = []
+    if mps:
+        filled_bits.append(f"Modules per string = {mps['value']} ({mps['basis']})")
+    if ps:
+        filled_bits.append(f"Parallel strings = {ps['value']} ({ps['basis']})")
+    return (mps["value"] if mps else nu,
+            ps["value"] if ps else nu,
+            dict(_PVPRO_MID_AUTOFILL) if mps else base,
+            dict(_PVPRO_MID_AUTOFILL) if ps else base,
+            dot_on if mps else dot_off,
+            dot_on if ps else dot_off,
+            _pvpro_autofill_note(filled_bits))
+
+
+# =============================================================================
+# CALLBACK — Advanced-mode "Estimate from data" button.
+#
+# Same idea as the Simple-mode button, but Advanced mode has ALREADY identified
+# the columns in Step 1 (prescreening), so this does NOT re-parse: it reads the
+# existing mapped-vars-store directly and estimates Modules per string +
+# Parallel strings into the Advanced fields. If Step 1 hasn't run yet (no
+# mapping), it prompts the user to run prescreening first.
+# =============================================================================
+@app.callback(
+    Output("param-pvpro-mps", "value", allow_duplicate=True),
+    Output("param-pvpro-ps",  "value", allow_duplicate=True),
+    Output("param-pvpro-mps", "style", allow_duplicate=True),
+    Output("param-pvpro-ps",  "style", allow_duplicate=True),
+    Output("param-pvpro-mps-dot", "style", allow_duplicate=True),
+    Output("param-pvpro-ps-dot",  "style", allow_duplicate=True),
+    Output("pvpro-autofill-note", "children", allow_duplicate=True),
+    Input("adv-pvpro-estimate-btn", "n_clicks"),
+    State("dataframe-store",   "data"),
+    State("mapped-vars-store", "data"),
+    State("param-pvpro-cells", "value"),
+    prevent_initial_call=True,
+)
+def estimate_pvpro_advanced(n, df_json, mapping, cells):
+    nu = dash.no_update
+
+    def _msg(text):
+        return html.Div(text, className="pvcopilot-note-float-in",
+                        style={"fontSize": "12px", "color": INK_SOFT,
+                               "marginTop": "4px", "lineHeight": "1.5",
+                               "fontFamily": _HINT_FONT})
+
+    if not n:
+        return nu, nu, nu, nu, nu, nu, nu
+    if not df_json or not mapping:
+        # Advanced mode expects Step 1 (prescreening) to have identified columns.
+        return nu, nu, nu, nu, nu, nu, _msg(
+            "Run prescreening (Step 1) first so the DC voltage / current columns "
+            "are identified, then click Estimate from data.")
+    try:
+        est = estimate_pvpro_params(_df_from_store(df_json), mapping,
+                                    cells_in_series=_pvnum(cells, 60, int))
+    except Exception:
+        est = {}
+    if not est:
+        return nu, nu, nu, nu, nu, nu, _msg(
+            "Couldn't estimate from this data \u2014 PVPRO estimation needs DC "
+            "voltage + current (or DC power) columns that agree with each other.")
+
+    base = dict(_PVPRO_MID_BASE)
+    dot_off = dict(_PVPRO_DOT_OFF)
+    dot_on = dict(_PVPRO_DOT_ON)
+    mps = est.get("modules_per_string")
+    ps = est.get("parallel_strings")
+    filled_bits = []
+    if mps:
+        filled_bits.append(f"Modules per string = {mps['value']} ({mps['basis']})")
+    if ps:
+        filled_bits.append(f"Parallel strings = {ps['value']} ({ps['basis']})")
+    return (mps["value"] if mps else nu,
+            ps["value"] if ps else nu,
+            dict(_PVPRO_MID_AUTOFILL) if mps else base,
+            dict(_PVPRO_MID_AUTOFILL) if ps else base,
+            dot_on if mps else dot_off,
+            dot_on if ps else dot_off,
+            _pvpro_autofill_note(filled_bits))
+
+
+# =============================================================================
+# CALLBACK — PVPRO numeric steppers (our own - / + buttons)
+#
+# The native number-input spinners blank the value in this Dash version, so
+# each PVPRO number field has explicit - / + buttons (see _pvpro_num_field).
+# This one callback handles all of them (Advanced + Simple): the clicked
+# button's id carries which input to change and the direction; we read that
+# input's current value, step it, clamp to its minimum, and write it back.
+# =============================================================================
+@app.callback(
+    [Output(t, "value", allow_duplicate=True) for t in _PVPRO_STEP_TARGETS],
+    Input({"type": "pvpro-step", "target": ALL, "dir": ALL}, "n_clicks"),
+    [State(t, "value") for t in _PVPRO_STEP_TARGETS],
+    prevent_initial_call=True,
+)
+def _pvpro_step(_clicks, *vals):
+    out = [dash.no_update] * len(_PVPRO_STEP_TARGETS)
+    trig = ctx.triggered_id
+    if not isinstance(trig, dict):
+        return out
+    target = trig.get("target")
+    direction = trig.get("dir")
+    if target not in _PVPRO_STEP_TARGETS:
+        return out
+    idx = _PVPRO_STEP_TARGETS.index(target)
+    suffix = target.split("param-pvpro-")[-1]           # e.g. "cells"
+    step, minv, decimals = _PVPRO_STEP_CFG.get(suffix, (1, None, 0))
+    cur = _pvnum(vals[idx], minv if minv is not None else 0, float)
+    newv = cur + (step if direction == "up" else -step)
+    if minv is not None and newv < minv:
+        newv = minv
+    newv = round(newv, decimals) if decimals else int(round(newv))
+    out[idx] = newv
+    return out
 
 
 # =============================================================================
@@ -6254,7 +6656,7 @@ def generate_code(n, filename, mapped_variables_dict, selected_filters, selected
                 "background": INK,
                 "color": "#e8e4dc",
                 "padding": "16px",
-                "borderRadius": "10px",
+                "borderRadius": "16px",
                 "maxHeight": "260px",
                 "overflowY": "auto",
                 "fontFamily": "Arial, sans-serif",
@@ -6276,7 +6678,7 @@ def generate_code(n, filename, mapped_variables_dict, selected_filters, selected
         "fontWeight": "500",
         "padding": "10px 14px",
         "border": f"1px solid {BORDER_STRONG}",
-        "borderRadius": "8px",
+        "borderRadius": "12px",
         "background": "white",
         "fontFamily": "Arial, sans-serif",
     }
@@ -7718,13 +8120,13 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
                     "", none, {}, True, "")
 
         pvpro_kwargs = dict(
-            cells_in_series     = cells     if cells     else 60,
-            modules_per_string  = mps       if mps       else 1,
-            parallel_strings    = ps        if ps        else 1,
-            alpha_isc           = alphaisc  if alphaisc is not None else 0.0046,
+            cells_in_series     = _pvnum(cells, 60, int),
+            modules_per_string  = _pvnum(mps, 1, int),
+            parallel_strings    = _pvnum(ps, 1, int),
+            alpha_isc           = _pvnum(alphaisc, 0.0046, float),
             technology          = tech      if tech      else "mono-c-Si",
-            days_per_run        = days      if days      else 14,
-            iterations_per_year = iters     if iters     else 12,
+            days_per_run        = _pvnum(days, 14, int),
+            iterations_per_year = _pvnum(iters, 12, int),
         )
         job_id = _pvpro_make_job()
 
@@ -7825,7 +8227,7 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     # Success: Step 3 DONE.  Reveal the result.
     progress = {"started": True, "data": True, "filter": True,
                 "calc": True, "code": False}
-    done_status = _success_banner(f"{source_name} analysis complete")
+    done_status = ""   # no success banner on completion (per request)
     return (stash, done_status, _simple_result_layout(stash), progress,
             dash.no_update, dash.no_update, dash.no_update)
 
@@ -8108,7 +8510,7 @@ def _run_diagnostic(ctx):
             "padding": "16px 18px",
             "background": "#eff6ff",
             "border": "1px solid #bfdbfe",
-            "borderRadius": "10px",
+            "borderRadius": "16px",
         },
         className="slide-in-up",
     )

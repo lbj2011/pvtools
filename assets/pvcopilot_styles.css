@@ -366,3 +366,68 @@
     background: #0064AB !important;
     box-shadow: 0 1px 3px rgba(0, 100, 171, 0.25) !important;
 }
+/* =========================================================================
+   Variable-mapping dropdown — category ("group") titles in navy blue.
+
+   NOTE: intentionally NOT scoped under .pvcopilot-root. The dmc.Select
+   dropdown is rendered in a portal at <body> (comboboxProps withinPortal),
+   so it lives OUTSIDE .pvcopilot-root and a scoped rule can't reach it.
+   Instead the Select is given classNames={"groupLabel": "pvcopilot-var-group"}
+   (see pvcopilot.py), and this uniquely-named class keeps the change local to
+   these dropdowns without affecting any other dmc.Select in pvtools.
+   ========================================================================= */
+.pvcopilot-var-group {
+    color: #0064AB !important;          /* NAVY — matches the app's accents */
+    font-family: Arial, sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em;
+}
+
+/* =========================================================================
+   PVPRO numeric stepper — hide the browser's native number spinner.
+   Each PVPRO field supplies its own − / + buttons (see _pvpro_num_field in
+   pvcopilot.py); the native spinner is not just redundant but actively
+   harmful here, because in this Dash version clicking it blanks the value.
+   Scoped under .pvcopilot-root (these inputs live in the page, not a portal).
+   ========================================================================= */
+.pvcopilot-root input.pvpro-num::-webkit-outer-spin-button,
+.pvcopilot-root input.pvpro-num::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.pvcopilot-root input.pvpro-num {
+    -moz-appearance: textfield;
+    appearance: textfield;
+    text-align: center !important;   /* beat any global input text-align rule */
+}
+
+/* =========================================================================
+   Page background continuity.
+   The pvtools shell frames this page between a full-width black top nav and a
+   black footer. Without this rule the shared page <body> shows through as
+   WHITE bands — above the light-gray content and below it (between the content
+   and the footer) — breaking the backdrop. Paint the body the same #f8fafc so
+   the background reads as one continuous light-gray field between the bars.
+
+   NOTE: intentionally NOT scoped under .pvcopilot-root — the gaps are OUTSIDE
+   the page root (they are the shared body/shell showing through), so a scoped
+   rule can't reach them. #f8fafc is a neutral near-white page tone and matches
+   .pvcopilot-root exactly.
+   ========================================================================= */
+html, body {
+    background: #f8fafc !important;
+}
+
+/* =========================================================================
+   PVPRO auto-fill / estimate note — float-and-fade in.
+   Applied via className="pvcopilot-note-float-in" on the note built after an
+   estimate finishes, so the "Pre-filled from your data …" line animates in
+   (rather than snapping) when the result lands.
+   ========================================================================= */
+@keyframes pvcopilot-note-float-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.pvcopilot-root .pvcopilot-note-float-in {
+    animation: pvcopilot-note-float-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

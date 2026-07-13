@@ -135,6 +135,35 @@ def _is_device_level(col):
     return bool(_DEVICE_LEVEL_RE.search(str(col)))
 
 
+# Friendly, concrete labels for a numbered device channel, so the mapping pill
+# reads "one inverter" (for inv1_dc_power) instead of the vaguer "per-device".
+# Matched only when _is_device_level() is already true; order matters only in
+# that the first hit wins. Keep these device words in sync with _DEVICE_LEVEL_RE.
+_DEVICE_NOUNS = [
+    (re.compile(r'(?:inv|inverter)[\s_]*\d', re.I), "one inverter"),
+    (re.compile(r'mppt[\s_]*\d',             re.I), "one MPPT"),
+    (re.compile(r'string[\s_]*\d',           re.I), "one string"),
+    (re.compile(r'(?:combiner|cb)[\s_]*\d',  re.I), "one combiner"),
+    (re.compile(r'meter[\s_]*\d',            re.I), "one meter"),
+    (re.compile(r'zone[\s_]*\d',             re.I), "one zone"),
+    (re.compile(r'block[\s_]*\d',            re.I), "one block"),
+    (re.compile(r'array[\s_]*\d',            re.I), "one array"),
+    (re.compile(r'ch[\s_]*\d',               re.I), "one channel"),
+]
+
+
+def _device_scope_label(col):
+    """A concrete 'one <device>' note for a numbered device channel (e.g.
+    'one inverter' for inv1_dc_power). Falls back to 'one device' if the device
+    word isn't one we specifically name. This is CONTEXT, not a data defect —
+    it tells the user the column is a single device, not the system total."""
+    s = str(col)
+    for rx, noun in _DEVICE_NOUNS:
+        if rx.search(s):
+            return noun
+    return "one device"
+
+
 def _missing_frac(df, col):
     """Fraction of a column that is missing (non-numeric/blank counts as missing)."""
     if col not in df.columns or len(df) == 0:
@@ -190,6 +219,40 @@ _POWER_NAME_RE = re.compile(
     r'power|pwr|(?:^|[^a-z])p_?(?:dc|ac|mpp?|pv|out|in|array|string)(?:[^a-z]|$)',
     re.I)
 _AC_MARKER_RE = re.compile(r'(?:^|[^a-z])ac(?:[^a-z]|$)|out|grid|phase', re.I)
+# Unambiguous DC-side markers: a "dc" token, or the inverter INPUT side
+# (input / in_ / _in). Deliberately conservative — it excludes softer hints
+# like "pv"/"mp" that also appear on system-level columns — so it only ever
+# fires when a name is clearly the DC side. Mirrors _AC_MARKER_RE and is used
+# only to reject a candidate from the OPPOSITE electrical role.
+_DC_MARKER_RE = re.compile(
+    r'(?:^|[^a-z])dc(?:[^a-z]|$)|input|(?:^|[^a-z])in_|_in(?:[^a-z]|$)', re.I)
+
+
+def _name_side(col):
+    """'ac' | 'dc' | None from unambiguous electrical-side markers in the NAME.
+
+    Returns None when the name carries neither marker OR carries both (an
+    ambiguous name like `ac_dc_*`); in those cases we defer to the LLM / data
+    and never filter. Only a clean one-sided name yields 'ac' or 'dc'."""
+    s = str(col)
+    ac = bool(_AC_MARKER_RE.search(s))
+    dc = bool(_DC_MARKER_RE.search(s))
+    if ac and not dc:
+        return "ac"
+    if dc and not ac:
+        return "dc"
+    return None
+
+
+def _drop_wrong_side(cols, want):
+    """Drop candidates whose NAME unambiguously marks the opposite electrical
+    side of `want` ('dc' or 'ac'). This is a deterministic guard against the
+    (non-deterministic) LLM occasionally listing an obviously-AC column such as
+    `ac_power` under a DC role — such a column must never be selected for, or
+    offered as an alternative under, the wrong side. Names with no clear side
+    marker (or an ambiguous one) are always kept."""
+    opp = "ac" if want == "dc" else "dc"
+    return [c for c in (cols or []) if _name_side(c) != opp]
 
 
 def _scan_power_names(df):
@@ -271,7 +334,7 @@ def _quality_tag(df, col, role=None):
     if mf > FLAG_MISSING_FRAC:
         return f"{mf:.0%} missing"
     if _is_device_level(col):
-        return "per-device"
+        return _device_scope_label(col)
     return None
 
 
@@ -712,12 +775,19 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # back DC -> AC for the electrical quantities, and warn on ambiguity.
         # ----------------------------------
         def _resolve_dc_ac(dc_role, ac_role, label):
-            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC."""
-            best, viable = _best_by_data(df, _cands(dc_role))
+            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC.
+
+            Candidates whose NAME clearly marks the wrong electrical side are
+            dropped first (see _drop_wrong_side) so an AC-named column can never
+            be chosen for — or offered as an alternative under — a DC role, and
+            vice versa."""
+            dc_cands = _drop_wrong_side(_cands(dc_role), "dc")
+            ac_cands = _drop_wrong_side(_cands(ac_role), "ac")
+            best, viable = _best_by_data(df, dc_cands)
             if best:
                 _ambiguity_note(dc_role, best, viable)
                 return best, "dc"
-            best, viable = _best_by_data(df, _cands(ac_role))
+            best, viable = _best_by_data(df, ac_cands)
             if best:
                 mapping_notes.append(
                     f"No usable DC {label} column — using AC {label} '{best}' "
@@ -727,10 +797,10 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             # Lenient fallback: nothing passed the quality gates, but if a
             # candidate column exists, keep the least-bad one (shown + warned)
             # rather than leaving the role unmapped.
-            lb, reason = _least_bad(df, _cands(dc_role))
+            lb, reason = _least_bad(df, dc_cands)
             side = "dc"
             if lb is None:
-                lb, reason = _least_bad(df, _cands(ac_role))
+                lb, reason = _least_bad(df, ac_cands)
                 side = "ac"
             if lb is not None:
                 mapping_notes.append(
@@ -761,8 +831,14 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # Supplement the LLM's candidates with a deterministic name scan so an
         # obvious column like 'dc_power' is caught even when the LLM omits it.
         scan_dc_p, scan_ac_p = _scan_power_names(df)
-        dc_p_cands = list(dict.fromkeys(_cands("DC Power") + scan_dc_p))
-        ac_p_cands = list(dict.fromkeys(_cands("AC Power") + scan_ac_p))
+        # Guard each side against wrong-side names before combining with the
+        # deterministic scan (which is already side-correct). This is what stops
+        # an LLM-listed `ac_power` from surfacing under DC Power (selected or as
+        # an "also detected" alternative), and vice versa.
+        dc_p_cands = list(dict.fromkeys(
+            _drop_wrong_side(_cands("DC Power"), "dc") + scan_dc_p))
+        ac_p_cands = list(dict.fromkeys(
+            _drop_wrong_side(_cands("AC Power"), "ac") + scan_ac_p))
 
         def _compute_power(side):
             df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
@@ -965,10 +1041,24 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # appear under "LLM-detected {role}" rather than being hidden. Each gets
         # a short quality tag (e.g. 'all-zero', '94% missing', 'per-device') the
         # UI appends after the name.
+        #
+        # Same-side only: a DC role lists AC columns as alternatives ONLY when
+        # the chosen column is itself an AC fallback (no DC column existed). When
+        # a real DC column was selected we never offer an AC column beside it —
+        # DC and AC power are different physical quantities, so e.g. `ac_power`
+        # must not appear under DC Power. (dc_*_cands are already wrong-side
+        # filtered; filter the V/I lists here too before pairing them by side.)
+        dc_v_cands = _drop_wrong_side(_cands("DC Voltage"), "dc")
+        ac_v_cands = _drop_wrong_side(_cands("AC Voltage"), "ac")
+        dc_i_cands = _drop_wrong_side(_cands("DC Current"), "dc")
+        ac_i_cands = _drop_wrong_side(_cands("AC Current"), "ac")
         _role_cands = {
-            "DC Power":           dc_p_cands + ac_p_cands,
-            "DC Voltage":         _cands("DC Voltage") + _cands("AC Voltage"),
-            "DC Current":         _cands("DC Current") + _cands("AC Current"),
+            "DC Power":           (ac_p_cands + dc_p_cands) if p_side == "ac"
+                                  else dc_p_cands,
+            "DC Voltage":         (ac_v_cands + dc_v_cands) if v_side == "ac"
+                                  else dc_v_cands,
+            "DC Current":         (ac_i_cands + dc_i_cands) if i_side == "ac"
+                                  else dc_i_cands,
             "Irradiance":         all_irr,
             "Module temperature": _cands("Module temperature"),
             "Time":               ([c for c in _cands("Time") if c in df.columns]
@@ -2279,6 +2369,108 @@ def _yoy_degradation(series, eps=1e-9):
     if not ratios:
         return np.nan
     return float(np.median(ratios) * 100.0)  # %/yr
+
+
+# ---------------------------------------------------------------------------
+# PVPRO parameter estimation FROM THE DATA ITSELF.
+#
+# Typical crystalline-module operating values used to back out the array
+# layout from measured string voltage/current. Rough by nature -- the UI
+# marks these as auto-filled estimates the user should review.
+# ---------------------------------------------------------------------------
+VMP_PER_CELL = 0.51      # V at max power per crystalline cell (standard)
+MODULE_IMP_TYP = 8.5     # A at max power for a typical crystalline string
+VI_P_TOL = 0.35          # measured V*I must agree with measured P within 35%
+
+
+def estimate_pvpro_params(df, mapped_variables_dict, cells_in_series=60):
+    """Estimate PVPRO array-layout parameters FROM THE MEASUREMENTS.
+
+    All electrical quantities are measured from the dataset itself: the median
+    voltage/current/power over the TOP-DECILE power points (the array's actual
+    max-power operating region). The layout then follows arithmetically:
+
+        modules_per_string = V_measured / (cells_in_series x 0.51 V/cell)
+        parallel_strings   = I_measured / I_string
+            where I_measured is the measured current, or P_measured/V_measured
+            when no current column exists.
+
+    Before estimating, the measurements are cross-checked against each other:
+    if measured V x I disagrees with measured P by more than 35%, the columns
+    are inconsistent (e.g. an AC current fallback on a DC-side power) and NO
+    estimate is produced -- better empty than wrong.
+
+    Returns {param_name: {"value": int, "basis": str}} for the parameters the
+    data supports; {} when it can't be done honestly.
+    """
+    out = {}
+    pcol = mapped_variables_dict.get("DC Power")
+    vcol = mapped_variables_dict.get("DC Voltage")
+    icol = mapped_variables_dict.get("DC Current")
+    if not pcol or pcol not in df.columns:
+        return out
+    p = pd.to_numeric(df[pcol], errors="coerce")
+    p_hi_cut = p.quantile(0.90)
+    if not np.isfinite(p_hi_cut) or p_hi_cut <= 0:
+        return out
+    high = p >= p_hi_cut            # the array's real max-power operating region
+    if int(high.sum()) < 30:
+        return out
+    p_med = p[high].median()
+
+    v_med = None
+    if vcol and vcol in df.columns:
+        v = pd.to_numeric(df[vcol], errors="coerce")[high].median()
+        # Plausible DC string voltage only (rejects mis-scaled/AC-ish values).
+        if np.isfinite(v) and 15 <= v <= 1500:
+            v_med = float(v)
+
+    i_med, i_from = None, "measured"
+    if icol and icol in df.columns:
+        i = pd.to_numeric(df[icol], errors="coerce")[high].median()
+        if np.isfinite(i) and 0.3 <= i <= 2000:
+            i_med = float(i)
+
+    # Sanity-check V, I, P against each other. A measured V*I can be at most
+    # the reported power; it is often much LESS, because V and I are frequently
+    # per-inverter (or per-string) while DC Power is the whole-system total, so
+    # V*I is only a 1/N fraction of P. That is a LEGITIMATE case -- the
+    # per-device voltage/current still yield a correct modules-per-string /
+    # parallel-strings for that device -- so a ratio well below 1 must be
+    # allowed. We reject ONLY when V*I is materially GREATER than P, which is
+    # physically impossible for a sub-measurement and signals genuinely
+    # inconsistent columns (mis-scaled units, etc.). Wrong electrical side is
+    # already prevented upstream by the DC/AC name filter.
+    if v_med is not None and i_med is not None and p_med > 0:
+        ratio = (v_med * i_med) / p_med
+        if ratio > 1 + VI_P_TOL:
+            return out
+
+    # No current column: CALCULATE it from the measured power and voltage.
+    if i_med is None and v_med is not None and p_med > 0:
+        i_calc = p_med / v_med
+        if 0.3 <= i_calc <= 2000:
+            i_med, i_from = i_calc, "P/V"
+
+    module_vmp = cells_in_series * VMP_PER_CELL
+    if v_med is not None and module_vmp > 0:
+        mps = max(1, int(round(v_med / module_vmp)))
+        if mps <= 40:
+            out["modules_per_string"] = {
+                "value": mps,
+                "basis": (f"measured {v_med:.0f} V / "
+                          f"{module_vmp:.1f} V/module "
+                          f"({cells_in_series} cells x {VMP_PER_CELL} V)")}
+
+    if i_med is not None:
+        ps = max(1, int(round(i_med / MODULE_IMP_TYP)))
+        if ps <= 200:
+            src = (f"measured {i_med:.1f} A" if i_from == "measured"
+                   else f"{i_med:.1f} A calculated as P/V")
+            out["parallel_strings"] = {
+                "value": ps,
+                "basis": f"{src} / {MODULE_IMP_TYP} A/string"}
+    return out
 
 
 # =============================================================================
