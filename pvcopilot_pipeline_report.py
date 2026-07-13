@@ -495,6 +495,12 @@ def run_one(path, forced_method=None):
     # short span) count against rate_reliable in these reports. The website's
     # degradation_reliability verdict stays strict and is NOT affected.
     reasons = [x for x in reasons if "irradiance" not in x]
+    # REPORT-ONLY POLICY: the scattered-YoY check only counts when the
+    # year-over-year disagreement exceeds ±2 %/yr (ci_width > 4). The website
+    # keeps the stricter ±1.5 (MAX_CI_WIDTH = 3) verdict.
+    REPORT_MAX_CI_WIDTH = 4.0
+    if _ci_width is not None and np.isfinite(_ci_width) and _ci_width <= REPORT_MAX_CI_WIDTH:
+        reasons = [x for x in reasons if "disagree" not in x]
     reliable = len(reasons) == 0
     rec["rate_reliable"] = reliable
     rec["reliability_reasons"] = reasons   # -> unreliable_because in results CSV
