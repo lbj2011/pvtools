@@ -28,7 +28,9 @@ The focused results sheet has columns:
     missing_maps | multiple_matches | statistical_trend_method |
     detected_or_created_columns | why_missing
 (unreliable_because spells out exactly which reliability checks failed when
-rate_reliable is "no" — empty when the rate is reliable.)
+rate_reliable is "no" — empty when the rate is reliable. Missing irradiance
+is NOT counted against rate_reliable in these reports — it appears as a
+"not weather-normalized" note instead; the website's verdict stays strict.)
 (multiple_matches lists, per variable, every column that matched when there
 was more than one — with the chosen one marked "(used)".)
 (mean_power_w is in watts; units are inferred from the power column name.)
@@ -487,6 +489,13 @@ def run_one(path, forced_method=None):
     reliable, reasons = degradation_reliability(
         rd, n_points=_n_daily, has_irradiance=bool(_irr_key),
         duration_years=rec.get("duration_years"), ci_width=_ci_width)
+    # REPORT-ONLY POLICY: missing irradiance alone does not disqualify a rate
+    # here — it is already surfaced as a "not weather-normalized" note above.
+    # Only hard failures (implausible value, scattered YoY, too few points,
+    # short span) count against rate_reliable in these reports. The website's
+    # degradation_reliability verdict stays strict and is NOT affected.
+    reasons = [x for x in reasons if "irradiance" not in x]
+    reliable = len(reasons) == 0
     rec["rate_reliable"] = reliable
     rec["reliability_reasons"] = reasons   # -> unreliable_because in results CSV
     if not reliable:
