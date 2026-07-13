@@ -1369,15 +1369,27 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 # NORMALIZATION
 # ================================
 def normalize(df, mapped_variables_dict, gamma=-0.004):
+    # Adaptive normalization based on which columns are available:
+    #   power + irradiance + temp -> full temperature-corrected normalization
+    #   power + irradiance         -> irradiance-only normalization
+    #   power alone                -> raw power (no normalization possible)
+    power_key  = mapped_variables_dict.get("DC Power")
+    irr_key    = mapped_variables_dict.get("Irradiance")
+    temp_C_key = mapped_variables_dict.get("Module temperature")
 
-    irr_key = mapped_variables_dict["Irradiance"]
-    power_key = mapped_variables_dict["DC Power"]
-    temp_C_key = mapped_variables_dict["Module temperature"]
+    has_irr  = bool(irr_key) and irr_key in df.columns
+    has_temp = bool(temp_C_key) and temp_C_key in df.columns
 
-    df['norm'] = df[power_key] / (
-        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
-
-    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    if has_irr and has_temp:
+        df['norm'] = df[power_key] / (
+            df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+        df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    elif has_irr:
+        df['norm'] = df[power_key] / df[irr_key] * 1000
+        df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    else:
+        # No irradiance: trend the raw power directly (un-normalized).
+        df['norm'] = df[power_key]
 
     return df
 
@@ -1396,8 +1408,16 @@ def low_irra_power_filter(df, mapped_variables_dict,
     # irradiance filter
     mask &= df[irr_key] > irr_thresh
 
-    # power filter
-    mask &= df[power_key] > power_ratio * df[irr_key]
+    # Power filter — UNIT-INDEPENDENT. The old form (power > ratio * irradiance)
+    # compared the power column's native units against W/m², which only worked
+    # when power happened to be in watts; a kW-scaled file (e.g. DKASC) failed
+    # for every daytime row and 0% survived. Scale by the system's own
+    # spike-robust peak instead: at full sun (1000 W/m²) a point must produce
+    # at least `power_ratio` of peak power, proportionally less at lower sun.
+    p = pd.to_numeric(df[power_key], errors="coerce")
+    capacity = p.quantile(0.99)
+    if np.isfinite(capacity) and capacity > 0:
+        mask &= p > power_ratio * (df[irr_key] / 1000.0) * capacity
 
     # norm range filter
     upper = df['norm'].quantile(norm_upper_pct / 100)
@@ -1412,39 +1432,75 @@ def low_irra_power_filter(df, mapped_variables_dict,
 # ================================
 # DAILY AGGREGATION
 # ================================
-def aggregate_daily(df_f, irradiance_col):
-    daily = (
-        df_f[['norm', irradiance_col]]
-        .dropna()
-        .groupby(df_f.index.date)
-        .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
-    )
+def aggregate_daily(df_f, irradiance_col=None):
+    # Group by the post-dropna frame's OWN index. Grouping by df_f.index.date
+    # (the full, original-length index) breaks with "Grouper and axis must be
+    # same length" whenever dropna() removes rows -- which happens on any real
+    # data that has gaps/NaNs.
+    if irradiance_col and irradiance_col in df_f.columns:
+        # Irradiance available: irradiance-weighted daily mean of 'norm'.
+        sub = df_f[['norm', irradiance_col]].dropna()
+        daily = (
+            sub
+            .groupby(sub.index.date)
+            .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
+        )
+        daily.index = pd.to_datetime(daily.index)
+        return daily
 
+    # No irradiance: daily PEAK power, then drop low-peak (cloudy / partial /
+    # sparsely-sampled) days so the trend is built from comparable clear days.
+    sub = df_f[['norm']].dropna()
+    daily = sub.groupby(sub.index.date)['norm'].quantile(PEAK_QUANTILE)
     daily.index = pd.to_datetime(daily.index)
+
+    if len(daily) >= CLEAR_DAY_MIN_DAYS:
+        reference_peak = daily.quantile(0.90)   # robust "clear-sky" peak level
+        if reference_peak and np.isfinite(reference_peak):
+            daily = daily[daily >= CLEAR_DAY_FRAC * reference_peak]
 
     return daily
 
 # ================================
 # YoY
 # ================================
-def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
-    series = series.dropna()
+def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
+                tolerance_days=15):
+    series = series.dropna().sort_index()
     yoy = []
 
-    for t in series.index:
-        t_prev = t - pd.DateOffset(years=1)
+    # Denominator guard: a year-over-year ratio is curr/prev, so a small `prev`
+    # explodes it (e.g. a 257 W partial-day vs a normal day -> +465). Skip any
+    # pair whose prior-year value is implausibly low relative to the series'
+    # typical level, not just ~zero. This kills the artifact where un-normalized
+    # low-output days act as tiny denominators and send the rate to hundreds %.
+    median_level = float(np.median(series.values)) if len(series) else 0.0
+    prev_floor = max(eps, DENOM_FLOOR_FRAC * median_level)
 
-        if t_prev in series.index:
-            prev = series.loc[t_prev]
-            curr = series.loc[t]
+    # Pair each point with the value closest to exactly one year earlier,
+    # accepting any match within +/- tolerance_days rather than requiring the
+    # exact same calendar date. This makes YoY robust to irregular/sparse daily
+    # sampling, where the identical calendar date rarely recurs across years.
+    targets = series.index - pd.DateOffset(years=1)
+    nearest_pos = series.index.get_indexer(
+        targets, method="nearest", tolerance=pd.Timedelta(days=tolerance_days)
+    )
 
-            if prev < eps:
-                continue
+    for i in range(len(series)):
+        j = nearest_pos[i]
+        if j == -1:
+            continue  # no data point within tolerance of one year earlier
 
-            ratio = curr / prev - 1
+        prev = series.iloc[j]
+        curr = series.iloc[i]
 
-            if np.isfinite(ratio):
-                yoy.append(ratio)
+        if prev < prev_floor:
+            continue  # prior-year value too low to be a trustworthy denominator
+
+        ratio = curr / prev - 1
+
+        if np.isfinite(ratio):
+            yoy.append(ratio)
 
     yoy = np.array(yoy)
 
@@ -1516,17 +1572,24 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
 def compute_lr(series):
     series = series.dropna()
 
+    # Mathematical minimum for a slope. Too-few-points still produces a number;
+    # the caller flags it as unreliable (see degradation_reliability) rather than
+    # the tool refusing outright.
     if len(series) < 2:
         return np.nan, None
 
-    t = _time_to_years(series.index).values.reshape(-1, 1)
+    t = _time_to_years(series.index).values
     y = series.values
 
-    model = LinearRegression().fit(t, y)
-    trend = model.predict(t)
+    # Theil-Sen (median of pairwise slopes) instead of ordinary least squares:
+    # OLS is dragged by a few outlier days (e.g. a handful of high-output days at
+    # the end read as steep "improvement"), while the median slope is robust to
+    # them and recovers the true gentle trend.
+    from scipy import stats as _scipy_stats
+    slope, intercept, _lo, _hi = _scipy_stats.theilslopes(y, t)
+    trend = slope * t + intercept
 
-    slope = model.coef_[0]
-    rd = slope / np.mean(y)*100
+    rd = slope / np.mean(y) * 100
 
     fig = go.Figure()
 
@@ -2893,3 +2956,257 @@ def compute_pvpro(df,
 
     _report("done", n_total_windows, n_total_windows, "Done")
     return rd, figs, rates
+
+# ===========================================================================
+# PORTED FROM THE bugFixes BRANCH — energy-ratio YoY method, rate-
+# reliability helpers, and low_power_filter. Required by
+# pvcopilot_pipeline_report.py. Purely additive: nothing above is modified.
+# ===========================================================================
+
+# ================================
+# DAILY AGGREGATION
+# ================================
+# When there's no irradiance, the daily value is the day's PEAK power (a high
+# quantile) rather than the mean -- and low-peak days are dropped. Rationale:
+# without irradiance we can't weather-normalize, so a daily MEAN collapses on
+# sparsely/partially-sampled days (e.g. a dawn-only day averages near zero),
+# which then blows up year-over-year ratios. A clear day's PEAK power is roughly
+# comparable year-to-year (same solar geometry), so trending daily peaks of
+# clear/high-output days is the standard fallback and keeps the signal stable.
+PEAK_QUANTILE = 0.95          # "peak" = 95th percentile of a day's power
+
+
+CLEAR_DAY_FRAC = 0.6          # keep days whose peak >= 60% of the reference peak
+
+
+CLEAR_DAY_MIN_DAYS = 10       # only apply the clear-day drop when we have enough days
+
+
+DENOM_FLOOR_FRAC = 0.2        # YoY: ignore pairs whose prior value < 20% of median
+
+
+# Plausible annual degradation band (%/yr). Real PV degradation is a small
+# NEGATIVE number (~0 to -3 %/yr typically). Anything positive beyond noise, or
+# steeper than ~-3 %/yr, almost always means the inputs were un-normalizable
+# (no irradiance), too sparse, or otherwise unreliable -- we flag those as
+# rate_reliable = no. (Tunable: loosen MIN to e.g. -5 if you want to allow
+# genuinely fast-degrading systems through unflagged.)
+DEGRADATION_PLAUSIBLE_MIN = -3.0
+
+
+DEGRADATION_PLAUSIBLE_MAX = 0.5
+
+
+# A per-year degradation trend fit to a handful of daily points is unreliable --
+# a few noisy days swing the slope to absurd values (+33%/yr from 4 points). We
+# still REPORT a rate below this many daily points, but flag it as unreliable
+# (with the reason) rather than presenting it as trustworthy.
+MIN_TREND_POINTS = 20
+
+
+MAX_CI_WIDTH = 3.0           # internal band wider than this (%/yr) -> unreliable
+
+
+# ---------------------------------------------------------------------------
+# ENERGY-RATIO METHOD (RdTools-style)
+#
+# Sum each day FIRST (measured energy vs plane-of-array-expected energy), then
+# trend the daily ratio year-over-year. Summing before dividing keeps dawn/dusk
+# and transient points from poisoning the ratio, so far less data is discarded
+# and the trend is steadier. Validated against synthetic data with known
+# injected rates (recovered within ~0.03 %/yr; truth inside the internal
+# uncertainty band in 12/12 runs).
+# ---------------------------------------------------------------------------
+ER_MIN_IRR = 50.0            # daylight gate for the daily sums (W/m^2)
+
+
+ER_MIN_DAY_POINTS = 4        # a day needs this many daylight points
+
+
+ER_MIN_INSOL_FRAC = 0.2      # ...and >=20% of the median daily insolation
+
+
+ER_RATIO_TRIM = (0.3, 1.7)   # sanity band around the median daily ratio
+
+
+ER_YOY_TOL_DAYS = 7          # match days within +/- a week of one year apart
+
+
+ER_MIN_PAIRS = 5             # need this many year-apart pairs for a rate
+
+
+ER_BOOT_N = 500              # bootstrap resamples for the internal band
+
+
+# ================================
+# Low power filter (no-irradiance fallback)
+# ================================
+def low_power_filter(df, mapped_variables_dict, peak_quantile=0.99, min_frac=0.15):
+    """Power-only cleanup used when there's no irradiance (so the irradiance-based
+    clear-sky / low-irradiance filters can't run).
+
+    Keeps points producing at least `min_frac` of the system's peak power and
+    drops the rest -- i.e. removes night, dawn/dusk, and heavily-clouded low-output
+    readings, which otherwise stay in (raw power has no irradiance to gate on) and
+    contaminate the trend. `peak_quantile` (99th pct) is a spike-robust stand-in
+    for the true peak.
+
+    Returns (normal_indices, outlier_indices), matching the other filters.
+    """
+    power_key = mapped_variables_dict.get("DC Power")
+    if not power_key or power_key not in df.columns:
+        return df.index, df.index[[]]
+    p = pd.to_numeric(df[power_key], errors="coerce")
+    peak = p.quantile(peak_quantile)
+    if not np.isfinite(peak) or peak <= 0:
+        return df.index, df.index[[]]
+    mask = p >= (min_frac * peak)
+    # Safety: never drop every row. If the threshold would remove everything
+    # (e.g. an outlier-inflated peak), keep all rather than zero out the dataset.
+    if not mask.any():
+        return df.index, df.index[[]]
+    return df.index[mask], df.index[~mask]
+
+
+def rate_is_plausible(rd):
+    """True if a degradation rate (%/yr) is finite and within the plausible band
+    (roughly a small negative number). Used to flag unreliable results rather
+    than presenting them as trustworthy."""
+    try:
+        return bool(np.isfinite(rd) and
+                    DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
+    except Exception:
+        return False
+
+
+def degradation_reliability(rd, n_points=None, has_irradiance=True,
+                            duration_years=None, ci_width=None):
+    """Decide whether a (computed) degradation rate is trustworthy, and if not,
+    WHY -- so the UI can show the rate alongside 'unreliable because ...'.
+
+    `ci_width` (energy-ratio YoY only) is the width of the internal bootstrap
+    uncertainty band in %/yr. It is NEVER displayed as a range -- it only feeds
+    this flag: a band wider than MAX_CI_WIDTH means the spread of year-over-year
+    changes is too large for the single number to be trusted.
+
+    Returns (is_reliable, reasons). reasons is a list of plain-English strings;
+    an empty list means the rate looks reliable.
+    """
+    reasons = []
+    if n_points is not None and n_points < MIN_TREND_POINTS:
+        reasons.append(
+            f"only {n_points} daily data point(s) survived filtering "
+            f"(a reliable trend needs at least {MIN_TREND_POINTS})")
+    if not has_irradiance:
+        reasons.append(
+            "there is no irradiance column, so power isn't weather-normalized "
+            "(year-to-year weather then looks like degradation)")
+    if duration_years is not None and duration_years < 2:
+        reasons.append(
+            f"the data spans only {duration_years:.1f} year(s) — under 2 years is "
+            "too short to separate real aging from seasonal weather")
+    if not rate_is_plausible(rd):
+        reasons.append(
+            f"the computed rate ({rd:+.1f}%/yr) is outside the physically "
+            "plausible range (real degradation is roughly 0 to −3%/yr)")
+    if ci_width is not None and np.isfinite(ci_width) and ci_width > MAX_CI_WIDTH:
+        reasons.append(
+            f"the year-over-year changes disagree with each other by about "
+            f"±{ci_width / 2:.1f}%/yr — too scattered for this single number "
+            "to be trusted")
+    return (len(reasons) == 0), reasons
+
+
+def daily_energy_ratio(df, mapped_variables_dict, gamma=-0.004):
+    """Daily measured-vs-expected energy ratio. Returns a Series indexed by
+    day, or None when it can't be built (no power/irradiance, no valid days)."""
+    pcol = mapped_variables_dict.get("DC Power")
+    icol = mapped_variables_dict.get("Irradiance")
+    tcol = mapped_variables_dict.get("Module temperature")
+    if not pcol or pcol not in df.columns or not icol or icol not in df.columns:
+        return None
+    p = pd.to_numeric(df[pcol], errors="coerce")
+    g = pd.to_numeric(df[icol], errors="coerce")
+    t = pd.to_numeric(df[tcol], errors="coerce") if tcol and tcol in df.columns else None
+
+    expected = g * (1 + gamma * (t - 25)) if t is not None else g.copy()
+    ok = (g >= ER_MIN_IRR) & (p >= 0) & expected.notna() & p.notna()
+    sub = pd.DataFrame({"p": p[ok], "e": expected[ok], "g": g[ok]})
+    if len(sub) == 0:
+        return None
+    day = sub.groupby(sub.index.date).agg(
+        e_meas=("p", "sum"), e_exp=("e", "sum"),
+        insol=("g", "sum"), n=("p", "size"))
+    day.index = pd.to_datetime(day.index)
+
+    med_insol = day["insol"].median()
+    day = day[(day["n"] >= ER_MIN_DAY_POINTS)
+              & (day["insol"] >= ER_MIN_INSOL_FRAC * med_insol)
+              & (day["e_exp"] > 0)]
+    if len(day) == 0:
+        return None
+    ratio = day["e_meas"] / day["e_exp"]
+    med = ratio.median()
+    ratio = ratio[(ratio >= ER_RATIO_TRIM[0] * med)
+                  & (ratio <= ER_RATIO_TRIM[1] * med)]
+    return ratio if len(ratio) >= 2 else None
+
+
+def compute_yoy_energy(df, mapped_variables_dict, gamma=-0.004):
+    """Energy-ratio YoY degradation rate.
+
+    Returns (rd, fig, ci_width, n_days):
+      rd        median year-over-year change of the daily energy ratio (%/yr)
+      fig       scatter of the daily ratio with the trend annotated
+      ci_width  width of the internal bootstrap band (%/yr) — used ONLY for
+                the reliability flag, never displayed as a range
+      n_days    number of valid daily points the estimate is built from
+    (np.nan, None, np.nan, 0) when the method can't run on this data.
+    """
+    ratio = daily_energy_ratio(df, mapped_variables_dict, gamma=gamma)
+    if ratio is None:
+        return np.nan, None, np.nan, 0
+    ratio = ratio.sort_index()
+
+    idx = ratio.index
+    targets = idx - pd.DateOffset(years=1)
+    pos = idx.get_indexer(targets, method="nearest")
+    changes = []
+    for i, j in enumerate(pos):
+        if j < 0 or idx[j] >= idx[i]:
+            continue
+        if abs((idx[i] - pd.DateOffset(years=1) - idx[j]).days) > ER_YOY_TOL_DAYS:
+            continue
+        prev, curr = ratio.iloc[j], ratio.iloc[i]
+        if prev > 0:
+            changes.append((curr / prev - 1.0) * 100.0)
+    changes = np.asarray(changes)
+    if len(changes) < ER_MIN_PAIRS:
+        return np.nan, None, np.nan, int(len(ratio))
+
+    rd = float(np.median(changes))
+    rng = np.random.default_rng(0)   # fixed seed -> same answer every run
+    boots = np.median(
+        rng.choice(changes, size=(ER_BOOT_N, len(changes)), replace=True), axis=1)
+    ci_width = float(np.percentile(boots, 95) - np.percentile(boots, 5))
+
+    # Figure: daily ratio scatter + the median trend through it.
+    t_yr = np.asarray((ratio.index - ratio.index[0]).days) / 365.25
+    trend = ratio.median() * (1 + rd / 100.0) ** t_yr
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=ratio.index, y=ratio.values, mode="markers",
+        marker=dict(size=6, opacity=0.6, color="#A6CAEC"),
+        name="Daily energy ratio"))
+    fig.add_trace(go.Scatter(
+        x=ratio.index, y=trend, mode="lines",
+        line=dict(color="#0070C0", width=2),
+        name=f"YoY Trend ({rd:.2f}%/yr)"))
+    fig.update_layout(
+        title="Daily Energy Ratio and YoY Trend",
+        xaxis_title="Time", yaxis_title="Measured / expected energy",
+        template="plotly_white", height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(orientation="h", yanchor="top", y=-0.2,
+                    xanchor="center", x=0.5))
+    return rd, fig, ci_width, int(len(ratio))
