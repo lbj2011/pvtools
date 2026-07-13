@@ -264,6 +264,51 @@ input[type="checkbox"] {
     margin-top: 12px;
 }
 
+/* Data-scope toggle (Filtered data / All data) beside a section title */
+.scope-radio {
+    display: inline-flex;
+    gap: 6px;
+    background: #f3f4f6;
+    padding: 4px;
+    border-radius: 999px;
+}
+.scope-radio label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: #4b5563;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.scope-radio label:hover {
+    color: #1f2937;
+}
+.scope-radio input {
+    accent-color: #0070C0;
+    cursor: pointer;
+}
+
+/* Smooth reveal when Advanced Filters is expanded. (Native <details> can't
+   animate the close, so collapsing is instant.) */
+details[open] .advanced-panel {
+    animation: advPanelReveal 0.30s ease;
+}
+@keyframes advPanelReveal {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Marker rotates as the section opens/closes */
+.advanced-summary {
+    transition: color 0.15s ease;
+}
+details[open] > .advanced-summary {
+    color: #4b5563;
+}
+
 
 /* ================= CHAT UI ================= */
 
@@ -481,21 +526,51 @@ input[type="checkbox"] {
     background-color: #eaf3fb;
 }
 /* ================= AI RUN / LOADING STATE ================= */
-/* Shown (via dcc.Loading custom_spinner) while the LLM call runs.
-   The Loading component dims/replaces the wrapped area; this centres a
-   spinning circle with the timing note underneath it. */
-.ai-run-overlay {
+/* Full-cover frosted overlay shown while the LLM call runs. Sits on top of
+   the interactive area (its wrapper is position:relative) so it can be shown
+   the instant a query is sent and cleared instantly by the Stop button. */
+.ai-loading-overlay {
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 20px 28px;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.65);
+    background: rgba(255, 255, 255, 0.55);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
-    box-shadow: 0 8px 26px rgba(120, 140, 150, 0.22);
+    border-radius: 12px;
+    z-index: 20;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+/* Stop button, pinned top-right of the overlay */
+.ai-stop-btn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    border: none;
+    background: rgba(255, 255, 255, 0.9);
+    color: #6b7280;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+    transition: all 0.15s ease;
+}
+.ai-stop-btn:hover {
+    background: #f3f4f6;
+    color: #4b5563;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+.ai-stop-btn:active {
+    transform: translateY(0);
 }
 
 .ai-run-spinner {
@@ -516,4 +591,56 @@ input[type="checkbox"] {
     font-size: 14px;
     font-weight: 500;
     letter-spacing: 0.2px;
+}
+
+/* ================= SHAP FACTOR SELECTOR PILLS ================= */
+.shap-pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+.shap-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 13px;
+    border-radius: 999px;
+    background: #e8f1fb;
+    color: #5b6b7a;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    outline: none;
+    transition: all 0.15s ease;
+}
+.shap-pill:hover {
+    background: #d7e8f8;
+    color: #1f2937;
+}
+.shap-pill-active,
+.shap-pill.shap-pill-active {
+    background: #0868ac !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(8, 104, 172, 0.28);
+}
+.shap-pill-active:hover {
+    background: #075a94 !important;
+    color: #ffffff !important;
+}
+
+/* ranking bars: hand cursor + hover highlight so they read as clickable */
+#shap-ranking-graph,
+#shap-ranking-graph .draglayer,
+#shap-ranking-graph .barlayer .point path {
+    cursor: pointer;
+}
+#shap-ranking-graph .barlayer .point path {
+    transition: opacity 0.12s ease;
+}
+#shap-ranking-graph .barlayer .point path:hover {
+    opacity: 0.72;
 }
