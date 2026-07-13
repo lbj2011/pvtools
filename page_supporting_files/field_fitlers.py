@@ -230,15 +230,9 @@ def build_filters(types, advanced_extra=None):
                     ),
 
                 ],
-                style={"flex": "0 0 auto", "order": 2, "marginLeft": "auto"},
+                style={"flex": "0 0 auto"},
 
             ),
-
-                    # left-hand slot (e.g. the AI question button)
-                    html.Div(
-                        advanced_extra if advanced_extra is not None else [],
-                        style={"flex": "0 0 auto", "order": 1},
-                    ),
 
                 ],
                 style={

@@ -263,132 +263,139 @@ layout = html.Div([
 
             dcc.Store(id="chat-filtered-data"),
 
-            # Structured filters; the AI question button rides on the
-            # Advanced Filters row (far right) to save vertical space.
+            # Structured filters (the box). The AI question button now
+            # lives OUTSIDE this box, just below it.
             html.Div(
             [
-                build_filters(
-                    types,
-                    advanced_extra=html.Button(
-                        [
-                            html.Span("Ask Questions to Filter the Data"),
-                            dbc.Badge("Beta", color="#00B0F0",
-                                      className="ms-2",
-                                      style={"verticalAlign": "middle"}),
-                            html.Span(id="ai-toggle-caret", children=" ▸",
-                                      style={"marginLeft": "8px",
-                                             "fontSize": "13px"}),
-                        ],
-                        id="ai-toggle-btn",
-                        n_clicks=0,
-                        className="ai-toggle-btn",
-                    ),
-                )
+                build_filters(types)
             ]),
+
+            # ── AI ask button — sits outside the filter box ──
+            html.Div(
+                html.Button(
+                    [
+                        html.Span("Ask Questions to Filter the Data"),
+                        dbc.Badge("Beta", color="#00B0F0",
+                                  className="ms-2",
+                                  style={"verticalAlign": "middle"}),
+                        html.Span(id="ai-toggle-caret", children=" ▸",
+                                  style={"marginLeft": "8px",
+                                         "fontSize": "13px"}),
+                    ],
+                    id="ai-toggle-btn",
+                    n_clicks=0,
+                    className="ai-toggle-btn",
+                ),
+                style={"marginTop": "14px"},
+            ),
 
             # ── Collapsible AI panel (full-width, below the filter card) ──
             dbc.Collapse(
                 html.Div(
                 [
-                    html.Div(
-                        html.Span(
-                            "(⏱ May take 5–20 seconds)",
-                            style={
-                                "color": "#A6A6A6",
-                                "fontSize": "13px",
-                                "fontWeight": "400",
-                            },
-                        ),
-                        style={"marginBottom": "10px"},
-                    ),
-
-                    # INPUT ROW
-                    html.Div(
-                        [
-                            dcc.Input(
-                                id="chat-input",
-                                type="text",
-                                placeholder="Ask a question about the PV degradation dataset...",
-                                className="chat-input-style",
-                            ),
-
-                            html.Button(
-                                "Send",
-                                id="chat-submit",
-                                n_clicks=0,
-                                disabled=True,
-                                className="send-button",
-                            ),
-
-                            html.Button(
-                                "Reset",
-                                id="chat-reset",
-                                n_clicks=0,
-                                className="reset-button"
-                            ),
-                        ],
-                        style={
-                            "display": "flex",
-                            "alignItems": "center",
-                            "marginBottom": "16px",
+                    # INPUT + EXAMPLES + RESPONSE wrapped in one Loading. While the
+                    # LLM call runs the content stays visible but faded/blurred, and
+                    # a frosted spinner block (circle + timing note) floats on top.
+                    dcc.Loading(
+                        overlay_style={
+                            "visibility": "visible",
+                            "opacity": 0.4,
+                            "filter": "blur(1px)",
+                            "pointerEvents": "none",
                         },
-                    ),
-
-                    # Example questions
-                    html.Div(
+                        custom_spinner=html.Div(
+                            [
+                                html.Div(className="ai-run-spinner"),
+                                html.Div("⏱ May take 5–20 seconds",
+                                         className="ai-run-msg"),
+                            ],
+                            className="ai-run-overlay",
+                        ),
+                        children=html.Div(
                         [
-                            html.Span(
-                                "Examples question:",
+                            # INPUT ROW (Send / Reset stay on the input's line)
+                            html.Div(
+                                [
+                                    dcc.Input(
+                                        id="chat-input",
+                                        type="text",
+                                        placeholder="Ask a question about the PV degradation dataset...",
+                                        className="chat-input-style",
+                                    ),
+
+                                    html.Button(
+                                        "Send",
+                                        id="chat-submit",
+                                        n_clicks=0,
+                                        disabled=True,
+                                        className="send-button",
+                                    ),
+
+                                    html.Button(
+                                        "Reset",
+                                        id="chat-reset",
+                                        n_clicks=0,
+                                        className="reset-button"
+                                    ),
+                                ],
                                 style={
-                                    "fontSize": "13px",
-                                    "color": "#666",
-                                    "alignSelf": "center",
-                                    "marginRight": "4px",
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "marginBottom": "16px",
                                 },
                             ),
 
-                            html.Button(
-                                "Show studies with <-5% degradation",
-                                id="q1",
-                                n_clicks=0,
-                                className="example-btn",
-                            ),
-                            html.Button(
-                                "Show cases at offshore area",
-                                id="q2",
-                                n_clicks=0,
-                                className="example-btn",
-                            ),
-                            html.Button(
-                                "Tell me studies in Asia",
-                                id="q3",
-                                n_clicks=0,
-                                className="example-btn",
-                            ),
-                        ],
-                        style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
-                    ),
-                    html.P(''),
+                            # Example questions
+                            html.Div(
+                                [
+                                    html.Span(
+                                        "Examples question:",
+                                        style={
+                                            "fontSize": "13px",
+                                            "color": "#666",
+                                            "alignSelf": "center",
+                                            "marginRight": "4px",
+                                        },
+                                    ),
 
-                    # RESPONSE TEXT
-                    dcc.Loading(
-                        type="circle",
-                        children=html.Div(
-                            [
-                                html.Div(
-                                    [
-                                        html.Div(
-                                            [
-                                                html.Div(id="response-text")
-                                            ],
-                                            className="response-container"
-                                        ),
-                                        html.Div(id="filtered-table"),
-                                    ],
-                                    id="response-panel",
-                                    style={"display": "none"}   # hidden at start
-                                )
-                            ]
+                                    html.Button(
+                                        "Show studies with <-5% degradation",
+                                        id="q1",
+                                        n_clicks=0,
+                                        className="example-btn",
+                                    ),
+                                    html.Button(
+                                        "Show cases at offshore area",
+                                        id="q2",
+                                        n_clicks=0,
+                                        className="example-btn",
+                                    ),
+                                    html.Button(
+                                        "Tell me studies in Asia",
+                                        id="q3",
+                                        n_clicks=0,
+                                        className="example-btn",
+                                    ),
+                                ],
+                                style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
+                            ),
+                            html.P(''),
+
+                            # RESPONSE
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.Div(id="response-text")
+                                        ],
+                                        className="response-container"
+                                    ),
+                                    html.Div(id="filtered-table"),
+                                ],
+                                id="response-panel",
+                                style={"display": "none"}   # hidden at start
+                            ),
+                        ]
                         ),
                     ),
                     html.P(''),
@@ -417,8 +424,9 @@ layout = html.Div([
                             },
                         ),
                     ],
+                    id="llm-reasoning-details",
                     open=False,  # folded by default
-                    style={"marginBottom": "16px"},
+                    style={"marginBottom": "16px", "display": "none"},  # hidden until analysis runs
                 ),
 
                 ],
@@ -432,7 +440,7 @@ layout = html.Div([
                 is_open=False,
             ),
 
-        ]),  # end CardBody
+        ], style={"padding": "0"}),  # end CardBody
     ], style={"border": "none", "boxShadow": "none",
               "backgroundColor": "transparent"}),
 
@@ -488,7 +496,7 @@ layout = html.Div([
             "width": "100vw",
             "marginLeft": "calc(-50vw + 50%)",
             "marginTop": "16px",
-            "marginBottom": "8px",
+            "marginBottom": "48px",
         },
     ),
 
@@ -752,6 +760,7 @@ def toggle_send_button(value, n_submit):
     Output("response-panel", "style"),
     Output("chat-filtered-data", "data"),
     Output("llm-result", "children"),   # ← ADD THIS
+    Output("llm-reasoning-details", "style"),
     Input("chat-submit", "n_clicks"),
     Input("chat-reset", "n_clicks"),
     Input("chat-input", "n_submit"),   # ← ADD THIS
@@ -774,13 +783,17 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
         "border": "1px solid #D1E7F6",
     }
 
+    # "Show LLM reasoning / filter result" — only visible once an analysis runs
+    details_hidden = {"marginBottom": "16px", "display": "none"}
+    details_visible = {"marginBottom": "16px", "display": "block"}
+
     if trigger == "chat-reset":
-        return "", "", "", "Send", True, hidden, None, ""
+        return "", "", "", "Send", True, hidden, None, "", details_hidden
 
     if trigger in ["chat-submit", "chat-input"]:
 
         if not question:
-            return "", "", "", "Send", True, hidden, None, ""
+            return "", "", "", "Send", True, hidden, None, "", details_hidden
 
         result = get_filter_from_llm(question)
         msg_text = result.get("reason", "")
@@ -793,7 +806,7 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
         llm_debug = json.dumps(result, indent=2)
 
         if not result.get("can_be_answered_with_dataframe", False):
-            return message, "", "", "Send", True, visible, None, llm_debug
+            return message, "", "", "Send", True, visible, None, llm_debug, details_visible
 
         df_filtered = apply_filters(df, result.get("filter_tree"))
 
@@ -848,10 +861,11 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
             True,
             visible,
             df_filtered.index.tolist(),
-            llm_debug
+            llm_debug,
+            details_visible,
         )
     
-    return "", "", "", "Send", True, hidden, None, ""
+    return "", "", "", "Send", True, hidden, None, "", details_hidden
 
 
 @app.callback(
@@ -1206,6 +1220,12 @@ def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
     except (TypeError, ValueError):
         cap_kw = "Not reported"
 
+    # publish year is stored as a float (e.g. 2020.0) — show it as an integer
+    try:
+        year_display = str(int(float(sel.get("publish year"))))
+    except (TypeError, ValueError):
+        year_display = "N/A"
+
     children = [
         # close button (matches pathway page)
         html.Button(
@@ -1249,7 +1269,7 @@ def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
                    "background": "rgba(255,255,255,0.55)", "borderRadius": "10px"},
         ),
         # details
-        _detail_row("Year", sel.get("publish year", "N/A")),
+        _detail_row("Year", year_display),
         _detail_row("Type", sel.get("document type", "N/A")),
         _detail_row("Country", sel.get("country", "N/A")),
         _detail_row("Climate zone", sel.get("PV zone", "N/A")),
