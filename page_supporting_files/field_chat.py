@@ -15,6 +15,9 @@ import os
 import openai
 import re
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 cborg_API_KEY = os.getenv("cborg_api_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
