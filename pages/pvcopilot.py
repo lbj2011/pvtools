@@ -17,7 +17,7 @@ import traceback
 from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
 from page_supporting_files.analysis_utils import estimate_pvpro_params
-from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter, stale_data_filter, clipping_filter, detect_and_fix_time_shifts
 from page_supporting_files.diagnostic_prompts import DIAGNOSTIC_SYSTEM_PROMPT, DIAGNOSTIC_SYSTEM_PROMPT_PVPRO
 import base64
 import os
@@ -1041,23 +1041,37 @@ def filter_explanations_block():
 
             html.Details([
                 html.Summary(html.B("Basic value filter (always applied)"), style=_exp_summary_style()),
-                html.Div(
+                html.Div([
                     "Applied automatically before all other filters. Removes physically implausible "
                     "sensor readings: irradiance outside [0, 1500] W/m², module temperature outside "
                     "[−40, 100] °C, and DC power below −1 W. Catches sensor faults (e.g. irradiance = "
-                    "34,000 W/m²) that would corrupt normalization and clear-sky scoring.",
-                    style=_exp_inner_style()
-                ),
+                    "34,000 W/m²) that would corrupt normalization and clear-sky scoring. ",
+                    html.B("If a site latitude/longitude is provided"),
+                    ", the irradiance check is additionally tightened with the QCRad (BSRN) "
+                    "physically-possible limits (",
+                    html.A("pvanalytics.quality.irradiance.check_ghi_limits_qcrad",
+                           href="https://pvanalytics.readthedocs.io/en/stable/generated/pvanalytics.quality.irradiance.check_ghi_limits_qcrad.html",
+                           target="_blank", style=_exp_link_style()),
+                    "): the allowed ceiling follows the sun's position — about 2100 W/m² at solar "
+                    "noon but only 100 W/m² at night — so a sensor reading 400 W/m² after sunset "
+                    "fails even though it is inside the fixed range."
+                ], style=_exp_inner_style()),
             ], style={"marginBottom": "6px"}),
 
             html.Details([
                 html.Summary(html.B("Time zone & DST correction"), style=_exp_summary_style()),
-                html.Div(
-                    "Corrects timestamps for local time-zone offsets and Daylight Saving Time (DST) "
-                    "transitions. Ensures the datetime index is monotonic and properly localized before "
-                    "any temporal analysis.",
-                    style=_exp_inner_style()
-                ),
+                html.Div([
+                    "Detects abrupt timestamp shifts — DST jumps, logger clock resets, timezone "
+                    "changes mid-record — directly from the data, using changepoint detection on the "
+                    "daily power-weighted solar-noon proxy (same approach as ",
+                    html.A("pvanalytics.quality.time.shifts_ruptures",
+                           href="https://pvanalytics.readthedocs.io/en/stable/generated/pvanalytics.quality.time.shifts_ruptures.html",
+                           target="_blank", style=_exp_link_style()),
+                    ", with a faster cost model). Only segments that break from the record's dominant "
+                    "time regime are shifted back into line; a constant offset across the whole record "
+                    "is treated as the dataset's own convention and left untouched. No site location "
+                    "is required. Timestamps are only relabeled — no data points are dropped."
+                ], style=_exp_inner_style()),
             ], style={"marginBottom": "6px"}),
 
             html.Details([
@@ -1106,6 +1120,40 @@ def filter_explanations_block():
                     "smoothness cannot be reliably estimated from sparse samples, so the filter falls "
                     "back to energy-only mode — retaining days whose seasonally-normalized irradiance "
                     "exceeds the energy threshold."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            # NEW-FILTERS: explanation entries for the two new filters
+            html.Details([
+                html.Summary(html.B("Stale / frozen data filter"), style=_exp_summary_style()),
+                html.Div([
+                    "Flags stretches where a sensor or logger froze — runs of consecutive "
+                    "near-identical readings in irradiance or power (",
+                    html.A("pvanalytics.quality.gaps.stale_values_diff",
+                           href="https://pvanalytics.readthedocs.io/en/stable/generated/pvanalytics.quality.gaps.stale_values_diff.html",
+                           target="_blank", style=_exp_link_style()),
+                    "). Frozen values pass range and IQR checks (they are in-range and not "
+                    "statistical outliers) but corrupt normalization and flatten degradation "
+                    "trends. Runs of exact zeros are never flagged, since nighttime "
+                    "irradiance and power are legitimately constant at 0. The first readings "
+                    "of each run (up to the window length) are kept."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("Inverter clipping filter (off by default)"), style=_exp_summary_style()),
+                html.Div([
+                    "Detects periods where the inverter caps output at its AC limit, using "
+                    "geometric flat-top detection on the power curve's shape (",
+                    html.A("pvanalytics.features.clipping.geometric",
+                           href="https://pvanalytics.readthedocs.io/en/stable/generated/pvanalytics.features.clipping.geometric.html",
+                           target="_blank", style=_exp_link_style()),
+                    ") — no inverter nameplate rating is required. During clipped periods "
+                    "power does not respond to irradiance, which biases normalized power "
+                    "downward on the sunniest days and makes degradation look milder than it "
+                    "is. Off by default because clipped data is real production data — "
+                    "exclude it for module degradation analysis, keep it for energy-delivery "
+                    "questions."
                 ], style=_exp_inner_style()),
             ], style={"marginBottom": "6px"}),
 
@@ -2013,12 +2061,12 @@ shared_upload_header = html.Div(
 # =============================================================================
 # CHAT — AGENT 2 · FILTER
 # =============================================================================
-def filter_row(checkbox_id, label, customize_body=None):
+def filter_row(checkbox_id, label, customize_body=None, default=True):
     parts = [
         html.Div(
             [
                 dbc.Checkbox(
-                    id=checkbox_id, value=True,
+                    id=checkbox_id, value=default,
                     className="me-2 d-inline-block",
                     # Make the filled checkbox NAVY (matches the rest of
                     # the app's accents).  `accent-color` is the modern
@@ -2212,6 +2260,22 @@ clearsky_params = html.Div([
     ]),
 ])
 
+# NEW-FILTERS: parameter panels for the stale-data + clipping filters
+stale_params = html.Div([
+    html.Label("Window (consecutive points)", style=_label_style),
+    html.Div("Runs of ≥ window near-identical nonzero readings are flagged as a frozen "
+             "sensor/logger (e.g. 6 points = 1.5 h of 15-min data). Nighttime zeros are never flagged.",
+             style=_help_style),
+    dcc.Input(id="param-stale-window", type="number", value=6, step=1, min=2, style=_param_input_style),
+])
+
+clipping_params = html.Div([
+    html.Label("Max. normalized slope", style=_label_style),
+    html.Div("Periods where the power curve's shape is flatter than this are treated as "
+             "inverter clipping. Lower = stricter.", style=_help_style),
+    dcc.Input(id="param-clip-slope", type="number", value=0.2, step=0.05, min=0.01, style=_param_input_style),
+])
+
 
 filter_agent_body = html.Div([
     html.Div(
@@ -2234,11 +2298,38 @@ filter_agent_body = html.Div([
             {"label": "", "value": "low-irra-power"},
             {"label": "", "value": "outlier"},
             {"label": "", "value": "clearsky"},
+            {"label": "", "value": "stale"},     # NEW-FILTERS
+            {"label": "", "value": "clipping"},  # NEW-FILTERS
         ],
-        value=["timezone", "low-irra-power", "outlier", "clearsky"],
+        # NEW-FILTERS: "stale" is on by default; "clipping" is opt-in
+        value=["timezone", "low-irra-power", "outlier", "clearsky", "stale"],
         inline=False,
         style={"display": "none"}
     ),
+
+    # NEW-FILTERS (#3 QCRad): optional site location. When both fields are
+    # filled, the always-on basic value filter tightens its irradiance check
+    # with sun-position-aware QCRad limits. Left empty -> fixed range, as before.
+    html.Details([
+        html.Summary("Site location (optional — enables sun-position-aware irradiance limits)", style={
+            "cursor": "pointer", "color": INK_SOFT, "fontSize": "13px",
+            "fontWeight": "600", "fontFamily": "Arial, sans-serif", "marginBottom": "8px",
+        }),
+        html.Div([
+            html.Div([
+                html.Label("Latitude (°)", style=_label_style),
+                dcc.Input(id="param-site-lat", type="number", value=None, min=-90, max=90,
+                          step=0.01, placeholder="e.g. 37.87", style=_param_input_style),
+            ], style={"flex": "1"}),
+            html.Div([
+                html.Label("Longitude (°)", style=_label_style),
+                dcc.Input(id="param-site-lon", type="number", value=None, min=-180, max=180,
+                          step=0.01, placeholder="e.g. -122.27", style=_param_input_style),
+            ], style={"flex": "1"}),
+        ], style={"display": "flex", "gap": "12px", "marginTop": "8px",
+                  "padding": "12px 14px", "background": "#f1f5f9",
+                  "border": f"1px solid {BORDER}", "borderRadius": "12px"}),
+    ], style={"marginBottom": "12px"}),
 
     section_label("Recommended filters"),
     html.Div(
@@ -2247,6 +2338,9 @@ filter_agent_body = html.Div([
             filter_row("cb-low-irra-power", "Low irradiance / power filter", low_irra_params),
             filter_row("cb-outlier",        "Outlier removal (IQR)",          outlier_params),
             filter_row("cb-clearsky",       "Clear-sky filter",               clearsky_params),
+            # NEW-FILTERS: the two rows below are the new checkboxes
+            filter_row("cb-stale",          "Stale / frozen data filter",     stale_params),
+            filter_row("cb-clipping",       "Inverter clipping filter",       clipping_params, default=False),
         ],
         style={
             "padding": "16px 18px",
@@ -3994,12 +4088,14 @@ layout = dmc.MantineProvider(_page_body)
 # =============================================================================
 app.clientside_callback(
     """
-    function(tz, lip, out, cs) {
+    function(tz, lip, out, cs, st, cp) {
         var vals = [];
         if (tz)  vals.push("timezone");
         if (lip) vals.push("low-irra-power");
         if (out) vals.push("outlier");
         if (cs)  vals.push("clearsky");
+        if (st)  vals.push("stale");     // NEW-FILTERS
+        if (cp)  vals.push("clipping");  // NEW-FILTERS
         return vals;
     }
     """,
@@ -4008,6 +4104,8 @@ app.clientside_callback(
     Input("cb-low-irra-power", "value"),
     Input("cb-outlier", "value"),
     Input("cb-clearsky", "value"),
+    Input("cb-stale", "value"),     # NEW-FILTERS
+    Input("cb-clipping", "value"),  # NEW-FILTERS
 )
 
 
@@ -4177,13 +4275,17 @@ def show_analyze_filename(filename):
     State("param-iqr-multiplier","value"),
     State("param-cs-smooth",     "value"),
     State("param-cs-energy",     "value"),
+    State("param-stale-window",  "value"),   # NEW-FILTERS
+    State("param-clip-slope",    "value"),   # NEW-FILTERS
+    State("param-site-lat",      "value"),   # NEW-FILTERS (#3 QCRad)
+    State("param-site-lon",      "value"),   # NEW-FILTERS (#3 QCRad)
 
     prevent_initial_call=True
 )
 def run_filter(filter_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
         gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_smooth, cs_energy):
+        cs_smooth, cs_energy, stale_window, clip_slope, site_lat, site_lon):
 
     trigger = ctx.triggered_id
 
@@ -4196,9 +4298,21 @@ def run_filter(filter_clicks, upload_clicks,
         return ["", None]
 
     df = _df_from_store(df_json)
-    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
+
+    # Power is the minimum requirement. parse_contents already computed
+    # power = V * I when only voltage+current were present, so by here a
+    # missing DC Power means we genuinely cannot analyze.
+    power_key = mapped_variables_dict.get("DC Power") if mapped_variables_dict else None
+    if not power_key or power_key not in df.columns:
+        return [_no_data_alert("Cannot analyze: no DC Power column found, and no Voltage + Current "
+                               "to compute it from. Provide power, or voltage and current."), None]
+
+    # .get, not [] — a missing key would raise KeyError inside the callback and
+    # leave the Apply Filters spinner loading forever instead of showing an alert.
+    irra_key = mapped_variables_dict.get("Irradiance") if mapped_variables_dict else None
     if irra_key is None or irra_key not in df.columns:
-        return ["❌ Irradiance column not found.", None]
+        return [_no_data_alert("Cannot filter: no irradiance column was identified in this dataset. "
+                               "Check the variable mapping in Step 1."), None]
 
     # Brief pause so Step 2 (Filter) reads as actively working.
     if trigger == "filter-btn":
@@ -4210,8 +4324,10 @@ def run_filter(filter_clicks, upload_clicks,
     norm_lower     = norm_lower if norm_lower is not None else 0.01
     norm_upper_pct = norm_upper_pct if norm_upper_pct is not None else 99
 
-    # Basic value filter
-    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
+    # Basic value filter. NEW-FILTERS (#3 QCRad): when a site location is
+    # given, the irradiance check also applies sun-position-aware QCRad limits.
+    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict,
+                                               latitude=site_lat, longitude=site_lon)
     df = df.loc[bv_normal].copy()
 
     clearsky_mask = pd.Series(True, index=df.index)
@@ -4223,21 +4339,68 @@ def run_filter(filter_clicks, upload_clicks,
                                                     energy_threshold=cs_energy)
         clearsky_mask = df.index.isin(normal_idx)
 
+    # NEW-FILTERS: stale and clipping masks are computed on the raw signals
+    # here, before normalization and before the timezone correction re-labels
+    # the index.
+    stale_mask = np.ones(len(df), dtype=bool)
+    stale_error = None
+    if "stale" in selected_filters:
+        stale_window = int(stale_window) if stale_window else 6
+        try:
+            normal_idx, outlier_idx = stale_data_filter(df, mapped_variables_dict,
+                                                        window=stale_window)
+            stale_mask = df.index.isin(normal_idx)
+        except Exception as e:
+            stale_error = str(e)
+
+    clipping_mask = np.ones(len(df), dtype=bool)
+    clipping_error = None
+    if "clipping" in selected_filters:
+        clip_slope = clip_slope if clip_slope is not None else 0.2
+        try:
+            normal_idx, outlier_idx = clipping_filter(df, mapped_variables_dict,
+                                                      slope_max=clip_slope)
+            clipping_mask = df.index.isin(normal_idx)
+        except Exception as e:
+            clipping_error = str(e)
+
     df_filtered = normalize(df, mapped_variables_dict, gamma=gamma)
     current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
     filter_stats = []
 
+    # NEW-FILTERS (#5 time-shift): detect DST jumps / clock resets from the
+    # data itself and shift only the breaking segments back into line.
+    # (Replaces the previous blanket UTC -> US/Pacific relabel, which assumed
+    # every upload was UTC and every site was in Pacific time.)
     if "timezone" in selected_filters:
         try:
             df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
-            filter_stats.append("Timezone corrected (UTC → US/Pacific)")
-        except Exception:
-            filter_stats.append("⚠️ Timezone correction failed")
+            _pkey = mapped_variables_dict.get("DC Power")
+            df_filtered, tz_msg = detect_and_fix_time_shifts(df_filtered, _pkey)
+            filter_stats.append(tz_msg)
+        except Exception as e:
+            filter_stats.append(f"⚠️ Time-shift correction failed: {e}")
 
     if "clearsky" in selected_filters:
         removed = (~clearsky_mask).sum()
         filter_stats.append(f"Clear-sky filter removed {removed} points")
+
+    # NEW-FILTERS: apply the masks computed above and report removed counts
+    if "stale" in selected_filters:
+        if stale_error:
+            filter_stats.append(f"⚠️ Stale data filter failed: {stale_error}")
+        else:
+            removed = (~stale_mask & current_mask).sum()
+            current_mask &= stale_mask
+            filter_stats.append(f"Stale data filter removed {removed} points")
+
+    if "clipping" in selected_filters:
+        if clipping_error:
+            filter_stats.append(f"⚠️ Clipping filter failed: {clipping_error}")
+        else:
+            removed = (~clipping_mask & current_mask).sum()
+            current_mask &= clipping_mask
+            filter_stats.append(f"Clipping filter removed {removed} points")
 
     if "low-irra-power" in selected_filters:
         normal_idx, outlier_idx = low_irra_power_filter(
@@ -8025,13 +8188,24 @@ def simple_stage_filter(pdata):
         except Exception:
             clearsky_mask = pd.Series(True, index=df.index)
 
-        df_filtered = normalize(df, mapped, gamma=-0.004)
-        current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
+        # NEW-FILTERS: stale-data filter also runs in the fully-automatic
+        # pipeline (clipping stays opt-in, so it is not applied here)
+        stale_mask = np.ones(len(df), dtype=bool)
+        try:
+            st_normal_idx, _ = stale_data_filter(df, mapped)
+            stale_mask = df.index.isin(st_normal_idx)
+        except Exception:
+            pass
 
+        df_filtered = normalize(df, mapped, gamma=-0.004)
+        current_mask = pd.Series(clearsky_mask & stale_mask, index=df_filtered.index)
+
+        # NEW-FILTERS (#5 time-shift): data-driven shift correction replaces
+        # the previous blanket UTC -> US/Pacific relabel.
         try:
             df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = (df_filtered.index
-                                 .tz_localize("UTC").tz_convert("US/Pacific"))
+            df_filtered, _tz_msg = detect_and_fix_time_shifts(
+                df_filtered, mapped.get("DC Power"))
         except Exception:
             pass
 

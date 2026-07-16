@@ -30,6 +30,8 @@ MarkupSafe>=1.1.1
 nbformat>=4.4.0
 plotly>=6.0.0
 pvlib==0.9.5
+pvanalytics>=0.2.2
+ruptures>=1.1.9
 pyrsistent>=0.14.11
 python-dateutil>=2.8.0
 pytz>=2018.9

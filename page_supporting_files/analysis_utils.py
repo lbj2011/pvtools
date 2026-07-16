@@ -4,8 +4,6 @@ import io
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 import base64, os, json
-import hashlib
-import threading
 import openai
 # import rdtools
 import ast
@@ -45,65 +43,6 @@ client = openai.OpenAI(
 # Model used for column identification. (Kept as a constant so parse_contents
 # and any future caller reference one place.)
 LLM_MODEL = "gpt-5.4-mini"
-
-# ---------------------------------------------------------------------------
-# Deterministic LLM column-identification cache.
-#
-# The LLM (even at temperature=0 / seed=0) does NOT return the same candidate
-# lists every call, so the SAME file could map to different columns run-to-run.
-# The prompt depends only on the column NAMES (not the data), so we hash it and
-# cache the result on disk: the first run for a given column-signature calls the
-# LLM; every run after that reuses it. Delete the cache file to force a refresh.
-# (The mapping is only committed once the caller confirms a good run — see
-# commit_llm_cache — so a wrong mapping from a bad dataset is never locked in.)
-# ---------------------------------------------------------------------------
-_LLM_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               ".llm_id_cache.json")
-_LLM_CACHE_LOCK = threading.Lock()
-_LLM_CACHE = None  # loaded lazily
-
-
-def _llm_cache_load():
-    global _LLM_CACHE
-    if _LLM_CACHE is None:
-        try:
-            with open(_LLM_CACHE_PATH, "r") as f:
-                _LLM_CACHE = json.load(f)
-        except Exception:
-            _LLM_CACHE = {}
-    return _LLM_CACHE
-
-
-def _llm_cache_get(key):
-    with _LLM_CACHE_LOCK:
-        return _llm_cache_load().get(key)
-
-
-def _llm_cache_put(key, value):
-    # Load-modify-write under a lock, with an atomic replace, so parallel
-    # workers can't corrupt the file.
-    with _LLM_CACHE_LOCK:
-        cache = _llm_cache_load()
-        cache[key] = value
-        try:
-            tmp = _LLM_CACHE_PATH + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(cache, f)
-            os.replace(tmp, _LLM_CACHE_PATH)
-        except Exception:
-            pass
-
-
-def commit_llm_cache(df):
-    """Save the column-mapping the LLM produced for this dataframe to the cache,
-    but ONLY when the caller has decided the run was GOOD. parse_contents stashes
-    the freshly-identified mapping as 'pending' on df.attrs; nothing is written
-    until this is called. A no-op on a cache hit or when nothing is pending."""
-    pending = getattr(df, "attrs", {}).get("_llm_cache_pending") if df is not None else None
-    if pending:
-        key, value = pending
-        _llm_cache_put(key, value)
-
 
 def _time_to_years(index):
     return (index - index[0]).days / 365.25
@@ -642,44 +581,33 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
     mapping_notes = []   # AC-fallback / ambiguous-column / time-by-value warnings
 
     try:
-        # Deterministic identification: reuse the cached candidate lists for this
-        # exact column-signature if we've seen it. temperature=0/seed=0 alone is
-        # NOT enough (the gateway doesn't honor the seed), so the cache is what
-        # guarantees the same file maps the same way every run.
+        # Identification calls the LLM every run (no caching). temperature=0 +
+        # seed=0 give best-effort determinism, but the gateway doesn't honor the
+        # seed, so the same file CAN map to different columns run-to-run.
         _p("Identifying data columns…")
-        cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        raw_candidates = _llm_cache_get(cache_key)
-        # Only SAVE the mapping once the dataset is confirmed GOOD downstream.
-        # On a miss we hold the freshly-identified result "pending" and let the
-        # caller commit it (commit_llm_cache) iff the run was clean -- so a wrong
-        # mapping from a failed/iffy dataset never gets locked into the cache.
-        _cache_miss = raw_candidates is None
+        _p("Asking AI to identify your columns…")
+        # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
+        # Some models reject these params -- fall back to a plain call if so.
+        try:
+            response = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                seed=0,
+            )
+        except (openai.BadRequestError, openai.UnprocessableEntityError):
+            # Only retry without the params when the model REJECTS them (a 4xx).
+            # A timeout / connection / rate-limit error must NOT trigger a second
+            # full call here -- that would stack another timeout on top.
+            response = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+            )
 
-        if _cache_miss:
-            _p("Asking AI to identify your columns…")
-            # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
-            # Some models reject these params -- fall back to a plain call if so.
-            try:
-                response = client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    seed=0,
-                )
-            except (openai.BadRequestError, openai.UnprocessableEntityError):
-                # Only retry without the params when the model REJECTS them (a 4xx).
-                # A timeout / connection / rate-limit error must NOT trigger a second
-                # full call here -- that would stack another timeout on top.
-                response = client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-            res_text = response.choices[0].message.content.strip()
-            cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
-            result = json.loads(cleaned)
-            raw_candidates = result.get("candidates", {}) or {}
-            # NOTE: deliberately NOT saved here -- see commit_llm_cache().
+        res_text = response.choices[0].message.content.strip()
+        cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
+        result = json.loads(cleaned)
+        raw_candidates = result.get("candidates", {}) or {}
 
         def _cands(role):
             """Candidate column names the LLM proposed for a role (best-first),
@@ -1082,11 +1010,6 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # so it lands on the final df object the caller receives).
         df.attrs["mapping_alternatives"] = comprehensive_alts
         df.attrs["mapping_quality_tags"] = quality_tags
-
-        # Hold a freshly-identified (not-yet-cached) mapping as "pending" so the
-        # caller can commit it to the cache only if the run is GOOD.
-        df.attrs["_llm_cache_pending"] = (
-            (cache_key, raw_candidates) if _cache_miss else None)
 
         # Build the read-only mapping table for display (canonical roles).
         _p("Building data summary…")

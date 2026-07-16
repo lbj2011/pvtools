@@ -8,8 +8,11 @@ For every dataset in a folder (default ./test_datasets/), this drives the SAME
 pipeline the website runs -- Analyze -> Apply Filters -> Calculate Degradation --
 using the exact functions the app's callbacks call, and records, per dataset:
 
-    GOOD     full pipeline ran and produced a finite degradation rate
-    WARNING  ran, but with caveats (no irradiance, no temperature, YoY disabled)
+    GOOD     full pipeline ran and produced a finite degradation rate with no
+             data-quality caveats (purely informational notes -- e.g. "multiple
+             columns matched, picked one" -- do NOT demote a dataset)
+    WARNING  ran, but with caveats (no irradiance, no temperature, YoY disabled,
+             unreliable rate, sparse/missing/near-constant columns, AC fallback)
     BLOCKED  tool correctly refused (under 1 year of data -- expected behavior)
     ERROR    the tool failed -- file unreadable, column mapping failed, a filter
              or the degradation method crashed, timed out, or returned no rate
@@ -83,10 +86,11 @@ try:
         parse_contents, normalize, low_irra_power_filter, low_power_filter,
         aggregate_daily, compute_yoy, compute_lr, compute_hw, compute_arima,
         compute_csd, rate_is_plausible, degradation_reliability, MIN_TREND_POINTS,
-        commit_llm_cache, compute_yoy_energy,
+        compute_yoy_energy,
     )
     from page_supporting_files.pvcopilot_filter_functions import (
         basic_value_filter, clear_sky_filter, identify_outliers_iqr,
+        detect_and_fix_time_shifts,
     )
 except ModuleNotFoundError as e:
     sys.stderr.write(
@@ -127,6 +131,26 @@ STATUS_COLOR = {
     "ERROR":   "#dc2626",  # red
 }
 STATUS_ORDER = ["GOOD", "WARNING", "BLOCKED", "ERROR"]
+
+# Notes matching these prefixes describe a SUCCESSFUL, unambiguous decision --
+# the mapper narrating its work (picked one of several matching columns,
+# derived DC power as V x I, found the time column by value). They stay in the
+# JSON/notes for transparency but are NOT data-quality caveats, so they do not
+# demote a dataset from GOOD to WARNING. Anything not listed here counts as a
+# caveat by default (fail-safe: an unknown note still demotes).
+INFO_NOTE_PREFIXES = (
+    "Multiple columns matched",
+    "DC Power computed as Voltage × Current",
+    "DC Voltage computed as Power / Current",
+    "DC Current computed as Power / Voltage",
+    "Auto-selected irradiance",
+    "Time column detected from values",
+)
+
+
+def _caveat_notes(notes):
+    """The subset of notes that are genuine data-quality caveats."""
+    return [n for n in notes if not n.startswith(INFO_NOTE_PREFIXES)]
 
 _POOL = ThreadPoolExecutor(max_workers=4)
 
@@ -206,12 +230,14 @@ def _run_filters(df, mapping):
     df_f = normalize(df, mapping, gamma=-0.004)
     current_mask = pd.Series(clearsky_mask, index=df_f.index)
 
+    # NEW-FILTERS (#5 time-shift): data-driven shift correction replaces the
+    # previous blanket UTC -> US/Pacific relabel (same change as the app).
     if "timezone" in DEFAULT_FILTERS:
         try:
             df_f.index = pd.to_datetime(df_f.index)
-            df_f.index = df_f.index.tz_localize("UTC").tz_convert("US/Pacific")
+            df_f, _tz_msg = detect_and_fix_time_shifts(df_f, mapping.get("DC Power"))
         except Exception:
-            pass  # already tz-aware or non-datetime; app tolerates this too
+            pass  # non-datetime index; app tolerates this too
 
     if "low-irra-power" in DEFAULT_FILTERS and has_irr:
         normal_idx, _ = low_irra_power_filter(
@@ -300,7 +326,8 @@ def run_one(path, forced_method=None):
                    reason=f"{type(e).__name__}: {e}\n" + traceback.format_exc(limit=2))
         return rec
     # AC-fallback / computed-power / time-by-value warnings from parse_contents.
-    # Recording them makes such rows WARNING and surfaces the reason in the JSON.
+    # All are recorded in the JSON; only the ones that are genuine data-quality
+    # caveats (see INFO_NOTE_PREFIXES) demote the row to WARNING.
     if mapping_notes:
         rec["notes"].extend(mapping_notes)
 
@@ -509,13 +536,14 @@ def run_one(path, forced_method=None):
             f"Rate {rd:+.2f}%/yr is UNRELIABLE because " + "; ".join(reasons) + ".")
 
     rec["stage"] = "done"
-    rec["status"] = "WARNING" if rec["notes"] else "GOOD"
+    # Only genuine data-quality caveats demote to WARNING. Informational
+    # mapper-narration notes ("multiple columns matched", "power computed as
+    # V x I") used to make GOOD unreachable -- every real SCADA export has at
+    # least one -- so a binary any-note rule marked ALL datasets WARNING.
+    caveats = _caveat_notes(rec["notes"])
+    rec["status"] = "WARNING" if caveats else "GOOD"
     rec["reason"] = (f"{method} degradation rate = {rd:.3f} %/yr"
-                     + (" (with caveats)" if rec["notes"] else ""))
-    # Save the LLM column-mapping to the cache ONLY for a clean GOOD run, so a
-    # wrong/iffy mapping is never locked in (WARNING/BLOCKED/ERROR re-query next run).
-    if rec["status"] == "GOOD":
-        commit_llm_cache(df)
+                     + (" (with caveats)" if caveats else ""))
     return rec
 
 
