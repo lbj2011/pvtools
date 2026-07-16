@@ -17,7 +17,7 @@ import json
 import os
 import openai
 import re
-from page_supporting_files.field_chat import apply_filters, get_filter_from_llm
+from page_supporting_files.field_chat import apply_filters, get_filter_from_llm, get_chat_response
 from dash import callback_context
 from page_supporting_files.field_fitlers import build_filters
 from dash import ctx
@@ -236,6 +236,127 @@ _SHAP_LABEL_TO_VALUE = (
     {s["label"]: s["value"] for s in SHAP_DATA["selector"]} if SHAP_DATA else {}
 )
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Dataset knowledge summary — a compact text digest of the real aggregate
+# statistics, computed once and fed to the chat LLM so it can *answer*
+# analytical questions (not only filter). All numbers come from the data,
+# so the model quotes real figures instead of hallucinating.
+# ─────────────────────────────────────────────────────────────────────
+def build_dataset_knowledge(_df):
+    from collections import Counter
+    lines = []
+    n = len(_df)
+    lines.append(f"Total studies (records): {n}")
+
+    if "rate" in _df.columns:
+        r = pd.to_numeric(_df["rate"], errors="coerce").dropna()
+        if len(r):
+            neg = (r < 0).mean() * 100
+            lines.append(
+                f"Degradation rate (%/year): mean {r.mean():.2f}, median {r.median():.2f}, "
+                f"std {r.std():.2f}, min {r.min():.2f}, max {r.max():.2f}. "
+                f"{neg:.0f}% of records are negative (power loss). More negative = faster degradation.")
+    if "duration" in _df.columns:
+        d = pd.to_numeric(_df["duration"], errors="coerce").dropna()
+        if len(d):
+            lines.append(f"Study duration (years): mean {d.mean():.1f}, median {d.median():.1f}, "
+                         f"range {d.min():.0f}-{d.max():.0f}.")
+    if "publish year" in _df.columns:
+        y = pd.to_numeric(_df["publish year"], errors="coerce").dropna()
+        if len(y):
+            lines.append(f"Publication years: {int(y.min())} to {int(y.max())}.")
+
+    def cat_block(col, title, exclude=None):
+        if col not in _df.columns:
+            return
+        exclude = {e.lower() for e in (exclude or [])}
+        sub = _df[[col, "rate"]].copy()
+        sub["rate"] = pd.to_numeric(sub["rate"], errors="coerce")
+        sub = sub.dropna(subset=[col])
+        if exclude:
+            sub = sub[~sub[col].astype(str).str.strip().str.lower().isin(exclude)]
+        g = sub.groupby(col)["rate"].agg(["count", "mean", "median"])
+        g = g[g["count"] >= 3].sort_values("median")
+        if len(g) == 0:
+            return
+        lines.append(f"\n{title} — degradation rate by category (association, not causal):")
+        for idx, row in g.iterrows():
+            lines.append(f"  - {idx}: n={int(row['count'])}, mean {row['mean']:.2f}, "
+                         f"median {row['median']:.2f} %/yr")
+
+    # "other"/"mixed" are non-specific buckets — exclude so questions like
+    # "which technology degrades fastest?" return a real technology.
+    cat_block("pv tech", "PV technology",
+              exclude={"other", "mixed", "unknown", "unspecified", "n/a", "nan"})
+    cat_block("PV zone", "Climate zone")
+    cat_block("mounting", "Mounting type")
+    cat_block("scope of study", "Scope of study")
+
+    if "country" in _df.columns:
+        sub = _df[["country", "rate"]].copy()
+        sub["rate"] = pd.to_numeric(sub["rate"], errors="coerce")
+        g = (sub.dropna(subset=["country"]).groupby("country")["rate"]
+             .agg(["count", "median"]).sort_values("count", ascending=False).head(15))
+        if len(g):
+            lines.append("\nTop countries by number of studies (median rate):")
+            for idx, row in g.iterrows():
+                lines.append(f"  - {idx}: n={int(row['count'])}, median {row['median']:.2f} %/yr")
+
+    if "faults_list" in _df.columns:
+        c = Counter()
+        for val in _df["faults_list"]:
+            if isinstance(val, str):
+                for f in val.split(","):
+                    f = f.strip()
+                    if f:
+                        c[f] += 1
+            elif isinstance(val, (list, tuple)):
+                for f in val:
+                    f = str(f).strip()
+                    if f:
+                        c[f] += 1
+        if c:
+            lines.append("\nMost frequently reported faults (count):")
+            for f, cnt in c.most_common(12):
+                lines.append(f"  - {f}: {cnt}")
+
+    if SHAP_DATA and SHAP_DATA.get("ranking"):
+        lines.append("\nSHAP factor importance (mean |SHAP|; higher = stronger "
+                     "influence on the modeled degradation rate):")
+        for rk in SHAP_DATA["ranking"]:
+            lines.append(f"  - {rk['label']}: {rk['value']:.2f}")
+
+        factors = SHAP_DATA.get("factors", {})
+        if factors:
+            lines.append("\nSHAP per-category effects (median SHAP in %/yr; a POSITIVE "
+                         "value is associated with LESS degradation, a NEGATIVE value "
+                         "with MORE degradation):")
+            label_by_value = {s["value"]: s["label"] for s in SHAP_DATA.get("selector", [])}
+            for fkey in ["pv_tech", "pv_zone", "mounting", "scope_of_study", "faults"]:
+                fac = factors.get(fkey)
+                if not fac or "levels" not in fac:
+                    continue
+                lv = sorted(fac["levels"], key=lambda x: x.get("median", 0))
+                parts = [f"{l['label']} {l['median']:+.2f}" for l in lv if "median" in l]
+                if parts:
+                    lines.append(f"  {label_by_value.get(fkey, fkey)}: " + ", ".join(parts))
+            dur = factors.get("duration")
+            if dur and dur.get("line_x") and dur.get("line_y"):
+                lx, ly = dur["line_x"], dur["line_y"]
+                lines.append(
+                    f"  Study duration (trend): at ~{lx[0]:.0f} yr median SHAP {ly[0]:+.2f}, "
+                    f"at ~{lx[-1]:.0f} yr median SHAP {ly[-1]:+.2f} "
+                    "(how apparent degradation shifts with exposure length).")
+
+    return "\n".join(lines)
+
+
+try:
+    DATA_KNOWLEDGE = build_dataset_knowledge(df)
+except Exception as _e:
+    DATA_KNOWLEDGE = f"Total studies (records): {len(df)}"
+
 # blue/green diverging scale (matches the GnBu map palette)
 _SHAP_GREEN = (0x2c, 0xa2, 0x5f)   # more degradation (negative SHAP)
 _SHAP_PALE  = (0xea, 0xf3, 0xf0)   # ~0
@@ -273,7 +394,7 @@ def build_shap_ranking_fig():
         text=[f"{v:.2f}" for v in vals], textposition="outside",
         textfont=dict(size=12, color="#444"),
         cliponaxis=False, showlegend=False,
-        hovertemplate="%{y}<br>impact = %{x:.2f}<extra>click to view</extra>",
+        hoverinfo="none",  # no tooltip, but clicks still fire
     ))
     # category legend swatches
     for c, lab in [("#0868ac", "System & site"), ("#41b6c4", "Measurement"),
@@ -283,11 +404,11 @@ def build_shap_ranking_fig():
             marker=dict(size=11, color=c, symbol="square"),
             name=lab, showlegend=True))
     fig.update_layout(
-        margin=dict(l=6, r=24, t=6, b=34),
+        margin=dict(l=6, r=24, t=10, b=34),
         xaxis_title="Average degradation impact",
         font=dict(family=_CHART_FONT, size=13),
         plot_bgcolor="white", paper_bgcolor="white",
-        height=300,
+        height=400,
         legend=dict(orientation="h", y=-0.22, x=0, font=dict(size=11)),
         xaxis=dict(showgrid=True, gridcolor="#eef0f2", zeroline=False,
                    range=[0, (max(vals) if vals else 1) * 1.18]),
@@ -330,14 +451,12 @@ def build_shap_raincloud_fig(factor):
             marker=dict(size=12, color=c, symbol="square"),
             name=lab, showlegend=True))
     fig.update_layout(
-        title=dict(text=fac.get("title", ""), x=0.02, xanchor="left",
-                   font=dict(size=15, color="#111827")),
-        margin=dict(l=10, r=10, t=44, b=42),
+        margin=dict(l=10, r=10, t=34, b=42),
         font=dict(family=_CHART_FONT, size=13),
         plot_bgcolor="white", paper_bgcolor="white",
-        yaxis_title="SHAP value (%/yr)", height=390,
+        yaxis_title="SHAP value (%/yr)", height=400,
         violingap=0.25, violingroupgap=0,
-        legend=dict(orientation="h", y=1.0, x=1, xanchor="right", font=dict(size=11)),
+        legend=dict(orientation="h", y=1.04, x=1, xanchor="right", font=dict(size=11)),
         yaxis=dict(showgrid=True, gridcolor="#eef0f2", zeroline=False),
         xaxis=dict(showgrid=False),
     )
@@ -364,14 +483,12 @@ def build_shap_scatter_fig(factor):
     ))
     fig.add_hline(y=0, line=dict(color="black", width=1, dash="dot"))
     fig.update_layout(
-        title=dict(text=fac.get("title", ""), x=0.02, xanchor="left",
-                   font=dict(size=15, color="#111827")),
-        margin=dict(l=10, r=10, t=44, b=42),
+        margin=dict(l=10, r=10, t=34, b=42),
         font=dict(family=_CHART_FONT, size=13),
         plot_bgcolor="white", paper_bgcolor="white",
         xaxis_title=fac.get("xlabel", "Study duration (year)"),
-        yaxis_title="SHAP (%/yr)", height=390,
-        legend=dict(orientation="h", y=1.0, x=1, xanchor="right", font=dict(size=11)),
+        yaxis_title="SHAP (%/yr)", height=400,
+        legend=dict(orientation="h", y=1.04, x=1, xanchor="right", font=dict(size=11)),
         xaxis=dict(showgrid=True, gridcolor="#eef0f2", zeroline=False),
         yaxis=dict(showgrid=True, gridcolor="#eef0f2", zeroline=False),
     )
@@ -389,20 +506,23 @@ def build_shap_factor_fig(factor):
 
 def build_shap_body():
     """The two-column SHAP layout: ranking (left) + selector & factor fig (right)."""
-    sub_style = {"fontFamily": _CHART_FONT, "fontSize": "15px",
-                 "fontWeight": "600", "color": "#111827", "marginBottom": "8px"}
+    title_style = {"fontFamily": _CHART_FONT, "fontSize": "16px",
+                   "fontWeight": "700", "color": "#111827", "marginBottom": "10px"}
+    card_style = {"border": "1px solid #e9ecef", "borderRadius": "16px",
+                  "padding": "16px", "background": "#ffffff", "height": "100%"}
 
     short = {"pv_tech": "PV tech", "duration": "Duration", "faults": "Faults",
              "pv_zone": "Climate", "mounting": "Mounting", "scope_of_study": "Scope"}
 
     if not SHAP_DATA:
-        pills, default_factor = [], None
+        pills, default_factor, default_title = [], None, ""
         note = html.Div(
             "SHAP figure data not found — add data/shap_fig_data.json.",
             style={"color": "#9ca3af", "fontSize": "13px",
                    "fontFamily": _CHART_FONT, "marginBottom": "10px"})
     else:
         default_factor = SHAP_DATA["selector"][0]["value"]
+        default_title = SHAP_DATA["factors"][default_factor].get("title", "")
         pills = [
             html.Button(
                 short.get(s["value"], s["label"]),
@@ -419,27 +539,33 @@ def build_shap_body():
         note,
         dcc.Store(id="shap-selected", data=default_factor),
         dbc.Row([
-            dbc.Col([
-                html.Div("Importance ranking of factors", style=sub_style),
-                dcc.Graph(id="shap-ranking-graph",
-                          figure=build_shap_ranking_fig(),
-                          config={"displayModeBar": False},
-                          style={"width": "100%"}),
-            ], xs=12, sm=12, md=5, lg=5, xl=5),
+            dbc.Col(
+                html.Div([
+                    html.Div("Importance ranking of factors", style=title_style),
+                    dcc.Graph(id="shap-ranking-graph",
+                              figure=build_shap_ranking_fig(),
+                              config={"displayModeBar": False},
+                              clear_on_unhover=True,
+                              style={"width": "100%"}),
+                ], style=card_style),
+                xs=12, sm=12, md=5, lg=5, xl=5),
 
-            dbc.Col([
-                html.Div(pills, className="shap-pill-group"),
-                dcc.Graph(id="shap-factor-graph",
-                          figure=build_shap_factor_fig(default_factor),
-                          config={"displayModeBar": False},
-                          style={"width": "100%"}),
-                html.Div(
-                    "A positive SHAP value is associated with less severe "
-                    "degradation; a negative value with more severe degradation.",
-                    style={"fontFamily": _CHART_FONT, "fontSize": "12.5px",
-                           "color": "#6b7280", "marginTop": "6px",
-                           "textAlign": "center"}),
-            ], xs=12, sm=12, md=7, lg=7, xl=7),
+            dbc.Col(
+                html.Div([
+                    html.Div(default_title, id="shap-factor-title", style=title_style),
+                    html.Div(pills, className="shap-pill-group"),
+                    dcc.Graph(id="shap-factor-graph",
+                              figure=build_shap_factor_fig(default_factor),
+                              config={"displayModeBar": False},
+                              style={"width": "100%"}),
+                    html.Div(
+                        "(A positive SHAP value is associated with less severe "
+                        "degradation; a negative value with more severe degradation.)",
+                        style={"fontFamily": _CHART_FONT, "fontSize": "12.5px",
+                               "color": "#6b7280", "marginTop": "6px",
+                               "textAlign": "center"}),
+                ], style=card_style),
+                xs=12, sm=12, md=7, lg=7, xl=7),
         ], className="g-3", style={"marginLeft": "0px", "marginRight": "0px"}),
     ])
 
@@ -499,34 +625,49 @@ layout = html.Div([
 
     dbc.Row([
         dbc.Col([
-            dcc.Markdown("""This tool visualizes **global PV field degradation** extracted from scientific literature using **Large Language Models (LLMs)**.
+            html.Div([
+                html.Span([
+                    "This tool visualizes a ",
+                    html.Strong("global PV field degradation dataset"),
+                    " and ",
+                    html.Strong("analysis results"),
+                    " extracted from scientific literature using ",
+                    html.Strong("Large Language Models"),
+                    ".",
+                ]),
+                html.Button(
+                    "Details & resources",
+                    id="intro-details-btn",
+                    n_clicks=0,
+                    className="intro-details-btn",
+                ),
+            ], style={"display": "flex", "alignItems": "baseline",
+                      "justifyContent": "center", "flexWrap": "wrap",
+                      "gap": "10px", "textAlign": "center"}),
 
-                    - Source papers (~3,900 papers) were retrieved from **Scopus** using keyword-based searches.  
-                    - **ChatGPT and Gemini** were applied to automatically extract degradation information.  
-                    - Degradation rate is reported as a **negative value when power decreases**.   
-                         
-                """.replace('    ', '')
-                 ),
-                 html.Details([
-                    html.Summary(
-                        "Resources",
-                        style={"color": "#8A8A8A"}
+            dbc.Collapse(
+                html.Div([
+                    dcc.Markdown(
+                        "- Source papers (~3,900 papers) were retrieved from "
+                        "**Scopus** using keyword-based searches.\n"
+                        "- **ChatGPT and Gemini** were applied to automatically "
+                        "extract degradation information.\n"
+                        "- Degradation rate is reported as a **negative value "
+                        "when power decreases**."
                     ),
                     html.Ul([
                         html.Li(html.A("GitHub Repository", href="https://github.com/DuraMAT/PV-LLM", target="_blank")),
                         html.Li(html.A("Download Raw Data (DuraMAT Datahub)", href="https://datahub.duramat.org/project/mapping-pv-degradation-by-llm", target="_blank")),
-                    ])
-                ])
-        ], xs=12, sm=12, md=12, lg=9, xl=9),
-
-        dbc.Col([
-            html.Img(src=app.get_asset_url('llm_logo.jpg'),
-            style={'width': '90%'}),
-        ], xs=9, sm=8, md=6, lg=3, xl=3),
+                    ]),
+                ], style={"color": "#4b5563", "marginTop": "8px"}),
+                id="intro-details-collapse",
+                is_open=False,
+            ),
+        ], xs=12, sm=12, md=12, lg=12, xl=12),
     ]),
 
     html.H2("Degradation rate map", className="level-1-title",
-            style={"marginTop": "8px", "marginBottom": "6px"}),
+            style={"marginTop": "36px", "marginBottom": "6px"}),
 
     # ── Controls card: structured filters + AI ask-box, above the
     # full-width map (so the map can use the whole page). ──
@@ -570,18 +711,18 @@ layout = html.Div([
                     # so the Stop button can clear it immediately.
                     html.Div(
                     [
-                        # ── loading overlay (hidden until a query is sent) ──
+                        # ── loading indicator (hidden until a query is sent) ──
                         html.Div(
                             [
+                                html.Div(className="ai-run-spinner"),
+                                html.Div("May take 5–20 seconds",
+                                         className="ai-run-msg"),
                                 html.Button(
                                     "✕ Stop",
                                     id="chat-stop-btn",
                                     n_clicks=0,
                                     className="ai-stop-btn",
                                 ),
-                                html.Div(className="ai-run-spinner"),
-                                html.Div("⏱ May take 5–20 seconds",
-                                         className="ai-run-msg"),
                             ],
                             id="ai-loading-overlay",
                             className="ai-loading-overlay",
@@ -638,19 +779,19 @@ layout = html.Div([
                                     ),
 
                                     html.Button(
-                                        "Show studies with <-5% degradation",
+                                        "Show offshore PV studies",
                                         id="q1",
                                         n_clicks=0,
                                         className="example-btn",
                                     ),
                                     html.Button(
-                                        "Show cases at offshore area",
+                                        "Which PV technology degrades fastest?",
                                         id="q2",
                                         n_clicks=0,
                                         className="example-btn",
                                     ),
                                     html.Button(
-                                        "Tell me studies in Asia",
+                                        "What are the most common faults?",
                                         id="q3",
                                         n_clicks=0,
                                         className="example-btn",
@@ -789,7 +930,7 @@ layout = html.Div([
         html.Div(
             [
                 html.Div("Degradation Rate Overview",
-                         style={"fontFamily": _CHART_FONT, "fontSize": "18px",
+                         style={"fontFamily": _CHART_FONT, "fontSize": "21px",
                                 "fontWeight": "700", "color": "#1f2937"}),
                 dcc.RadioItems(
                     id="analysis-data-scope",
@@ -803,8 +944,8 @@ layout = html.Div([
                 ),
             ],
             style={"display": "flex", "alignItems": "center",
-                   "justifyContent": "space-between", "flexWrap": "wrap",
-                   "gap": "10px", "marginBottom": "16px"},
+                   "justifyContent": "flex-start", "flexWrap": "wrap",
+                   "gap": "16px", "marginBottom": "16px"},
         ),
 
         dbc.Row([
@@ -824,7 +965,9 @@ layout = html.Div([
                     dcc.Graph(id='histogram',
                               config={"displayModeBar": False},
                               style={'width': '100%'})
-                ]),
+                ], style={"border": "1px solid #e9ecef", "borderRadius": "16px",
+                          "padding": "16px", "background": "#ffffff",
+                          "height": "100%"}),
             ], xs=12, sm=12, md=6, lg=6, xl=6),
             dbc.Col([
                 html.Div([
@@ -842,7 +985,9 @@ layout = html.Div([
                     dcc.Graph(id='rate-duration-scatter',
                               config={"displayModeBar": False},
                               style={'width': '100%'})
-                ]),
+                ], style={"border": "1px solid #e9ecef", "borderRadius": "16px",
+                          "padding": "16px", "background": "#ffffff",
+                          "height": "100%"}),
             ], xs=12, sm=12, md=6, lg=6, xl=6),
         ], className="g-3", style={'marginLeft': '0px', 'marginRight': '0px'}),
 
@@ -853,8 +998,8 @@ layout = html.Div([
         # ── Part 2: SHAP Analysis (content added later) ──
         html.Div(
             [
-                html.Div("SHAP Analysis",
-                         style={"fontFamily": _CHART_FONT, "fontSize": "18px",
+                html.Div("Impact of Factors on Degradation (using SHAP)",
+                         style={"fontFamily": _CHART_FONT, "fontSize": "21px",
                                 "fontWeight": "700", "color": "#1f2937",
                                 "marginBottom": "4px"}),
                 html.Div(
@@ -874,8 +1019,14 @@ layout = html.Div([
     ], style={"padding": "20px", "borderRadius": "18px"}),
 
     html.P(''),
-    html.H2('Regional performance', className="level-1-title"),
-    html.P(''),
+    html.H2('Regional performance', className="level-1-title",
+            style={"marginTop": "48px"}),
+    html.P(
+        "Search a location to see how nearby PV systems have degraded, "
+        "by technology and climate zone.",
+        style={"color": "#6b7280", "fontFamily": _CHART_FONT,
+               "fontSize": "13px", "marginTop": "-8px", "marginBottom": "14px",
+               "lineHeight": "1.5"}),
     dbc.Card([
         dbc.Row([
             dbc.Col([
@@ -1042,9 +1193,9 @@ def fill_input(q1, q2, q3):
     button_id = ctx.triggered_id
 
     questions = {
-        "q1": "Show studies with <-5% degradation",
-        "q2": "Show cases at offshore area",
-        "q3": "Tell me studies in Asia",
+        "q1": "Show offshore PV studies",
+        "q2": "Which PV technology degrades fastest?",
+        "q3": "What are the most common faults?",
     }
 
     return questions.get(button_id, "")
@@ -1092,6 +1243,19 @@ def stop_chat(n_clicks):
     return "", "", "", "Send", True, hidden, None, "", details_hidden, overlay_hidden
 
 
+# ── Intro "Details & resources" expand/collapse ──────────────────────
+@app.callback(
+    Output("intro-details-collapse", "is_open"),
+    Output("intro-details-btn", "children"),
+    Input("intro-details-btn", "n_clicks"),
+    State("intro-details-collapse", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_intro_details(n_clicks, is_open):
+    new_open = not is_open
+    return new_open, ("Hide details" if new_open else "Details & resources")
+
+
 # ── SHAP: a pill click or a ranking-bar click sets the selected factor ──
 @app.callback(
     Output("shap-selected", "data"),
@@ -1115,6 +1279,7 @@ def set_shap_selected(pill_clicks, click_data, current):
 # ── SHAP: render the selected factor's figure and highlight its pill ──
 @app.callback(
     Output("shap-factor-graph", "figure"),
+    Output("shap-factor-title", "children"),
     Output({"type": "shap-pill", "index": dash.ALL}, "className"),
     Input("shap-selected", "data"),
     State({"type": "shap-pill", "index": dash.ALL}, "id"),
@@ -1124,7 +1289,43 @@ def render_shap(selected, pill_ids):
     selected = selected or (SHAP_DATA["selector"][0]["value"] if SHAP_DATA else None)
     classes = ["shap-pill shap-pill-active" if pid["index"] == selected
                else "shap-pill" for pid in pill_ids]
-    return build_shap_factor_fig(selected), classes
+    title = ""
+    if SHAP_DATA and selected in SHAP_DATA.get("factors", {}):
+        title = SHAP_DATA["factors"][selected].get("title", "")
+    return build_shap_factor_fig(selected), title, classes
+
+
+# ── SHAP: highlight the hovered ranking bar (clientside; Plotly's drag layer
+# blocks CSS :hover, so we dim the other bars on hoverData instead) ──
+app.clientside_callback(
+    """
+    function(hoverData, figure) {
+        if (!figure || !figure.data || !figure.data.length) {
+            return window.dash_clientside.no_update;
+        }
+        const fig = JSON.parse(JSON.stringify(figure));
+        const bar = fig.data[0];
+        if (!bar || !bar.y) { return window.dash_clientside.no_update; }
+        const n = bar.y.length;
+        let hovered = -1;
+        if (hoverData && hoverData.points && hoverData.points.length) {
+            const p = hoverData.points[0];
+            if (p.curveNumber === 0) { hovered = p.pointIndex; }
+        }
+        const op = [];
+        for (let i = 0; i < n; i++) {
+            op.push(hovered < 0 ? 0.92 : (i === hovered ? 1.0 : 0.4));
+        }
+        if (!bar.marker) { bar.marker = {}; }
+        bar.marker.opacity = op;
+        return fig;
+    }
+    """,
+    Output("shap-ranking-graph", "figure"),
+    Input("shap-ranking-graph", "hoverData"),
+    State("shap-ranking-graph", "figure"),
+    prevent_initial_call=True,
+)
 
 @app.callback(
     Output("chat-submit", "disabled", allow_duplicate=True),
@@ -1202,82 +1403,98 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
         if not question:
             return "", "", "", "Send", True, hidden, None, "", details_hidden, overlay_hidden
 
-        result = get_filter_from_llm(question)
+        result = get_chat_response(question, DATA_KNOWLEDGE)
 
         # If Stop was pressed while this call was running, throw the result
         # away and leave the reset (from stop_chat) in place.
         if _was_stopped():
             return (dash.no_update,) * 10
 
-        msg_text = result.get("reason", "")
-        message = html.Div([
-                html.Span("Response", className="field-chat-box-metric-label"),
-                html.Span(msg_text, className="field-chat-box-metric-text")
-            ], className="field-chat-box-metric-row")
+        mode = result.get("mode", "reject")
+        reason = result.get("reason", "")
+        answer = result.get("answer", "")
 
         # pretty debug view
         llm_debug = json.dumps(result, indent=2)
 
-        if not result.get("can_be_answered_with_dataframe", False):
-            return message, "", "", "Send", True, visible, None, llm_debug, details_visible, overlay_hidden
+        # ── ANSWER mode: analytical answer, no table, map filter untouched ──
+        if mode == "answer" and answer:
+            message = html.Div([
+                html.Div("Answer", className="field-chat-box-metric-label",
+                         style={"marginBottom": "4px"}),
+                dcc.Markdown(answer, className="field-chat-answer-md"),
+            ])
+            # keep the question in the input box (return the question, not "")
+            return (message, "", question, "Send", True, visible, None,
+                    llm_debug, details_visible, overlay_hidden)
 
-        df_filtered = apply_filters(df, result.get("filter_tree"))
+        # ── FILTER mode: show the matching records ──
+        if mode == "filter":
+            df_filtered = apply_filters(df, result.get("filter_tree"))
+            n_rows = len(df_filtered)
 
-        n_rows = len(df_filtered)
+            message = html.Div([
+                html.Div([
+                    html.Span("Filtered Data Points", className="field-chat-box-metric-label"),
+                    html.Span(f"{n_rows}", className="field-chat-box-metric-value")
+                ], className="field-chat-box-metric-row"),
 
+                html.Div([
+                    html.Span("Response", className="field-chat-box-metric-label"),
+                    html.Span(reason, className="field-chat-box-metric-text")
+                ], className="field-chat-box-metric-row")
+            ])
+
+            table = dash_table.DataTable(
+                data=df_filtered.to_dict("records"),
+                columns=[{"name": c, "id": c} for c in df_filtered.columns],
+                page_size=10,
+                style_table={
+                    "overflowX": "auto",
+                    "width": "100%",
+                },
+                style_cell={
+                    "fontSize": "12px",
+                    "textAlign": "left",
+                    "padding": "4px 8px",
+                    "lineHeight": "1.1",
+                    "whiteSpace": "nowrap",
+                    "height": "auto",
+                },
+                style_header={
+                    "backgroundColor": "#f0f2f6",
+                    "fontWeight": "800",
+                    "textAlign": "left",
+                },
+                style_data_conditional=[
+                    {
+                        "if": {"row_index": "odd"},
+                        "backgroundColor": "#fafafa",
+                    }
+                ],
+            )
+
+            return (
+                message,
+                table,
+                "",
+                "Send",
+                True,
+                visible,
+                df_filtered.index.tolist(),
+                llm_debug,
+                details_visible,
+                overlay_hidden,
+            )
+
+        # ── reject / not answerable ──
         message = html.Div([
-            html.Div([
-                html.Span("Filtered Data Points", className="field-chat-box-metric-label"),
-                html.Span(f"{n_rows}", className="field-chat-box-metric-value")
-            ], className="field-chat-box-metric-row"),
-
-            html.Div([
-                html.Span("Response", className="field-chat-box-metric-label"),
-                html.Span(msg_text, className="field-chat-box-metric-text")
-            ], className="field-chat-box-metric-row")
-        ])
-
-        table = dash_table.DataTable(
-            data=df_filtered.to_dict("records"),
-            columns=[{"name": c, "id": c} for c in df_filtered.columns],
-            page_size=10,
-            style_table={
-                "overflowX": "auto",
-                "width": "100%",
-            },
-            style_cell={
-                "fontSize": "12px",
-                "textAlign": "left",
-                "padding": "4px 8px",
-                "lineHeight": "1.1",
-                "whiteSpace": "nowrap",
-                "height": "auto",
-            },
-            style_header={
-                "backgroundColor": "#f0f2f6",
-                "fontWeight": "800",
-                "textAlign": "left",
-            },
-            style_data_conditional=[
-                {
-                    "if": {"row_index": "odd"},
-                    "backgroundColor": "#fafafa",
-                }
-            ],
-        )
-
-        return (
-            message,
-            table,
-            "",
-            "Send",
-            True,
-            visible,
-            df_filtered.index.tolist(),
-            llm_debug,
-            details_visible,
-            overlay_hidden,
-        )
+            html.Span("Response", className="field-chat-box-metric-label"),
+            html.Span(reason or "Sorry, I can't answer that from this dataset.",
+                      className="field-chat-box-metric-text"),
+        ], className="field-chat-box-metric-row")
+        return (message, "", "", "Send", True, visible, None,
+                llm_debug, details_visible, overlay_hidden)
     
     return "", "", "", "Send", True, hidden, None, "", details_hidden, overlay_hidden
 
@@ -1462,11 +1679,20 @@ def update_map_and_histogram(
     
     # The Part-1 analysis figures can reflect either the filtered subset or the
     # entire dataset, controlled by the "Filtered data / All data" toggle.
-    analysis_df = df if (analysis_scope == "all") else filtered_df
+    analysis_df = (df if (analysis_scope == "all") else filtered_df).copy()
 
-    mean_rate = analysis_df['rate'].mean()
-    median_rate = analysis_df['rate'].median()
-    std_rate = analysis_df['rate'].std() # Calculate standard deviation
+    # Coerce the numeric columns to plain numpy float64. The loaded data may use
+    # pandas nullable dtypes (Float64) or strings depending on the source file,
+    # and scipy.gaussian_kde / np.linspace require ordinary numeric arrays.
+    for _c in ("rate", "duration"):
+        if _c in analysis_df.columns:
+            analysis_df[_c] = pd.to_numeric(analysis_df[_c], errors="coerce").astype("float64")
+
+    rate_np = analysis_df["rate"].dropna().to_numpy(dtype="float64")
+
+    mean_rate = float(np.mean(rate_np)) if rate_np.size else float("nan")
+    median_rate = float(np.median(rate_np)) if rate_np.size else float("nan")
+    std_rate = float(np.std(rate_np, ddof=1)) if rate_np.size > 1 else float("nan")
     
     hist_fig = px.histogram(
         analysis_df,
@@ -1496,28 +1722,30 @@ def update_map_and_histogram(
         _stat_pill("Median", f"{median_rate:.2f}%/y", color="#1e3a8a"),
     ], style={"marginBottom": "6px"})
 
-    # Calculate KDE
-    kde = gaussian_kde(analysis_df['rate'])
+    # Calculate KDE (guarded: needs at least 2 distinct numeric values)
+    if rate_np.size > 1 and np.ptp(rate_np) > 0:
+        kde = gaussian_kde(rate_np)
 
-    # Generate x values for KDE curve
-    x_values = np.linspace(analysis_df['rate'].min(), analysis_df['rate'].max(), 200)  # More points for smoother curve
+        # Generate x values for KDE curve
+        x_values = np.linspace(rate_np.min(), rate_np.max(), 200)
 
-    # Evaluate KDE at x values
-    y_values = kde(x_values)
+        # Evaluate KDE at x values
+        y_values = kde(x_values)
 
-    # Scale y_values to match the histogram counts (important for visual fit)
-    counts, bin_edges = np.histogram(analysis_df['rate'], bins=50)
-    y_values = y_values * (counts.max() / y_values.max())  # Scale to max count
+        # Scale y_values to match the histogram counts (important for visual fit)
+        counts, bin_edges = np.histogram(rate_np, bins=50)
+        if y_values.max() > 0:
+            y_values = y_values * (counts.max() / y_values.max())
 
-    # Add the KDE trace
-    hist_fig.add_trace(go.Scatter(
-        x=x_values,
-        y=y_values,
-        mode='lines',
-        name='Kernel Density Estimate',
-        yaxis="y",
-        line=dict(color='black')
-    ))
+        # Add the KDE trace
+        hist_fig.add_trace(go.Scatter(
+            x=x_values,
+            y=y_values,
+            mode='lines',
+            name='Kernel Density Estimate',
+            yaxis="y",
+            line=dict(color='black')
+        ))
 
     # Set color + opacity
     hist_fig.update_traces(marker_color="#0070C0", opacity=0.3)
@@ -1547,7 +1775,8 @@ def update_map_and_histogram(
             xanchor="left",
             x=0.01,
         ),
-        margin=dict(l=2, t=20)
+        margin=dict(l=2, t=20),
+        height=330,
     )
 
     duration_fig = px.scatter(analysis_df, x='duration', y='rate',
@@ -1568,6 +1797,7 @@ def update_map_and_histogram(
     duration_fig.update_layout(
         xaxis_title='Exposure length (year)',
         yaxis_title='Degradation Rate (%/year)',
+        height=330,
     )
 
     return fig, hist_fig, data_info, duration_fig

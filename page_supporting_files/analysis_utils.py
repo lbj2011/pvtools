@@ -408,7 +408,16 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
 
         try:
             if 'csv' in filename:
-                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                # Read straight from the raw bytes with an encoding fallback.
+                # Some loggers (e.g. European PV monitoring exports) save CSVs
+                # as Latin-1 / CP1252 rather than UTF-8, so a header like
+                # "Tamb (°C)" contains byte 0xB0 that UTF-8 can't decode. Try
+                # UTF-8 first, then fall back to Latin-1 (which maps every byte
+                # and decodes 0xB0 -> "°" correctly).
+                try:
+                    df = pd.read_csv(io.BytesIO(decoded), encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(io.BytesIO(decoded), encoding='latin-1')
                 code_read = f"df = pd.read_csv('{filename}')"
 
             elif 'xls' in filename or 'xlsx' in filename:
@@ -1657,12 +1666,32 @@ def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=
 
     fitted = res.fittedvalues
 
+    # --- Warm-up trim -------------------------------------------------------
+    # SARIMAX's diffuse initialization makes the first handful of one-step
+    # fitted values unreliable (they can spike to ~0 or huge values before the
+    # Kalman filter converges). Drop this transient so it doesn't corrupt the
+    # slope estimate or the plot. We drop about one seasonal cycle's worth of
+    # points, capped at 10% of the record so short series keep enough data.
+    warmup = min(seasonal_period + d, max(1, len(fitted) // 10))
+    fitted = fitted.iloc[warmup:]
+
     t = _time_to_years(fitted.index).values.reshape(-1, 1)
     y = fitted.values
 
     lr = LinearRegression().fit(t, y)
     slope = lr.coef_[0]
     rd = slope / np.mean(y) * 100
+
+    # --- Smoothed trend curve for plotting ---------------------------------
+    # We do NOT plot the raw one-step-ahead `fittedvalues` (on daily data they
+    # shadow the noisy series and look jagged). Instead we plot a CENTERED
+    # ROLLING MEAN of the (post-warm-up) fitted values: a smooth curve that
+    # still follows the mid-term undulations, matching the HW/CSD trend style
+    # rather than collapsing to a straight line. The reported rate `rd` is
+    # unchanged -- it is still the linear slope of the fitted values above.
+    smooth_window = 31  # ~1 month, centered
+    trend_curve = fitted.rolling(window=smooth_window, center=True,
+                                 min_periods=1).mean()
 
     fig = go.Figure()
 
@@ -1677,11 +1706,11 @@ def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=
         )
     )
 
-    # ARIMA fitted line
+    # ARIMA fitted trend (smoothed)
     fig.add_trace(
         go.Scatter(
-            x=fitted.index,
-            y=fitted.values,
+            x=trend_curve.index,
+            y=trend_curve.values,
             mode="lines",
             line=dict(color="#0070C0", width=2),
             name=f"ARIMA Fit ({rd:.2f}%/yr)"

@@ -1793,21 +1793,6 @@ sidebar = build_sidebar()
 # CHAT — AGENT 1 · DATA
 # =============================================================================
 data_agent_body = html.Div([
-    html.Div(
-        [
-            "Using the data you loaded above. Click ",
-            html.B("Run prescreening"),
-            " to detect your columns and preview the raw signal.",
-        ],
-        style={
-            "fontSize": "16px",
-            "color": INK,
-            "lineHeight": "1.6",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "18px",
-        }
-    ),
-
     # Analyze button — runs detection on the shared, already-loaded data.
     html.Button(
         "Run prescreening",
@@ -2214,18 +2199,6 @@ clearsky_params = html.Div([
 
 
 filter_agent_body = html.Div([
-    html.Div(
-        "I've prepared the recommended filters for your dataset. You can toggle individual filters "
-        "off or expand them to customize parameters. When you're ready, hit Apply.",
-        style={
-            "fontSize": "16px",
-            "color": INK,
-            "lineHeight": "1.6",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        }
-    ),
-
     # Hidden checklist preserving the value contract for callbacks
     dbc.Checklist(
         id="filter-options",
@@ -2304,11 +2277,15 @@ metric_options = [
             html.Details([
                 html.Summary("Customize parameters", style={"cursor": "pointer", "color": INK_SOFT, "fontSize": "13px", "marginTop": "4px"}),
                 html.Div([
-                    html.Div("Rolling trend window (days)", style=_label_style),
-                    dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7, style={**_param_input_style, "marginBottom": "8px"}),
-                    html.Div("IQR multiplier k", style=_label_style),
-                    dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5, style=_param_input_style),
-                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
+                    html.Div([
+                        html.Div("Rolling trend window (days)", style=_label_style),
+                        dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7, style=_param_input_style),
+                    ], style={"flex": "1 1 0", "minWidth": "0"}),
+                    html.Div([
+                        html.Div("IQR multiplier k", style=_label_style),
+                        dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5, style=_param_input_style),
+                    ], style={"flex": "1 1 0", "minWidth": "0"}),
+                ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}", "display": "flex", "gap": "12px"}),
             ]),
         ]),
         "value": "YOY",
@@ -2611,25 +2588,32 @@ def _metric_category_heading(text):
 
 
 calc_agent_body = html.Div([
-    html.Div(
-        "Time to estimate the degradation rate. Choose a method — YoY is the most robust default — "
-        "then run the calculation.",
-        style={
-            "fontSize": "16px",
-            "color": INK,
-            "lineHeight": "1.6",
-            "fontFamily": "Arial, sans-serif",
-            "marginBottom": "16px",
-        }
-    ),
-
     section_label("Choose a metric"),
     html.Div([
         # Category 1 — statistical / trend methods (YoY, LR, HW, ARIMA, CSD).
-        _metric_category_heading("statistical / trend methods"),
-        dcc.RadioItems(
+        # Heading on the left, "Select all / Clear all" toggle on the right.
+        # The button selects every enabled method or clears them; the clientside
+        # sync keeps this group mutually exclusive with the PVPRO option below.
+        html.Div([
+            _metric_category_heading("statistical / trend methods"),
+            html.Button(
+                "Select all",
+                id="metric-stat-selectall-btn",
+                n_clicks=0,
+                style={
+                    "fontSize": "12px", "fontWeight": "600",
+                    "fontFamily": "Arial, sans-serif",
+                    "color": NAVY, "background": "white",
+                    "border": f"1px solid {BORDER_STRONG}",
+                    "borderRadius": "8px", "padding": "4px 12px",
+                    "cursor": "pointer",
+                },
+            ),
+        ], style={"display": "flex", "alignItems": "center",
+                  "justifyContent": "space-between", "marginBottom": "12px"}),
+        dcc.Checklist(
             id="metric-stat-radio",
-            value="YOY",
+            value=["YOY"],
             options=build_stat_metric_options(disable_yoy=False),
             labelStyle={"display": "block", "marginBottom": "10px",
                         "cursor": "pointer", "color": "inherit"},
@@ -3025,7 +3009,7 @@ chat_stream = html.Div(
                     agent_message(
                         "data",
                         data_agent_body,
-                        intro="I prescreen your dataset — load, inspect, and identify variables."
+                        intro="Load, inspect, and identify variables."
                     ),
                     id="agent-data-wrap",
                 ),
@@ -3038,7 +3022,7 @@ chat_stream = html.Div(
                             agent_message(
                                 "filter",
                                 filter_agent_body,
-                                intro="I clean the signal — outliers, low irradiance, clear-sky filtering."
+                                intro="Outliers, low irradiance, clear-sky filtering."
                             ),
                             id="agent-filter-content",
                             style={"display": "none"},
@@ -3055,7 +3039,7 @@ chat_stream = html.Div(
                             agent_message(
                                 "calc",
                                 calc_agent_body,
-                                intro="I estimate the annual degradation rate."
+                                intro="Estimate the annual degradation rate."
                             ),
                             id="agent-calc-content",
                             style={"display": "none"},
@@ -4015,31 +3999,49 @@ app.clientside_callback(
 # CLIENTSIDE SYNC — two visible RadioItems -> one hidden master radio.
 #
 # The "Choose a metric" panel splits its options into two visible groups
-# (statistical methods vs PVPRO).  We mirror whichever one the user
-# touched most recently into the hidden `metric-selected-visible` radio,
-# which is the source of truth read by every downstream callback.  We
-# also clear the OTHER group so only one ever shows a selected dot,
-# preserving single-select semantics.
+# (statistical methods vs PVPRO).  The statistical group is a multi-select
+# checklist; PVPRO is a single radio.  We mirror the FIRST checked stat
+# method (or "PVPRO") into the hidden `metric-selected-visible` radio, which
+# downstream callbacks read to detect the PVPRO branch.  Picking PVPRO clears
+# the stat checklist and vice-versa, so the two groups stay mutually
+# exclusive (you run stat methods OR PVPRO, never both at once).
 # =============================================================================
 app.clientside_callback(
     """
-    function(statVal, pvproVal) {
+    function(statVals, pvproVal) {
+        var nu = dash_clientside.no_update;
+        statVals = statVals || [];
+        // Master value: "PVPRO" when PVPRO is picked, otherwise the FIRST
+        // checked statistical method (a non-PVPRO code). Downstream callbacks
+        // only ever test master === "PVPRO"; the run callback reads the full
+        // checked list from metric-stat-radio directly for the stat methods.
         var triggered = dash_clientside.callback_context.triggered;
         if (!triggered || triggered.length === 0) {
-            // Initial firing -- whichever has a value wins; default to stat.
-            return [statVal || pvproVal || "YOY", statVal, pvproVal];
+            // Initial firing.
+            if (pvproVal) { return ["PVPRO", [], pvproVal]; }
+            if (statVals.length) { return [statVals[0], statVals, null]; }
+            return ["YOY", ["YOY"], null];
         }
         var prop = triggered[0].prop_id;  // "metric-stat-radio.value" etc.
-        if (prop.indexOf("metric-stat-radio") === 0 && statVal) {
-            // Stat group picked -> clear PVPRO group, mirror stat.
-            return [statVal, statVal, null];
-        }
         if (prop.indexOf("metric-pvpro-radio") === 0 && pvproVal) {
-            // PVPRO picked -> clear stat group, mirror PVPRO.
-            return [pvproVal, null, pvproVal];
+            // PVPRO picked -> clear the stat group, mirror PVPRO.
+            return ["PVPRO", [], pvproVal];
         }
-        // Neither has a value: fall back to YoY.
-        return ["YOY", "YOY", null];
+        if (prop.indexOf("metric-stat-radio") === 0) {
+            if (statVals.length) {
+                // One or more stat methods checked -> clear PVPRO, mirror the
+                // first checked method into the master. Pass statVals back
+                // unchanged (same reference) so no echo re-fire is needed.
+                return [statVals[0], statVals, null];
+            }
+            // Everything unchecked: leave the master as-is (avoids clobbering
+            // a PVPRO selection when the stat group merely emptied).
+            return [nu, statVals, pvproVal];
+        }
+        // Fallback.
+        if (pvproVal) { return ["PVPRO", [], pvproVal]; }
+        if (statVals.length) { return [statVals[0], statVals, null]; }
+        return ["YOY", ["YOY"], null];
     }
     """,
     Output("metric-selected-visible", "value"),
@@ -4078,7 +4080,15 @@ def gate_yoy_by_duration(df_json, current_value):
     disable_yoy = duration_years is not None and duration_years < _MIN_YEARS_FOR_YOY
     options = build_stat_metric_options(disable_yoy=disable_yoy)
     if disable_yoy:
-        new_value = "LR" if current_value == "YOY" else dash.no_update
+        # current_value is now a list of checked methods. Drop YoY if present;
+        # fall back to LR only if that would otherwise leave nothing checked.
+        current = list(current_value) if isinstance(current_value, (list, tuple)) else \
+            ([current_value] if current_value else [])
+        if "YOY" in current:
+            current = [m for m in current if m != "YOY"]
+            new_value = current if current else ["LR"]
+        else:
+            new_value = dash.no_update
         note = (f"YoY needs at least {_MIN_YEARS_FOR_YOY:g} year"
                 f"{'s' if _MIN_YEARS_FOR_YOY != 1 else ''} of data; "
                 "it's disabled for this dataset.")
@@ -4089,6 +4099,53 @@ def gate_yoy_by_duration(df_json, current_value):
         note = ""
         note_style = {"display": "none"}
     return options, new_value, note, note_style
+
+
+# =============================================================================
+# CALLBACK — "Select all / Clear all" toggle for the statistical-method
+# checklist. One button: if every currently-enabled method is already checked
+# it clears the selection, otherwise it checks them all (skipping any option
+# greyed out by the YoY duration gate). A second callback keeps the button
+# label in sync with the current selection.
+# =============================================================================
+def _enabled_stat_values(options):
+    """Return the values of the non-disabled options in the stat checklist."""
+    vals = []
+    for o in (options or []):
+        if isinstance(o, dict) and not o.get("disabled"):
+            v = o.get("value")
+            if v is not None:
+                vals.append(v)
+    if not vals:  # fallback if options didn't round-trip as expected
+        vals = ["YOY", "LR", "HW", "ARIMA", "CSD"]
+    return vals
+
+
+@app.callback(
+    Output("metric-stat-radio", "value", allow_duplicate=True),
+    Input("metric-stat-selectall-btn", "n_clicks"),
+    State("metric-stat-radio", "value"),
+    State("metric-stat-radio", "options"),
+    prevent_initial_call=True,
+)
+def toggle_select_all_metrics(n_clicks, current_value, options):
+    enabled = _enabled_stat_values(options)
+    current = set(current_value or [])
+    # Every enabled method already checked -> clear; otherwise select them all.
+    if current.issuperset(set(enabled)):
+        return []
+    return enabled
+
+
+@app.callback(
+    Output("metric-stat-selectall-btn", "children"),
+    Input("metric-stat-radio", "value"),
+    State("metric-stat-radio", "options"),
+)
+def label_select_all_btn(current_value, options):
+    enabled = _enabled_stat_values(options)
+    current = set(current_value or [])
+    return "Clear all" if current.issuperset(set(enabled)) else "Select all"
 
 
 # =============================================================================
@@ -4140,12 +4197,12 @@ def show_analyze_filename(filename):
     return html.Span(filename, style={
         "display": "inline-block",
         "padding": "3px 12px",
-        "background": "#eef2f7",
-        "border": "1px solid #e2e8f0",
+        "background": "#e6f2fb",           # light blue
+        "border": "1px solid #a6cded",     # light blue border
         "borderRadius": "999px",
         "fontSize": "13px",
         "fontWeight": "600",
-        "color": "#334155",
+        "color": "#0064AB",                # dark blue (NAVY)
         "fontFamily": "Arial, sans-serif",
         "letterSpacing": "0",
         "textTransform": "none",
@@ -4396,6 +4453,245 @@ def run_filter(filter_clicks, upload_clicks,
 
 
 # =============================================================================
+# MULTI-METHOD SUPPORT (statistical / trend methods)
+#
+# The Step-3 "statistical / trend methods" chooser is a multi-select checklist.
+# When more than one method is checked, we run them all on the same daily
+# series and present a comparison: a bar chart of each method's rate, and one
+# combined power-trend figure that overlays every method's fitted trend on a
+# single shared scatter of the daily power.
+# =============================================================================
+
+# Distinct trend-line colors for the overlay / bars, one per method. Kept in a
+# fixed order so a given method always gets the same color across runs. Palette
+# is the requested blue/green swatch set (deep blue -> sky blue -> turquoise ->
+# dark green -> lime green).
+_STAT_METHOD_COLORS = {
+    "YOY":   "#0070C0",   # deep blue
+    "LR":    "#83CBEB",   # sky blue
+    "HW":    "#68DBCE",   # turquoise
+    "ARIMA": "#048E2F",   # dark green
+    "CSD":   "#92D050",   # lime green
+}
+
+
+def _dispatch_stat_method(method, daily_data, params):
+    """Run a single statistical / trend method on the daily series and return
+    (rate_percent_per_year, plotly_figure).  `params` carries the per-method
+    tunables read from the Step-3 "Customize parameters" panels."""
+    if method == "YOY":
+        return compute_yoy(daily_data,
+                           rolling_window=params.get("yoy_window") or 30,
+                           iqr_multiplier=params.get("yoy_iqr") or 1.5)
+    if method == "LR":
+        return compute_lr(daily_data)
+    if method == "HW":
+        return compute_hw(daily_data, period=params.get("hw_period") or 12)
+    if method == "ARIMA":
+        return compute_arima(daily_data,
+                             p=params.get("arima_p") if params.get("arima_p") is not None else 1,
+                             d=params.get("arima_d") if params.get("arima_d") is not None else 1,
+                             q=params.get("arima_q") if params.get("arima_q") is not None else 0,
+                             seasonal_period=params.get("arima_s") or 12)
+    if method == "CSD":
+        return compute_csd(daily_data, period=params.get("csd_period") or 12)
+    raise ValueError(f"Unknown metric: {method}")
+
+
+def _build_multi_method_layout(results, daily_data, start_date, end_date,
+                               duration_years):
+    """Build the Step-3 result block for a MULTI-method run.
+
+    `results` is a list of (method_code, rate_pct_per_year, figure) tuples in
+    the order the methods were checked.  Renders (1) a bar chart comparing the
+    methods' rates and (2) a single combined power-trend figure overlaying each
+    method's fitted trend on one shared daily-power scatter.
+    """
+    # ---- Bar chart: rate by method -----------------------------------------
+    bar_labels = [m for (m, _rd, _f) in results]
+    bar_rates  = [(float(rd) if rd is not None and np.isfinite(rd) else None)
+                  for (_m, rd, _f) in results]
+    bar_colors = [_STAT_METHOD_COLORS.get(m, NAVY) for m in bar_labels]
+    # Drop the "%/yr" suffix on the in-chart labels to save space (the axis
+    # title already says "Rate (%/yr)"); a bigger font keeps them readable.
+    bar_text   = [f"{r:+.2f}" if r is not None else "n/a" for r in bar_rates]
+
+    bar_fig = go.Figure(go.Bar(
+        x=bar_labels,
+        y=[r if r is not None else 0 for r in bar_rates],
+        marker_color=bar_colors,
+        text=bar_text,
+        textposition="outside",
+        textfont=dict(family="Arial", size=13, color=INK),
+        cliponaxis=False,
+        # Fixed bar width in category units (each category is 1 unit apart), so
+        # bars stay a sensible width regardless of how many methods are chosen
+        # -- in particular they don't balloon when only 2 are selected.
+        width=0.45,
+        hovertemplate="%{x}: %{y:+.2f}%/yr<extra></extra>",
+    ))
+    bar_fig.update_layout(
+        yaxis_title="Rate (%/yr)",
+        xaxis_title="Method",
+        template="plotly_white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Arial", color=INK),
+        margin=dict(l=50, r=20, t=14, b=45),
+        height=220,
+        showlegend=False,
+    )
+    bar_fig.update_xaxes(showgrid=False, zeroline=False)
+    bar_fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=True,
+                         zerolinecolor=BORDER_STRONG)
+
+    # ---- Combined trend overlay: one scatter + every method's trend line ----
+    combined = go.Figure()
+    combined.add_trace(go.Scatter(
+        x=daily_data.index,
+        y=daily_data.values,
+        mode="markers",
+        marker=dict(size=6, opacity=0.40, color="#C7D9EC"),
+        name="Daily power",
+    ))
+    for (m, rd, fig) in results:
+        # Each per-method figure has the trend/fit as its 2nd trace
+        # (trace 0 is the daily scatter). Pull it out and re-color it.
+        if fig is None or len(fig.data) < 2:
+            continue
+        trend_trace = fig.data[1]
+        rate_txt = f"{rd:+.2f}%/yr" if (rd is not None and np.isfinite(rd)) else "n/a"
+        combined.add_trace(go.Scatter(
+            x=trend_trace.x,
+            y=trend_trace.y,
+            mode="lines",
+            line=dict(color=_STAT_METHOD_COLORS.get(m, NAVY), width=2.5),
+            name=f"{m} ({rate_txt})",
+        ))
+    # Some fits (notably ARIMA) can throw a large transient spike in their
+    # first few fitted points, which otherwise squashes the whole plot. Set a
+    # readable DEFAULT y-range from the robust spread of the *daily power*
+    # (the ground-truth series), padded a little. The user can still zoom out
+    # / autoscale from the figure's toolbar to see the full excursion.
+    try:
+        _dvals = pd.Series(daily_data).replace([np.inf, -np.inf], np.nan).dropna().values
+        _ylo = float(np.nanpercentile(_dvals, 1))
+        _yhi = float(np.nanpercentile(_dvals, 99))
+        _pad = 0.08 * (_yhi - _ylo) if _yhi > _ylo else max(abs(_yhi), 1.0) * 0.1
+        _y_range = [_ylo - _pad, _yhi + _pad]
+    except Exception:
+        _y_range = None
+
+    # X-range pinned to the data span so the plot edges sit flush with the
+    # first/last observation and never extend past it.
+    try:
+        _xidx = pd.Series(daily_data).dropna().index
+        _x_range = [_xidx.min(), _xidx.max()]
+    except Exception:
+        _x_range = None
+
+    combined.update_layout(
+        title="Power trend — all selected methods",
+        xaxis_title="Time",
+        yaxis_title="Power (W)",
+        template="plotly_white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Arial", color=INK),
+        margin=dict(l=50, r=150, t=50, b=40),
+        title_font=dict(family="Arial", size=18, color=INK),
+        height=300,
+        # Legend: vertical, placed OUTSIDE the plot on the right so it never
+        # overlaps the trend lines. Transparent background.
+        legend=dict(orientation="v", yanchor="top", y=1.0,
+                    xanchor="left", x=1.02, bgcolor="rgba(0,0,0,0)",
+                    borderwidth=0, font=dict(size=11)),
+    )
+    combined.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False,
+                          range=_x_range, autorange=(_x_range is None))
+    combined.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False,
+                          range=_y_range, autorange=(_y_range is None))
+
+    # ---- Header summary -----------------------------------------------------
+    finite = [(m, rd) for (m, rd, _f) in results
+              if rd is not None and np.isfinite(rd)]
+
+    # Headline rate: render as "<min> to <max>%  /year" — only the second
+    # number carries the % sign, "to" is italic, and "/year" is a small
+    # trailing unit (matches the single-method hero-number styling).
+    _big = {"fontSize": "40px", "fontFamily": "Arial, sans-serif",
+            "fontWeight": "700", "color": VALUE_MAJOR, "lineHeight": "1.1"}
+    _to = {"fontSize": "26px", "fontFamily": "Arial, sans-serif",
+           "fontStyle": "italic", "color": VALUE_MAJOR, "margin": "0 8px"}
+    _yr = {"fontSize": "18px", "color": INK_SOFT, "marginLeft": "6px",
+           "fontFamily": "Arial, sans-serif", "fontStyle": "italic"}
+    if finite:
+        rates_only = [rd for (_m, rd) in finite]
+        rmin, rmax = min(rates_only), max(rates_only)
+        if rmin == rmax:
+            headline = [html.Span(f"{rmax:+.2f}%", style=_big),
+                        html.Span("/year", style=_yr)]
+        else:
+            headline = [html.Span(f"{rmin:+.2f}", style=_big),
+                        html.Span("to", style=_to),
+                        html.Span(f"{rmax:+.2f}%", style=_big),
+                        html.Span("/year", style=_yr)]
+    else:
+        headline = [html.Span("n/a", style=_big)]
+
+    summary_block = html.Div([
+        html.Div(headline, style={"marginBottom": "14px",
+                                  "display": "flex", "alignItems": "baseline",
+                                  "flexWrap": "wrap"}),
+        html.Div([
+            html.Div([html.Span("Methods: ", style={"color": INK_SOFT}),
+                      html.B(", ".join(bar_labels), style={"color": VALUE_DETAIL})],
+                     style={"fontSize": "14px", "marginBottom": "3px"}),
+            html.Div([html.Span("Duration: ", style={"color": INK_SOFT}),
+                      html.B(f"{duration_years:.1f} years",
+                             style={"color": VALUE_DETAIL})],
+                     style={"fontSize": "14px", "marginBottom": "3px"}),
+            html.Div([html.Span("Window: ", style={"color": INK_SOFT}),
+                      html.B(f"{start_date.strftime('%Y-%m-%d') if hasattr(start_date,'strftime') else start_date}  →  {end_date.strftime('%Y-%m-%d') if hasattr(end_date,'strftime') else end_date}",
+                             style={"fontFamily": "Arial, sans-serif",
+                                    "fontSize": "13px", "color": VALUE_DETAIL})],
+                     style={"fontSize": "14px"}),
+        ], style={"fontFamily": "Arial, sans-serif"}),
+    ])
+
+    return html.Div([
+        # Row 0: full-width section heading.
+        html.Div("annual degradation rate — method comparison", style={
+            "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "16px",
+            "fontFamily": "Arial, sans-serif",
+        }),
+        # Row 1: results (left) + rate-by-method bar chart (right), side by
+        # side. Wraps to stacked on narrow screens.
+        html.Div([
+            html.Div(summary_block,
+                     style={"flex": "1 1 300px", "minWidth": "260px"}),
+            html.Div(dcc.Graph(figure=bar_fig,
+                               config={"displayModeBar": False}),
+                     style={"flex": "1 1 360px", "minWidth": "300px"}),
+        ], style={"display": "flex", "gap": "22px", "alignItems": "flex-start",
+                  "flexWrap": "wrap", "marginBottom": "18px"}),
+        # Row 2: combined power-trend overlay (full width).
+        html.Div(dcc.Graph(
+            figure=combined,
+            config={"displaylogo": False, "scrollZoom": True,
+                    "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+        )),
+    ], className="slide-in-up", style={
+        "padding": "20px",
+        "background": "#f8fafc",
+        "border": f"1px solid {BORDER}",
+        "borderRadius": "16px",
+        "marginTop": "16px",
+    })
+
+
+# =============================================================================
 # CALLBACK — DEGRADATION (UNCHANGED logic, restyled output)
 # =============================================================================
 @app.callback(
@@ -4416,6 +4712,7 @@ def run_filter(filter_clicks, upload_clicks,
     State("dataframe-filtered",      "data"),
     State("mapped-vars-store",       "data"),
     State("metric-selected-visible", "value"),
+    State("metric-stat-radio",       "value"),
     State("param-yoy-window",        "value"),
     State("param-yoy-iqr",           "value"),
     State("param-hw-period",         "value"),
@@ -4438,6 +4735,7 @@ def analyze_uploaded_data_callback(
         degradation_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks,
         df_filtered_json, mapped_variables_dict, selected_metric,
+        selected_stat_methods,
         yoy_window, yoy_iqr, hw_period,
         arima_p, arima_d, arima_q, arima_s, csd_period,
         pvpro_cells, pvpro_mps, pvpro_ps, pvpro_alphaisc,
@@ -4529,24 +4827,78 @@ def analyze_uploaded_data_callback(
     else:
         daily_data = aggregate_daily(df_filtered, irra_key)
 
-        if selected_metric == "YOY":
-            rd, fig = compute_yoy(daily_data,
-                                  rolling_window=yoy_window if yoy_window else 30,
-                                  iqr_multiplier=yoy_iqr if yoy_iqr else 1.5)
-        elif selected_metric == "LR":
-            rd, fig = compute_lr(daily_data)
-        elif selected_metric == "HW":
-            rd, fig = compute_hw(daily_data, period=hw_period if hw_period else 12)
-        elif selected_metric == "ARIMA":
-            rd, fig = compute_arima(daily_data,
-                                    p=arima_p if arima_p is not None else 1,
-                                    d=arima_d if arima_d is not None else 1,
-                                    q=arima_q if arima_q is not None else 0,
-                                    seasonal_period=arima_s if arima_s else 12)
-        elif selected_metric == "CSD":
-            rd, fig = compute_csd(daily_data, period=csd_period if csd_period else 12)
-        else:
-            raise ValueError(f"Unknown metric: {selected_metric}")
+        # The statistical / trend chooser is a multi-select checklist. Read the
+        # full checked list; fall back to the master value / YoY if somehow
+        # empty. PVPRO is handled entirely in the branch above, so anything
+        # here is one or more of YOY/LR/HW/ARIMA/CSD.
+        methods = [m for m in (selected_stat_methods or []) if m and m != "PVPRO"]
+        if not methods:
+            methods = [selected_metric] if (selected_metric and
+                                            selected_metric != "PVPRO") else ["YOY"]
+
+        stat_params = dict(
+            yoy_window=yoy_window, yoy_iqr=yoy_iqr, hw_period=hw_period,
+            arima_p=arima_p, arima_d=arima_d, arima_q=arima_q, arima_s=arima_s,
+            csd_period=csd_period,
+        )
+
+        # ---- MULTI-METHOD: run them all, render a comparison ----------------
+        if len(methods) > 1:
+            results = []            # list of (method, rd, fig)
+            for m in methods:
+                try:
+                    rd_m, fig_m = _dispatch_stat_method(m, daily_data, stat_params)
+                except Exception as exc:
+                    rd_m, fig_m = np.nan, None
+                    print(f"[degradation] {m} failed: {exc}")
+                results.append((m, rd_m, fig_m))
+
+            start_date = df_filtered.index.min()
+            end_date   = df_filtered.index.max()
+            duration_years = (end_date - start_date).days / 365.25
+
+            multi_layout = _build_multi_method_layout(
+                results, daily_data, start_date, end_date, duration_years)
+
+            methods_rates = {
+                m: (round(float(rd), 4) if rd is not None and np.isfinite(rd) else None)
+                for (m, rd, _f) in results
+            }
+            # Primary rate for backward-compatible consumers: first finite rate.
+            primary_rate = next(
+                (rd for (_m, rd, _f) in results
+                 if rd is not None and np.isfinite(rd)), np.nan)
+            primary_pct = (float(primary_rate) if np.isfinite(primary_rate) else 0.0) / 100
+
+            rates_line = "; ".join(
+                f"{m}: {r:+.2f}%/yr" if r is not None else f"{m}: n/a"
+                for m, r in methods_rates.items()
+            )
+            trend_summary = _summarize_daily_series(
+                daily_data, "multiple methods (" + ", ".join(methods) + ")")
+            trend_summary = f"{trend_summary}\nPer-method rates — {rates_line}."
+
+            result_dict = {
+                "rate_pct_per_year": round(float(primary_rate) * 100, 4)
+                    if np.isfinite(primary_rate) else None,
+                "method": ", ".join(methods),
+                "duration_years": round(float(duration_years), 2),
+                "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
+                "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
+                "rate_pct": float(primary_pct),
+                "n_raw": int(len(df_filtered)),
+                "n_kept": int(len(df_filtered)),
+                "pct_kept": 100.0,
+                "trend_summary": trend_summary,
+                # Extra field: every checked method's rate (%/yr).
+                "methods_rates": methods_rates,
+            }
+            return [multi_layout, "", False, "Calculate Degradation",
+                    result_dict, {}, True]
+
+        # ---- SINGLE METHOD: keep the featured hero-number display -----------
+        selected_metric = methods[0]
+        rd, fig = _dispatch_stat_method(selected_metric, daily_data, stat_params)
 
     # Restyle the figure
     if fig is not None:
@@ -5757,6 +6109,9 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     nothingFoundMessage="No matching column",
                     w="100%",
                     size="sm",
+                    # Bold the selected column name in the input (only when a
+                    # value is chosen, so the placeholder stays regular weight).
+                    styles={"input": {"fontWeight": 700 if current else 400}},
                     # Custom option renderer: column name on the left, a small
                     # quality pill pushed to the right (JS fn in assets/, reads
                     # each option's "quality" field). Falls back gracefully to a
@@ -6408,7 +6763,7 @@ def reset_pvpro_params_on_new_data(*_):
         # simple highlight/dot/note cleared
         base, base, dot_off, dot_off, "",
         # advanced Step-3 metric selection back to the YoY default
-        "YOY",
+        ["YOY"],
     )
 
 

@@ -170,6 +170,107 @@ User question:
 {question}
 """
 
+def build_chat_prompt(question, knowledge_text):
+    """Prompt that lets the assistant either FILTER the data or ANSWER an
+    analytical question grounded in a precomputed dataset summary."""
+    return f"""
+You are a data assistant for a photovoltaic (PV) module degradation dataset.
+You have two capabilities:
+
+1. FILTER — when the user wants to see / list / show specific studies or a subset
+   (e.g. "show offshore PV", "studies in Asia with rate below -5%", "list rooftop
+   systems in desert climates").
+2. ANSWER — when the user asks an analytical or aggregate question about the data
+   (e.g. "what is the average degradation for CIGS?", "which climate zone degrades
+   fastest?", "does mounting type matter?", "how many studies are from China?",
+   "what are the most common faults?").
+
+Choose the single best mode. If the user clearly wants records displayed, use
+"filter". If a summary statistic answers their question, use "answer". If the
+question is unrelated to PV / this dataset, use "reject".
+
+=== DATASET SUMMARY (use ONLY these real numbers when answering; never invent) ===
+{knowledge_text}
+
+=== COLUMNS AVAILABLE FOR FILTERING ===
+{json.dumps(column_info, indent=2)}
+
+Filtering rules (only when mode == "filter"):
+- Allowed operators: ==, !=, >, <, >=, <=, contains
+- Only use columns that exist. Use numeric comparisons for numeric columns,
+  "contains" for partial text matches.
+- Expand a concept into related keywords with OR logic (e.g. "Asia" -> China,
+  India, Japan, Korea, ...; "desert" -> desert, arid, BWk).
+- Combine independent conditions with AND. Nest logic groups when needed.
+- filter_tree format:
+  {{"logic":"AND|OR","conditions":[{{"column":..,"operator":..,"value":..}} or nested group ]}}
+
+Answering rules (only when mode == "answer"):
+- Base the answer STRICTLY on the DATASET SUMMARY numbers above.
+- Degradation rate is negative when power declines; a more negative rate means
+  faster / more severe degradation.
+- Use association language, not causal ("is associated with", not "causes").
+- Be concise (2-5 sentences) and include the relevant numbers.
+- Use **markdown bold** VERY SPARINGLY — only on the few items that directly
+  answer the question (e.g. the winning technology / category / fault name and
+  the single most important number). Bold at most 2-3 items in the whole answer.
+  Do NOT bold every number, every category, or whole sentences.
+- When both are available, combine the statistical figures with the SHAP results
+  (e.g. compare the median rate ranking with the SHAP effect direction/magnitude).
+- If the summary does not contain what is needed, say so briefly and suggest the
+  user try filtering the data instead.
+
+Return JSON ONLY in this exact shape:
+{{
+  "is_pv_related": true or false,
+  "mode": "filter" or "answer" or "reject",
+  "reason": "short message to show the user (for filter: what is being shown; for reject: why)",
+  "answer": "the analytical answer text (only when mode == answer; otherwise empty string)",
+  "filter_tree": {{ ... }}  // the filter tree when mode == filter, otherwise {{}}
+}}
+
+User question:
+{question}
+"""
+
+
+def get_chat_response(question, knowledge_text):
+    """Router: returns either a filter plan or a grounded analytical answer."""
+    prompt = build_chat_prompt(question, knowledge_text)
+
+    start_time = time.time()
+    response = client.chat.completions.create(
+        model="gpt-5.4-nano",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+    elapsed_time = time.time() - start_time
+
+    content = response.choices[0].message.content.strip()
+    content = re.sub(r"^```json", "", content)
+    content = re.sub(r"```$", "", content).strip()
+
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        return {
+            "llm_time_seconds": elapsed_time,
+            "is_pv_related": False,
+            "mode": "reject",
+            "reason": "Sorry, I couldn't understand the request. Please try rephrasing your question.",
+            "answer": "",
+            "filter_tree": {},
+        }
+
+    result.setdefault("is_pv_related", False)
+    result.setdefault("mode", "reject")
+    result.setdefault("reason", "")
+    result.setdefault("answer", "")
+    result.setdefault("filter_tree", {})
+    result["llm_time_seconds"] = elapsed_time
+    return result
+
+
 def get_filter_from_llm(question):
     prompt = build_prompt(question)
 

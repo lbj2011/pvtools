@@ -8,7 +8,7 @@ _df_cache = None
 def get_df():
     global _df_cache
     if _df_cache is None:
-        _df_cache = pd.read_parquet("data/data_250924.parquet")
+        _df_cache = pd.read_parquet("data/data_2605_w_pvcz.parquet")
     return _df_cache
 
 def safe_get_df():
