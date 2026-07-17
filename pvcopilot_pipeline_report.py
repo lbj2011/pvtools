@@ -145,6 +145,7 @@ INFO_NOTE_PREFIXES = (
     "DC Current computed as Power / Voltage",
     "Auto-selected irradiance",
     "Time column detected from values",
+    "Large dataset downsampled",
 )
 
 

@@ -3841,6 +3841,9 @@ _page_body = html.Div([
     # populate the editable variable-mapping dropdowns in Advanced Step 1.
     dcc.Store(id="data-columns-store",    data=[]),
     dcc.Store(id="dataframe-store",       data={}),
+    # Downsampling note from parse_contents (None when the dataset was small
+    # enough to keep whole) — surfaced again as a banner in the Filter step.
+    dcc.Store(id="downsample-note",       data=None),
     dcc.Store(id="dataframe-filtered",    data={}),
     dcc.Store(id="code-read-store",       data={}),
     dcc.Store(id="data-source-store",     data=None),
@@ -4279,13 +4282,14 @@ def show_analyze_filename(filename):
     State("param-clip-slope",    "value"),   # NEW-FILTERS
     State("param-site-lat",      "value"),   # NEW-FILTERS (#3 QCRad)
     State("param-site-lon",      "value"),   # NEW-FILTERS (#3 QCRad)
+    State("downsample-note",     "data"),
 
     prevent_initial_call=True
 )
 def run_filter(filter_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
         gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_smooth, cs_energy, stale_window, clip_slope, site_lat, site_lon):
+        cs_smooth, cs_energy, stale_window, clip_slope, site_lat, site_lon, downsample_note):
 
     trigger = ctx.triggered_id
 
@@ -4529,7 +4533,25 @@ def run_filter(filter_clicks, upload_clicks,
         ]),
     ])
 
+    # Banner reminding the user that a very large dataset was downsampled at
+    # the Analyze step, so the filter counts below refer to the thinned data.
+    downsample_banner = ""
+    if downsample_note:
+        downsample_banner = html.Div([
+            html.B("⚠ Large dataset — downsampled. ", style={"fontFamily": "Arial, sans-serif"}),
+            html.Span(downsample_note, style={"fontFamily": "Arial, sans-serif"}),
+            html.Span(" Filtering and degradation run on this thinned data; because the same "
+                      "clock times are kept in every year, year-over-year trends are unaffected.",
+                      style={"fontFamily": "Arial, sans-serif"}),
+        ], style={
+            "padding": "12px 16px", "marginBottom": "16px",
+            "background": "#fffbeb", "border": "1px solid #fcd34d",
+            "borderRadius": "16px", "fontSize": "13px", "color": INK,
+            "lineHeight": "1.5",
+        })
+
     filter_layout = html.Div([
+        downsample_banner,
         html.Div([
             html.Div(summary_block, style={"flex": "1", "minWidth": "180px"}),
             html.Div(dcc.Graph(figure=pie_fig, config={"displayModeBar": False}), style={"flex": "1", "minWidth": "240px"}),
@@ -6254,6 +6276,7 @@ def poll_analyze_status(_n, token, n_clicks):
     Output("upload-status-output", "children",  allow_duplicate=True),
     Output("stored-data-file-name","data",      allow_duplicate=True),
     Output("data-columns-store",   "data",      allow_duplicate=True),
+    Output("downsample-note",      "data"),
     Input("analyze-btn",          "n_clicks"),
     Input("load-example-btn-1",   "n_clicks"),
     Input("load-example-btn-2",   "n_clicks"),
@@ -6287,9 +6310,9 @@ def analyze_uploaded_data_callback(
             output_msg = _success_banner(f"{example_filename} loaded")
         except Exception as e:
             return (html.Div(f"Error loading example: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", example_filename, [])
+                    {}, None, "", False, "Run prescreening", None, "", example_filename, [], None)
         return (html.Div("", className="text-muted"),
-                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename, [])
+                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename, [], None)
 
     # Analyze clicked
     if trigger == "analyze-btn":
@@ -6309,28 +6332,28 @@ def analyze_uploaded_data_callback(
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, contents, filename, progress=_status, timeout=ANALYZE_TIMEOUT_S)
                 if df is None:
-                    return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
+                    return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, df=df, progress=_status, timeout=ANALYZE_TIMEOUT_S)
             else:
                 return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                        {}, None, "", False, "Run prescreening", None, "", filename, [])
+                        {}, None, "", False, "Run prescreening", None, "", filename, [], None)
         except FutureTimeout:
             return (_no_data_alert("This is taking longer than expected — something may be wrong with your "
                                    "data. Check the file's formatting and columns, then try again."),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None)
         except Exception as e:
             return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None)
 
         _status("Packaging your dataset…")
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None)
 
         # Available columns for the editable mapping dropdowns, and whether
         # the Time variable lives in the index.
@@ -6426,12 +6449,18 @@ def analyze_uploaded_data_callback(
             }),
         ], className="slide-in-up")
 
+        # Downsampling note (if parse_contents thinned a very large dataset) —
+        # stored so the Filter step can show it as a banner too.
+        _ds_note = next((n for n in (mapping_notes or [])
+                         if n.startswith("Large dataset downsampled")), None)
+
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
                 "Run prescreening", None, "", stored_file_name,
                 {"columns": data_columns, "alternatives": alternatives,
-                 "detected": mapped_variables_dict, "quality_tags": quality_tags})
+                 "detected": mapped_variables_dict, "quality_tags": quality_tags},
+                _ds_note)
 
-    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None)
 
 
 # =============================================================================
