@@ -14,7 +14,7 @@ from page_supporting_files.analysis_utils import parse_contents
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
-from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
+from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code, downsize_block_mean
 from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
 from page_supporting_files.analysis_utils import estimate_pvpro_params
 from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter, stale_data_filter, clipping_filter, detect_and_fix_time_shifts
@@ -4533,15 +4533,14 @@ def run_filter(filter_clicks, upload_clicks,
         ]),
     ])
 
-    # Banner reminding the user that a very large dataset was downsampled at
-    # the Analyze step, so the filter counts below refer to the thinned data.
+    # Banner reminding the user that they downsized the dataset at the Analyze
+    # step, so the filter counts below refer to the reduced data.
     downsample_banner = ""
     if downsample_note:
         downsample_banner = html.Div([
-            html.B("⚠ Large dataset — downsampled. ", style={"fontFamily": "Arial, sans-serif"}),
+            html.B("⚠ Downsized dataset. ", style={"fontFamily": "Arial, sans-serif"}),
             html.Span(downsample_note, style={"fontFamily": "Arial, sans-serif"}),
-            html.Span(" Filtering and degradation run on this thinned data; because the same "
-                      "clock times are kept in every year, year-over-year trends are unaffected.",
+            html.Span(" Filtering and degradation below run on this downsized data.",
                       style={"fontFamily": "Arial, sans-serif"}),
         ], style={
             "padding": "12px 16px", "marginBottom": "16px",
@@ -5689,6 +5688,95 @@ def _build_overview_figures_div(df, mapped_variables_dict):
     )
 
 
+# =============================================================================
+# DOWNSIZE PANEL (large datasets)
+#
+# Shown between "identified variables" and the raw-data preview when the
+# parsed dataset exceeds DOWNSIZE_ROW_TARGET rows. Offers one-click preset
+# factors (including one that lands near 10,000 rows) plus a custom factor
+# input. The actual reduction is block-mean averaging: every `factor`
+# sequential readings are replaced by their mean (see downsize_block_mean).
+# =============================================================================
+DOWNSIZE_ROW_TARGET = 10000
+
+_downsize_pill_base = {
+    "padding": "10px 18px", "borderRadius": "999px", "cursor": "pointer",
+    "fontSize": "14px", "fontFamily": "Arial, sans-serif",
+    "border": f"1px solid {BORDER_STRONG}", "background": "#ffffff",
+    "color": INK, "whiteSpace": "nowrap",
+}
+
+
+def _downsize_btn(factor, n_rows, recommended=False):
+    rows_after = int(np.ceil(n_rows / factor))
+    style = dict(_downsize_pill_base)
+    if recommended:
+        style.update({"border": f"2px solid {NAVY}", "fontWeight": "600"})
+    label = [html.B(f"{factor:g}×"),
+             html.Span(f"  →  {rows_after:,} rows", style={"fontWeight": "400", "color": INK_SOFT})]
+    if recommended:
+        label.append(html.Span("  recommended", style={
+            "fontSize": "11px", "color": NAVY, "fontWeight": "700",
+            "textTransform": "uppercase", "letterSpacing": "0.06em", "marginLeft": "6px"}))
+    return html.Button(label, id={"type": "downsize-preset", "factor": f"{factor:g}"},
+                       n_clicks=0, style=style)
+
+
+def _build_downsize_panel(n_rows):
+    """The 'your dataset is large' card with preset + custom downsizing."""
+    f10k = max(round(n_rows / DOWNSIZE_ROW_TARGET, 1), 1.1)
+    factors = [(2.0, False), (5.0, False), (10.0, False)]
+    # Drop round presets that nearly coincide with the recommended factor,
+    # then insert the recommended one in ascending order.
+    factors = [(f, r) for f, r in factors if abs(f - f10k) / f10k > 0.15 and f > 1]
+    factors.append((f10k, True))
+    factors.sort(key=lambda t: t[0])
+    buttons = [_downsize_btn(f, n_rows, recommended=r) for f, r in factors]
+
+    return html.Div([
+        html.Div([
+            html.Span("⚠", style={"fontSize": "16px", "marginRight": "8px"}),
+            html.Span("large dataset", style={
+                "fontSize": "13px", "color": "#92400e", "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "700",
+            }),
+        ], style={"marginBottom": "8px"}),
+        html.Div(f"{n_rows:,} rows", style={
+            "fontSize": "34px", "fontWeight": "700", "color": INK, "lineHeight": "1",
+            "marginBottom": "6px",
+        }),
+        html.Div([
+            f"This is above the recommended {DOWNSIZE_ROW_TARGET:,} data points — analysis will be "
+            "slower and plots heavier. You can downsize it here: every group of consecutive "
+            "readings is replaced by its average, for every column, so the full time span "
+            "is kept and long-term trends are preserved (short spikes get smoothed).",
+        ], style={"fontSize": "14px", "color": INK_SOFT, "lineHeight": "1.6",
+                  "marginBottom": "14px", "maxWidth": "640px"}),
+        html.Div(buttons, style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                                 "marginBottom": "14px"}),
+        html.Div([
+            html.Span("or a custom factor:", style={
+                "fontSize": "13px", "color": INK_SOFT, "marginRight": "10px"}),
+            dcc.Input(id="downsize-custom-factor", type="number", min=1.1, step=0.1,
+                      placeholder="e.g. 7.5",
+                      style={**_param_input_style, "width": "110px", "display": "inline-block"}),
+            html.Button("Apply", id="downsize-apply-btn", n_clicks=0, style={
+                **_downsize_pill_base, "marginLeft": "10px",
+                "background": INK, "color": "white", "border": "none",
+                "fontWeight": "600",
+            }),
+        ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap"}),
+        html.Div(id="downsize-status", style={"marginTop": "10px"}),
+    ], style={
+        "padding": "20px 22px",
+        "background": "#fffbeb",
+        "border": "1px solid #fcd34d",
+        "borderRadius": "16px",
+        "marginBottom": "16px",
+        "fontFamily": "Arial, sans-serif",
+    })
+
+
 
 # Renders the "Identified Variables" panel as an editable table: each metric
 # row carries a dropdown so the user can override what the LLM detected (or
@@ -6429,6 +6517,8 @@ def analyze_uploaded_data_callback(
                 "borderRadius": "16px",
                 "marginBottom": "16px",
             }),
+            # Large-dataset downsizing offer (only rendered above 10k rows).
+            _build_downsize_panel(len(df)) if df is not None and len(df) > DOWNSIZE_ROW_TARGET else "",
             html.Div([
                 html.Div("raw data preview", style={
                     "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
@@ -6449,18 +6539,80 @@ def analyze_uploaded_data_callback(
             }),
         ], className="slide-in-up")
 
-        # Downsampling note (if parse_contents thinned a very large dataset) —
-        # stored so the Filter step can show it as a banner too.
-        _ds_note = next((n for n in (mapping_notes or [])
-                         if n.startswith("Large dataset downsampled")), None)
-
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
                 "Run prescreening", None, "", stored_file_name,
                 {"columns": data_columns, "alternatives": alternatives,
                  "detected": mapped_variables_dict, "quality_tags": quality_tags},
-                _ds_note)
+                None)
 
     return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [], None)
+
+
+# =============================================================================
+# CALLBACK — BLOCK-MEAN DOWNSIZING (large datasets)
+#
+# Fired by the preset pills or the custom-factor Apply button in the downsize
+# panel. Replaces the stored dataframe with its block-mean reduction, refreshes
+# the raw-data preview figures, and records a note that the Filter step
+# surfaces as a banner.
+# =============================================================================
+@app.callback(
+    Output("dataframe-store",  "data",     allow_duplicate=True),
+    Output("downsample-note",  "data",     allow_duplicate=True),
+    Output("downsize-status",  "children"),
+    Output("var-map-figures",  "children", allow_duplicate=True),
+    Input({"type": "downsize-preset", "factor": ALL}, "n_clicks"),
+    Input("downsize-apply-btn", "n_clicks"),
+    State("downsize-custom-factor", "value"),
+    State("dataframe-store",   "data"),
+    State("mapped-vars-store", "data"),
+    prevent_initial_call=True,
+)
+def apply_downsize(preset_clicks, apply_clicks, custom_factor, df_json, mapped_variables_dict):
+    no_change = (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+    if not df_json:
+        return no_change
+
+    trigger = ctx.triggered_id
+    if isinstance(trigger, dict):
+        # A preset pill. Dynamically created components can fire once on
+        # creation with zero clicks — ignore that.
+        if not any(c for c in (preset_clicks or []) if c):
+            return no_change
+        factor = trigger.get("factor")
+    else:
+        if not apply_clicks:
+            return no_change
+        factor = custom_factor
+
+    try:
+        factor = float(factor)
+        if not np.isfinite(factor) or factor <= 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return (dash.no_update, dash.no_update,
+                html.Div("Enter a factor greater than 1 (e.g. 5 or 7.5).", style={
+                    "fontSize": "13px", "color": "#b91c1c",
+                    "fontFamily": "Arial, sans-serif"}),
+                dash.no_update)
+
+    df = _df_from_store(df_json)
+    before = len(df)
+    if before < 2:
+        return no_change
+    df_small = downsize_block_mean(df, factor)
+
+    note = (f"Dataset downsized {factor:g}× by block averaging at your request: "
+            f"{before:,} → {len(df_small):,} rows. Each row is the mean of ~{factor:g} "
+            f"consecutive readings (every column averaged; full time span preserved).")
+    status = html.Div(
+        f"✓ Downsized {factor:g}×: {before:,} → {len(df_small):,} rows. "
+        f"The preview below and all later steps now use the downsized data.",
+        style={"fontSize": "13px", "color": "#15803d", "fontWeight": "600",
+               "fontFamily": "Arial, sans-serif"})
+    figures = _build_overview_figures_div(df_small, mapped_variables_dict)
+    return (df_small.to_json(date_format="iso", orient="split"),
+            note, status, figures)
 
 
 # =============================================================================
