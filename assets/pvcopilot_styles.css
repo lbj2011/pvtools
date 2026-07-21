@@ -128,6 +128,59 @@ html, body { background: #ffffff !important; }
   .pvcopilot-root .pvc-team-role { min-height:0; }
 }
 
+/* Live pipeline monitor */
+.pvcopilot-root .pvc-monitor { position:fixed; left:24px; bottom:24px; z-index:42; }
+.pvcopilot-root .pvc-monitor-toggle { display:flex; align-items:center; gap:9px; padding:11px 15px; border-radius:14px;
+  color:#263454; background:rgba(255,255,255,0.82); backdrop-filter:blur(22px) saturate(1.3);
+  -webkit-backdrop-filter:blur(22px) saturate(1.3); border:1px solid rgba(255,255,255,0.9);
+  box-shadow:0 12px 34px rgba(30,58,120,0.18); font-size:12.5px; font-weight:750; cursor:pointer; }
+.pvcopilot-root .pvc-monitor-dot { width:9px; height:9px; border-radius:50%; background:#9aa7bd; box-shadow:0 0 0 4px rgba(154,167,189,0.14); }
+.pvcopilot-root .pvc-monitor-dot.is-running { background:#2f6bff; box-shadow:0 0 0 4px rgba(47,107,255,0.16); animation:pvc-pulseDot 1.1s ease-in-out infinite; }
+.pvcopilot-root .pvc-monitor-dot.is-done { background:#18a36f; box-shadow:0 0 0 4px rgba(24,163,111,0.14); }
+.pvcopilot-root .pvc-monitor-dot.is-error { background:#cf3f4d; box-shadow:0 0 0 4px rgba(207,63,77,0.14); }
+.pvcopilot-root .pvc-monitor-panel { display:none; position:absolute; left:0; bottom:52px; width:min(410px,calc(100vw - 48px));
+  max-height:min(650px,calc(100vh - 110px)); overflow:hidden; border-radius:22px;
+  background:linear-gradient(150deg,rgba(255,255,255,0.94),rgba(240,247,255,0.88));
+  backdrop-filter:blur(30px) saturate(1.35); -webkit-backdrop-filter:blur(30px) saturate(1.35);
+  border:1px solid rgba(255,255,255,0.92); box-shadow:0 28px 76px rgba(30,58,120,0.27); }
+.pvcopilot-root .pvc-monitor-panel.is-open { display:block; animation:pvc-riseIn .2s ease both; }
+.pvcopilot-root .pvc-monitor-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:17px 18px 14px;
+  border-bottom:1px solid rgba(120,140,180,0.17); }
+.pvcopilot-root .pvc-monitor-title { color:#1c2540; font-size:15px; font-weight:800; }
+.pvcopilot-root .pvc-monitor-subtitle { margin-top:2px; color:#7b89a5; font-size:10.5px; }
+.pvcopilot-root .pvc-monitor-close { width:31px; height:31px; padding:0; border:0; border-radius:10px; color:#53617e;
+  background:rgba(120,140,180,0.12); font-size:20px; line-height:29px; cursor:pointer; }
+.pvcopilot-root .pvc-monitor-body { max-height:min(565px,calc(100vh - 190px)); overflow-y:auto; padding:10px 12px 12px; }
+.pvcopilot-root .pvc-monitor-row { padding:10px 11px; margin-bottom:7px; border-radius:13px; background:rgba(255,255,255,0.58);
+  border:1px solid rgba(255,255,255,0.82); }
+.pvcopilot-root .pvc-monitor-rowtop { display:flex; align-items:center; gap:8px; }
+.pvcopilot-root .pvc-monitor-statusdot { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:#9aa7bd; }
+.pvcopilot-root .pvc-monitor-row.is-running .pvc-monitor-statusdot { background:#2f6bff; animation:pvc-pulseDot 1.1s ease-in-out infinite; }
+.pvcopilot-root .pvc-monitor-row.is-done .pvc-monitor-statusdot { background:#18a36f; }
+.pvcopilot-root .pvc-monitor-row.is-error .pvc-monitor-statusdot { background:#cf3f4d; }
+.pvcopilot-root .pvc-monitor-row.is-locked { opacity:.62; }
+.pvcopilot-root .pvc-monitor-label { flex:1; color:#263454; font-size:12px; font-weight:750; }
+.pvcopilot-root .pvc-monitor-badge { padding:3px 6px; border-radius:980px; color:#71809e; background:rgba(120,140,180,0.1);
+  font-size:8.5px; line-height:1; font-weight:800; letter-spacing:.05em; }
+.pvcopilot-root .pvc-monitor-row.is-running .pvc-monitor-badge { color:#2f6bff; background:rgba(47,107,255,0.1); }
+.pvcopilot-root .pvc-monitor-row.is-done .pvc-monitor-badge { color:#15835e; background:rgba(24,163,111,0.1); }
+.pvcopilot-root .pvc-monitor-row.is-error .pvc-monitor-badge { color:#b52f3d; background:rgba(207,63,77,0.1); }
+.pvcopilot-root .pvc-monitor-message { margin:5px 0 0 16px; color:#657391; font-size:10.8px; line-height:1.4; }
+.pvcopilot-root .pvc-monitor-track { height:4px; margin:8px 0 0 16px; overflow:hidden; border-radius:99px; background:rgba(120,140,180,0.15); }
+.pvcopilot-root .pvc-monitor-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,#5b96ff,#2f6bff); transition:width .25s ease; }
+.pvcopilot-root .pvc-monitor-meta { margin:5px 0 0 16px; color:#8a97b0; font-family:'JetBrains Mono',monospace !important; font-size:8.8px; line-height:1.35; }
+.pvcopilot-root .pvc-monitor-error { margin:6px 0 0 16px; color:#b52f3d; font-size:9.5px; line-height:1.4; overflow-wrap:anywhere; }
+.pvcopilot-root .pvc-monitor-warning { margin:2px 0 9px; padding:11px 12px; border-radius:13px; color:#8e2632;
+  background:rgba(207,63,77,0.1); border:1px solid rgba(207,63,77,0.2); font-size:10.5px; line-height:1.45; }
+.pvcopilot-root .pvc-monitor-warning b { display:block; margin-bottom:3px; }
+.pvcopilot-root .pvc-monitor-warning code { display:block; margin-top:5px; color:#8e2632; background:rgba(255,255,255,0.48);
+  padding:5px 6px; border-radius:7px; font-size:8.5px; white-space:normal; overflow-wrap:anywhere; }
+.pvcopilot-root .pvc-monitor-footer { padding:6px 3px 2px; color:#94a0b6; text-align:center; font-family:'JetBrains Mono',monospace !important; font-size:8.5px; }
+@media (max-width:620px) {
+  .pvcopilot-root .pvc-monitor { left:14px; bottom:14px; }
+  .pvcopilot-root .pvc-monitor-panel { width:calc(100vw - 28px); }
+}
+
 /* Data requirements: three signal tiers first, then one compact file checklist. */
 .pvcopilot-root .pvc-datareq-modal { max-width:900px; padding:30px 32px 28px;
   background:linear-gradient(150deg,rgba(255,255,255,0.92),rgba(248,251,255,0.84));

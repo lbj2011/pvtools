@@ -19,8 +19,11 @@ tolerated when absent.
 """
 
 import os
+import base64
+import io
 import json
 import threading
+import time
 import traceback
 import uuid
 
@@ -96,14 +99,33 @@ _ANALYSIS_JOBS = {}
 
 def _pvpro_new_job():
     jid = uuid.uuid4().hex[:12]
+    now = time.time()
     _PVPRO_JOBS[jid] = {"phase": "starting", "current": 0, "total": 1,
-                        "message": "Starting PVPRO\u2026", "result": None, "error": None}
+                        "message": "Starting PVPRO\u2026", "result": None, "error": None,
+                        "started_at": now, "updated_at": now, "worker_pid": os.getpid(),
+                        "history": [{"at": now, "phase": "starting", "message": "Starting PVPRO\u2026"}]}
     return jid
 
 
 def _pvpro_set(jid, **kw):
-    if jid in _PVPRO_JOBS:
-        _PVPRO_JOBS[jid].update(kw)
+    job = _PVPRO_JOBS.get(jid)
+    if job:
+        _update_job_record(job, **kw)
+
+
+def _update_job_record(job, **kw):
+    """Update a job and retain a compact, user-visible phase history."""
+    now = time.time()
+    old_message = job.get("message")
+    old_phase = job.get("phase")
+    job.update(kw)
+    job["updated_at"] = now
+    new_message = job.get("message")
+    new_phase = job.get("phase")
+    if new_message and (new_message != old_message or new_phase != old_phase):
+        history = list(job.get("history") or [])
+        history.append({"at": now, "phase": new_phase, "message": new_message})
+        job["history"] = history[-24:]
 
 
 def _new_async_job(registry, message):
@@ -113,22 +135,31 @@ def _new_async_job(registry, message):
     but its result is discarded and can never be committed to the Dash stores.
     """
     jid = uuid.uuid4().hex[:12]
+    now = time.time()
     registry[jid] = {"phase": "running", "message": message, "result": None,
-                     "error": None, "cancelled": False}
+                     "error": None, "cancelled": False, "current": 0, "total": 1,
+                     "started_at": now, "updated_at": now, "worker_pid": os.getpid(),
+                     "history": [{"at": now, "phase": "running", "message": message}]}
     return jid
 
 
 def _cancel_async_job(registry, jid):
     job = registry.get(jid)
     if job:
-        job["cancelled"] = True
-        job["phase"] = "cancelled"
+        _update_job_record(job, cancelled=True, phase="cancelled", message="Cancelled by user.")
 
 
 def _async_set(registry, jid, **kw):
     job = registry.get(jid)
     if job and not job.get("cancelled"):
-        job.update(kw)
+        _update_job_record(job, **kw)
+
+
+def _missing_job_message(kind, jid, launched_pid):
+    return (f"{kind} job {jid} is not visible on polling worker {os.getpid()} "
+            f"(launched on worker {launched_pid or '?'}). This deployment is using multiple "
+            "web workers while PV Copilot's background registry is process-local. Run this page "
+            "with one worker, or move background jobs to a shared queue/cache.")
 
 # --------------------------------------------------------------------------- config
 EXAMPLES = [
@@ -205,7 +236,9 @@ DEFAULT_STATE = {
     "show_params": False, "pvpro_job": None, "pvpro_prog": None, "pvpro_dur": 0.0, "pvpro_nkept": 0, "diag_job": None,
     "pvpro_window": "", "pvpro_est_keys": [], "simple_method": "YOY", "pvpro_mode": "advanced", "pvpro_fig_sel": "p_mp_ref",
     "filt_open": False, "metric_open": False,
-    "ingest_job": None, "analysis_job": None, "analysis_scope": None,
+    "ingest_job": None, "ingest_worker_pid": None,
+    "analysis_job": None, "analysis_worker_pid": None, "analysis_scope": None,
+    "pvpro_worker_pid": None,
 }
 EMPTY_DATA = {"loaded": False}
 
@@ -332,6 +365,40 @@ def load_example_df(example_file):
     return pd.read_parquet(os.path.join("data", example_file))
 
 
+def load_raw_data(contents=None, filename=None, example_file=None, progress_callback=None):
+    """Read bytes into a dataframe without inspecting, mapping, or scoring it."""
+    if example_file:
+        _report(progress_callback, 1, 2, "Reading example file…")
+        df = load_example_df(example_file)
+        filename = example_file
+    else:
+        if not contents or not filename:
+            raise ValueError("No file was provided.")
+        _report(progress_callback, 1, 2, "Decoding uploaded file…")
+        _content_type, content_string = contents.split(",", 1)
+        decoded = base64.b64decode(content_string)
+        lower = filename.lower()
+        if lower.endswith(".csv"):
+            try:
+                df = pd.read_csv(io.BytesIO(decoded), encoding="utf-8")
+            except UnicodeDecodeError:
+                df = pd.read_csv(io.BytesIO(decoded), encoding="latin-1")
+        elif lower.endswith((".parquet", ".pq")):
+            df = pd.read_parquet(io.BytesIO(decoded))
+        elif lower.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(io.BytesIO(decoded))
+        else:
+            raise ValueError("Unsupported file type. Upload CSV or Parquet.")
+    _report(progress_callback, 2, 2, "Storing the raw dataset…")
+    return {"loaded": True, "identified": False, "df": _df_to_json(df),
+            "filename": filename or "your_data", "columns": [str(c) for c in df.columns]}
+
+
+def _report(progress_callback, current, total, message):
+    if progress_callback:
+        progress_callback(current, total, message)
+
+
 def _build_mapping(df, mapped):
     roles = ["Time", "Irradiance", "DC Power", "Module temperature", "DC Voltage", "DC Current"]
     mapping = []
@@ -348,8 +415,12 @@ def _build_mapping(df, mapped):
     return mapping
 
 
-def run_parse(contents=None, filename=None, df=None):
-    df, _summary, mapped, code_read, notes = parse_contents(contents=contents, filename=filename, df=df)
+def run_parse(contents=None, filename=None, df=None, progress_callback=None):
+    _report(progress_callback, 1, 4, "Identifying signal columns…")
+    parser_progress = (lambda message: _report(progress_callback, 1, 4, message)) if progress_callback else None
+    df, _summary, mapped, code_read, notes = parse_contents(
+        contents=contents, filename=filename, df=df, progress=parser_progress)
+    _report(progress_callback, 2, 4, "Validating required signals and identified columns…")
     if df is None or not mapped:
         raise ValueError("Couldn't identify the required columns automatically.")
     irra_key = mapped.get("Irradiance")
@@ -357,6 +428,7 @@ def run_parse(contents=None, filename=None, df=None):
         raise ValueError("Irradiance column not found — filtering needs an irradiance channel.")
     n = int(len(df))
     completeness = float(df.notna().mean().mean()) * 100.0
+    _report(progress_callback, 3, 4, "Computing completeness and column quality…")
     qtags = {}
     for c in df.columns:
         try:
@@ -364,7 +436,8 @@ def run_parse(contents=None, filename=None, df=None):
         except Exception:
             qtags[str(c)] = ""
     n_cols_total = len(df.columns) + (1 if isinstance(df.index, pd.DatetimeIndex) else 0)
-    return {"loaded": True, "df": _df_to_json(df), "mapped": mapped, "irra_key": irra_key,
+    _report(progress_callback, 4, 4, "Serializing the validated dataset…")
+    return {"loaded": True, "identified": True, "df": _df_to_json(df), "mapped": mapped, "irra_key": irra_key,
             "columns": [str(c) for c in df.columns], "n_columns": n_cols_total,
             "detected": dict(mapped), "quality_tags": qtags,
             "filename": filename or "your_data", "n_raw": n, "completeness": round(completeness, 1),
@@ -372,12 +445,14 @@ def run_parse(contents=None, filename=None, df=None):
             "has_vi": bool(mapped.get("DC Voltage") and mapped.get("DC Current"))}
 
 
-def apply_filter_chain(df, mapped, irra_key, selected, fparams):
+def apply_filter_chain(df, mapped, irra_key, selected, fparams, progress_callback=None):
     n_raw = int(len(df))
+    _report(progress_callback, 1, 7, "Applying basic value and sensor-range checks…")
     bv_normal, _ = basic_value_filter(df, mapped)
     df = df.loc[bv_normal].copy()
     clearsky_mask = pd.Series(True, index=df.index)
     if selected.get("clearsky", True):
+        _report(progress_callback, 2, 7, "Detecting clear-sky periods…")
         try:
             cs_idx, _ = clear_sky_filter(df, irra_key,
                                          smoothness_threshold=_num(fparams.get("clearsky_smooth"), 0.3),
@@ -385,15 +460,18 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams):
             clearsky_mask = pd.Series(df.index.isin(cs_idx), index=df.index)
         except Exception:
             clearsky_mask = pd.Series(True, index=df.index)
+    _report(progress_callback, 3, 7, "Normalizing power and correcting temperature…")
     df_f = normalize(df, mapped, gamma=-0.004)   # temperature correction (always applied)
     mask = pd.Series(clearsky_mask.values, index=df_f.index)
     if selected.get("tz", True):
+        _report(progress_callback, 4, 7, "Aligning timezone and daylight-saving timestamps…")
         try:
             df_f.index = pd.to_datetime(df_f.index).tz_localize("UTC").tz_convert("US/Pacific")
             mask.index = df_f.index
         except Exception:
             pass
     if selected.get("irr", True):
+        _report(progress_callback, 5, 7, "Removing low-irradiance and low-power points…")
         try:
             keep_idx, _ = low_irra_power_filter(df_f, mapped,
                                                 irr_thresh=_num(fparams.get("irr_thresh"), 300),
@@ -402,6 +480,7 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams):
         except Exception:
             pass
     if selected.get("iqr", True):
+        _report(progress_callback, 6, 7, "Removing statistical outliers…")
         try:
             ni, _ = identify_outliers_iqr(df_f, "norm", iqr_multiplier=_num(fparams.get("iqr"), 1.5))
             mask &= df_f.index.isin(ni)
@@ -410,6 +489,7 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams):
     kept = mask.values.astype(bool)
     df_good = df_f.loc[df_f.index[kept]]
     n_kept = int(len(df_good))
+    _report(progress_callback, 7, 7, "Building filtering summary figures…")
     pie_json, power_json = _filter_figures(df_f, kept, n_raw, n_kept)
     return df_good, n_raw, n_kept, pie_json, power_json
 
@@ -488,11 +568,14 @@ def run_one_metric(daily, method, mparams, df_good=None, mapped=None):
     raise ValueError(f"Unknown metric: {method}")
 
 
-def run_methods(df_good, irra_key, methods, mparams, mapped=None):
+def run_methods(df_good, irra_key, methods, mparams, mapped=None, progress_callback=None):
     """Run every selected statistical method; return {method: {rate, fig}}."""
+    total = max(1, len(methods) + 1)
+    _report(progress_callback, 1, total, "Aggregating the filtered time series…")
     daily = aggregate_daily(df_good, irra_key)
     out = {}
-    for m in methods:
+    for pos, m in enumerate(methods, start=2):
+        _report(progress_callback, pos, total, f"Running {METHOD_LABEL.get(m, m)}…")
         try:
             rate, fig = run_one_metric(daily, m, mparams, df_good=df_good, mapped=mapped)
             out[m] = {"rate": float(rate) if rate == rate else None,
@@ -526,28 +609,30 @@ def _launch_pvpro(dg, mapped, kwargs):
                         rates_json[str(k)] = float(v)
                     except Exception:
                         pass
-            _pvpro_set(jid, phase="done", result={"rate": float(rd), "figs": figs_json, "rates": rates_json})
+            _pvpro_set(jid, phase="done", message="PVPRO completed.", current=1, total=1,
+                       result={"rate": float(rd), "figs": figs_json, "rates": rates_json})
         except Exception as e:
             traceback.print_exc()
-            _pvpro_set(jid, phase="error", error=str(e))
+            _pvpro_set(jid, phase="error", message="PVPRO failed.", error=str(e))
 
     threading.Thread(target=worker, daemon=True).start()
     return jid
 
 
 def _launch_ingest(contents=None, filename=None, example_file=None):
-    jid = _new_async_job(_INGEST_JOBS, "Reading and identifying columns…")
+    jid = _new_async_job(_INGEST_JOBS, "Reading the data file…")
 
     def worker():
         try:
-            if example_file:
-                parsed = run_parse(df=load_example_df(example_file), filename=example_file)
-            else:
-                parsed = run_parse(contents=contents, filename=filename)
-            _async_set(_INGEST_JOBS, jid, phase="done", result=parsed)
+            progress = lambda current, total, message: _async_set(
+                _INGEST_JOBS, jid, phase="running", current=current, total=total, message=message)
+            raw = load_raw_data(contents=contents, filename=filename, example_file=example_file,
+                                progress_callback=progress)
+            _async_set(_INGEST_JOBS, jid, phase="done", current=2, total=2,
+                       message="File loaded. No analysis has been run.", result=raw)
         except Exception as exc:
             traceback.print_exc()
-            _async_set(_INGEST_JOBS, jid, phase="error", error=str(exc))
+            _async_set(_INGEST_JOBS, jid, phase="error", message="Data loading failed.", error=str(exc))
 
     threading.Thread(target=worker, daemon=True).start()
     return jid
@@ -556,6 +641,7 @@ def _launch_ingest(contents=None, filename=None, example_file=None):
 def _launch_analysis(kind, work):
     labels = {
         "simple_yoy": "Running the simple analysis…",
+        "simple_prepare_pvpro": "Preparing the dataset for PVPRO…",
         "advanced_1": "Screening raw signals…",
         "advanced_2": "Applying filters…",
         "advanced_3": "Calculating degradation…",
@@ -565,11 +651,15 @@ def _launch_analysis(kind, work):
 
     def worker():
         try:
-            payload = work()
-            _async_set(_ANALYSIS_JOBS, jid, phase="done", result=payload)
+            progress = lambda current, total, message: _async_set(
+                _ANALYSIS_JOBS, jid, phase="running", current=current, total=total, message=message)
+            progress(0, 1, labels.get(kind, "Preparing analysis…"))
+            payload = work(progress)
+            _async_set(_ANALYSIS_JOBS, jid, phase="done", current=1, total=1,
+                       message="Step completed successfully.", result=payload)
         except Exception as exc:
             traceback.print_exc()
-            _async_set(_ANALYSIS_JOBS, jid, phase="error", error=str(exc))
+            _async_set(_ANALYSIS_JOBS, jid, phase="error", message="Step failed.", error=str(exc))
 
     threading.Thread(target=worker, daemon=True).start()
     return jid
@@ -789,10 +879,8 @@ def workflow_layout(state, data, filtered, result):
             html.Div("\u2713", style={"width": "34px", "height": "34px", "borderRadius": "11px",
                      "background": "rgba(52,199,140,0.16)", "border": "1px solid rgba(52,199,140,0.3)",
                      "color": "#1a8f60", "display": "flex", "alignItems": "center", "justifyContent": "center", "fontWeight": 800}),
-            html.Div([html.Div(state["selected_label"], style={"fontSize": "16px", "fontWeight": 800}),
-                      html.Div([html.B(f"{data.get('n_raw', 0):,}"), " rows \u00b7 ", html.B(f"{data.get('completeness', 0)}%"),
-                                " complete \u00b7 ready to analyze"],
-                               style={"fontSize": "12px", "color": "#6b7794"})])]),
+            html.Div(state["selected_label"] or data.get("filename") or "Selected data file",
+                     style={"fontSize": "16px", "fontWeight": 800})]),
         mode_toggle(state)])
     body = simple_body(state, data, result) if state["mode"] == "simple" else advanced_body(state, data, filtered, result)
     return html.Div(className="glass rise", style={"padding": "26px 30px 30px", "position": "relative"}, children=[
@@ -830,7 +918,8 @@ def _simple_method_toggle(state, data):
 
 
 def _simple_pvpro_settings(state, data):
-    needs_vi = not data.get("has_vi")
+    identified = bool(data.get("identified"))
+    needs_vi = identified and not data.get("has_vi")
     bullet = lambda t: html.Li(t, style={"fontSize": "12.5px", "color": SUB, "lineHeight": "1.5", "marginBottom": "3px"})
     return html.Div([
         html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px", "marginBottom": "8px"}, children=[
@@ -845,13 +934,15 @@ def _simple_pvpro_settings(state, data):
                     target="_blank", style={"color": BLUE, "fontWeight": 600})])],
             style={"margin": "0 0 8px", "paddingLeft": "20px"}),
         (html.Div("\u26a0 DC Voltage + DC Current weren't identified in this dataset \u2014 PVPRO can't run.",
-                  style={"fontSize": "12.5px", "color": "#8a6d00", "fontWeight": 600, "marginBottom": "8px"}) if needs_vi else html.Div()),
+                  style={"fontSize": "12.5px", "color": "#8a6d00", "fontWeight": 600, "marginBottom": "8px"}) if needs_vi else
+         html.Div("Signal availability will be checked when analysis starts.",
+                  style={"fontSize": "12.5px", "color": SUB, "marginBottom": "8px"}) if not identified else html.Div()),
         html.Details([
             html.Summary("Customize parameters", style={"cursor": "pointer", "fontSize": "12.5px", "fontWeight": 600, "color": BLUE, "padding": "4px 0"}),
-            html.Div(html.Button([icon_spark(13, BLUE), html.Span("Estimate from data")], id={"type": "act", "index": "estimate-pvpro"}, n_clicks=0, style={
+            (html.Div(html.Button([icon_spark(13, BLUE), html.Span("Estimate from data")], id={"type": "act", "index": "estimate-pvpro"}, n_clicks=0, style={
                 "display": "inline-flex", "alignItems": "center", "gap": "7px", "padding": "8px 14px", "marginTop": "8px",
                 "border": "1px solid rgba(79,139,255,0.5)", "borderRadius": "980px", "background": "rgba(255,255,255,0.7)",
-                "color": BLUE, "fontWeight": 600, "fontSize": "12px", "cursor": "pointer"})),
+                "color": BLUE, "fontWeight": 600, "fontSize": "12px", "cursor": "pointer"})) if identified else html.Div()),
             html.Div([
                 _num_input("mparam", "cells", state["mparams"].get("cells", 60), "Cells in series"),
                 _num_input("mparam", "mps", state["mparams"].get("mps", 1), "Modules per string", dot=("mps" in state.get("pvpro_est_keys", []))),
@@ -1673,6 +1764,64 @@ def bot_reply(text, data, result):
     return "Ask about the degradation rate, the metrics, the filters, or how to read the trend figures."
 
 
+# --------------------------------------------------------------------------- live progress monitor
+def progress_monitor():
+    return html.Div(className="pvc-monitor", children=[
+        html.Button([
+            html.Span(className="pvc-monitor-dot", id="progress-monitor-dot"),
+            html.Span("Progress monitor")
+        ], id="progress-monitor-toggle", n_clicks=0, className="pvc-monitor-toggle",
+           title="Show background task progress"),
+        html.Div(id="progress-monitor-panel", className="pvc-monitor-panel", children=[
+            html.Div(className="pvc-monitor-head", children=[
+                html.Div([
+                    html.Div("Pipeline activity", className="pvc-monitor-title"),
+                    html.Div("Live server-side progress and diagnostics", className="pvc-monitor-subtitle")
+                ]),
+                html.Button("×", id="progress-monitor-close", n_clicks=0,
+                            className="pvc-monitor-close", **{"aria-label": "Close progress monitor"})
+            ]),
+            html.Div(id="progress-monitor-body", className="pvc-monitor-body")
+        ])
+    ])
+
+
+def _monitor_row(label, status="idle", message="Waiting", job=None, job_id=None, launched_pid=None):
+    status = status if status in ("idle", "running", "done", "error", "locked") else "idle"
+    now = time.time()
+    details = []
+    if job:
+        started = job.get("started_at") or now
+        updated = job.get("updated_at") or started
+        elapsed = max(0, int(now - started))
+        since_update = max(0, int(now - updated))
+        current = job.get("current") or 0
+        total = job.get("total") or 0
+        pct = min(100, max(3, current / total * 100)) if total and status == "running" else (100 if status == "done" else 0)
+        if status == "running":
+            details.append(html.Div(className="pvc-monitor-track", children=[
+                html.Div(className="pvc-monitor-fill", style={"width": f"{pct:.1f}%"})]))
+        meta = [f"{elapsed}s elapsed", f"updated {since_update}s ago"]
+        if job_id:
+            meta.append(f"job {job_id}")
+        if launched_pid:
+            meta.append(f"worker {launched_pid}")
+        details.append(html.Div(" · ".join(meta), className="pvc-monitor-meta"))
+        if job.get("error"):
+            details.append(html.Div(str(job["error"]), className="pvc-monitor-error"))
+    elif job_id:
+        details.append(html.Div(
+            f"Job {job_id} was started on worker {launched_pid or '?'} but is not visible on worker {os.getpid()}.",
+            className="pvc-monitor-error"))
+    return html.Div(className=f"pvc-monitor-row is-{status}", children=[
+        html.Div(className="pvc-monitor-rowtop", children=[
+            html.Span(className="pvc-monitor-statusdot"),
+            html.Span(label, className="pvc-monitor-label"),
+            html.Span(status.upper(), className="pvc-monitor-badge")]),
+        html.Div(message, className="pvc-monitor-message"),
+        *details])
+
+
 # --------------------------------------------------------------------------- static pages
 def _modal_shell(kicker, title, subtitle, body_children, modal_class=""):
     head = [html.Div(kicker, style={"display": "inline-flex", "padding": "6px 14px", "borderRadius": "20px",
@@ -1859,6 +2008,7 @@ def render_modal(view):
 def _root_layout():
     return dmc.MantineProvider(forceColorScheme="light", children=html.Div(className="pvcopilot-root", children=[
         html.Div(id="pvc-page", children=home_body()),
+        progress_monitor(),
         chat_widget(),
         dcc.Store(id="pvc-view", data="app"),
         dcc.Store(id="app-state", data=DEFAULT_STATE),
@@ -1879,6 +2029,133 @@ def _root_layout():
 
 
 layout = _root_layout()
+
+
+app.clientside_callback(
+    """
+    function(openClicks, closeClicks, currentClass) {
+        var triggered = (window.dash_clientside.callback_context.triggered || []);
+        if (!triggered.length || !triggered[0].value) return window.dash_clientside.no_update;
+        var id = triggered[0].prop_id || '';
+        if (id.indexOf('progress-monitor-close') === 0) return 'pvc-monitor-panel';
+        return (currentClass || '').indexOf(' is-open') >= 0
+            ? 'pvc-monitor-panel' : 'pvc-monitor-panel is-open';
+    }
+    """,
+    Output("progress-monitor-panel", "className"),
+    Input("progress-monitor-toggle", "n_clicks"),
+    Input("progress-monitor-close", "n_clicks"),
+    State("progress-monitor-panel", "className"),
+    prevent_initial_call=True,
+)
+
+
+@app.callback(
+    Output("progress-monitor-body", "children"),
+    Output("progress-monitor-dot", "className"),
+    Input("async-job-poll", "n_intervals"),
+    Input("pvpro-poll", "n_intervals"),
+    State("app-state", "data"), State("data-store", "data"),
+    State("filtered-store", "data"), State("result-store", "data"),
+)
+def render_progress_monitor(_async_tick, _pvpro_tick, state, data, filtered, result):
+    state = state or DEFAULT_STATE
+    data = data or EMPTY_DATA
+    filtered = filtered or {}
+    result = result or {}
+    adv = state.get("adv") or {}
+
+    ingest_id = state.get("ingest_job")
+    analysis_id = state.get("analysis_job")
+    pvpro_id = state.get("pvpro_job")
+    diag_id = state.get("diag_job")
+    ingest_job = _INGEST_JOBS.get(ingest_id) if ingest_id else None
+    analysis_job = _ANALYSIS_JOBS.get(analysis_id) if analysis_id else None
+    pvpro_job = _PVPRO_JOBS.get(pvpro_id) if pvpro_id else None
+    diag_job = _DIAG_JOBS.get(diag_id) if diag_id else None
+    analysis_kind = (analysis_job or {}).get("kind")
+
+    def running_status(job_id, job):
+        if not job_id:
+            return None
+        if not job:
+            return "error"
+        return "error" if job.get("phase") == "error" else ("done" if job.get("phase") == "done" else "running")
+
+    ingest_status = running_status(ingest_id, ingest_job)
+    if not ingest_status:
+        ingest_status = "done" if data.get("loaded") else "idle"
+    rows = [_monitor_row(
+        "Data loading", ingest_status,
+        (ingest_job or {}).get("message") or ("Dataset is ready." if data.get("loaded") else "No dataset selected."),
+        ingest_job, ingest_id, state.get("ingest_worker_pid"))]
+
+    def advanced_row(step, label, kind, ready_message, done_message):
+        if analysis_id and analysis_kind == kind:
+            status = running_status(analysis_id, analysis_job)
+            return _monitor_row(label, status, (analysis_job or {}).get("message") or ready_message,
+                                analysis_job, analysis_id, state.get("analysis_worker_pid"))
+        value = adv.get(str(step), "locked")
+        status = "done" if value == "done" else ("locked" if value == "locked" else "idle")
+        message = done_message if status == "done" else ("Complete the previous step first." if status == "locked" else ready_message)
+        return _monitor_row(label, status, message)
+
+    rows.append(advanced_row(1, "Data prescreening", "advanced_1", "Ready to inspect raw signals.", "Prescreening completed."))
+    rows.append(advanced_row(2, "Intelligent filtering", "advanced_2", "Ready to apply filters.", "Filtering completed."))
+
+    if analysis_id and analysis_kind in ("simple_yoy", "simple_prepare_pvpro", "advanced_3"):
+        analysis_status = running_status(analysis_id, analysis_job)
+        rows.append(_monitor_row("Degradation analysis", analysis_status,
+                                 (analysis_job or {}).get("message") or "Calculating degradation…",
+                                 analysis_job, analysis_id, state.get("analysis_worker_pid")))
+    else:
+        analysis_done = bool(state.get("simple_done") or adv.get("3") == "done")
+        analysis_locked = not data.get("loaded") or (state.get("mode") == "advanced" and adv.get("3") == "locked")
+        rows.append(_monitor_row("Degradation analysis",
+                                 "done" if analysis_done else ("locked" if analysis_locked else "idle"),
+                                 "Analysis completed." if analysis_done else ("Complete filtering first." if analysis_locked else "Ready to calculate degradation.")))
+
+    pv_status = running_status(pvpro_id, pvpro_job)
+    if not pv_status:
+        pv_status = "done" if "PVPRO" in ((result.get("multi") or {})) else "idle"
+    rows.append(_monitor_row("PVPRO fitting", pv_status,
+                             (pvpro_job or {}).get("message") or ("PVPRO result is ready." if pv_status == "done" else "Not running."),
+                             pvpro_job, pvpro_id, state.get("pvpro_worker_pid")))
+
+    code_status = "done" if adv.get("4") == "done" else ("locked" if adv.get("4") == "locked" else "idle")
+    rows.append(_monitor_row("Code generation", code_status,
+                             "Reproducible code generated." if code_status == "done" else "Available after analysis."))
+
+    if diag_id:
+        diag_status = "error" if not diag_job else ("done" if diag_job.get("done") else "running")
+        diag_message = (diag_job or {}).get("message") or ("Generating AI diagnosis…" if diag_status == "running" else "Diagnosis task is unavailable.")
+        rows.append(_monitor_row("AI diagnosis", diag_status, diag_message, diag_job, diag_id,
+                                 (diag_job or {}).get("worker_pid")))
+    else:
+        rows.append(_monitor_row("AI diagnosis", "done" if result.get("diagnosis") else "idle",
+                                 "Diagnosis completed." if result.get("diagnosis") else "Not requested."))
+
+    missing = []
+    for label, jid, job, launched in (
+        ("data loading", ingest_id, ingest_job, state.get("ingest_worker_pid")),
+        ("analysis", analysis_id, analysis_job, state.get("analysis_worker_pid")),
+        ("PVPRO", pvpro_id, pvpro_job, state.get("pvpro_worker_pid")),
+    ):
+        if jid and not job:
+            missing.append(f"{label} job {jid}: launched on worker {launched or '?'}, polled on worker {os.getpid()}")
+    banner = []
+    if missing:
+        banner = [html.Div(className="pvc-monitor-warning", children=[
+            html.B("Deployment worker mismatch detected."),
+            html.Div("The app stores jobs in process memory. Run this page with one web worker, or move jobs to a shared queue/cache."),
+            html.Code(" | ".join(missing))])]
+
+    active_jobs = [j for j in (ingest_job, analysis_job, pvpro_job, diag_job) if j and j.get("phase") not in ("done", "error", "cancelled") and not j.get("done")]
+    any_missing = bool(missing)
+    any_error = any(j and (j.get("phase") == "error" or j.get("error")) for j in (ingest_job, analysis_job, pvpro_job))
+    dot_state = "is-error" if any_missing or any_error else ("is-running" if active_jobs else ("is-done" if data.get("loaded") else "is-idle"))
+    footer = html.Div(f"Polling worker {os.getpid()} · updates every 0.9s", className="pvc-monitor-footer")
+    return [*banner, *rows, footer], f"pvc-monitor-dot {dot_state}"
 
 
 # Busy overlay: show a spinner + live seconds counter while an action computes,
@@ -1944,8 +2221,12 @@ def poll_pvpro(_n, state, filtered, result):
     djid = state.get("diag_job")
     if djid:
         dj = _DIAG_JOBS.get(djid)
+        if not dj:
+            state = dict(state); state["diag_job"] = None
+            result = dict(result or {}); result["diagnosing"] = False
+            result["diagnosis"] = "AI diagnosis task is unavailable on this server worker."
+            return state, result
         if dj and dj.get("done"):
-            _DIAG_JOBS.pop(djid, None)
             state = dict(state); state["diag_job"] = None
             result = dict(result or {}); result["diagnosis"] = dj.get("text"); result["diagnosing"] = False
             return state, result
@@ -1958,14 +2239,21 @@ def poll_pvpro(_n, state, filtered, result):
         return no_update, no_update
     job = _PVPRO_JOBS.get(jid)
     if not job:
-        return no_update, no_update
+        state = dict(state); state["adv"] = dict(state.get("adv") or {})
+        state["pvpro_job"] = None; state["pvpro_prog"] = None
+        if not simple:
+            state["adv"]["3"] = "idle"
+        message = _missing_job_message("PVPRO", jid, state.get("pvpro_worker_pid"))
+        state["pvpro_worker_pid"] = None
+        return state, dict(result or {}, error=message)
     state = dict(state)
     state["adv"] = dict(state.get("adv") or {})
     if job["phase"] == "error":
         state["pvpro_job"] = None; state["pvpro_prog"] = None
         if not simple:
             state["adv"]["3"] = "idle"
-        _PVPRO_JOBS.pop(jid, None)
+        _update_job_record(job, committed=True)
+        state["pvpro_worker_pid"] = None
         return state, dict(result or {}, error=job.get("error"))
     if job["phase"] == "done":
         r = job.get("result") or {}
@@ -1977,7 +2265,8 @@ def poll_pvpro(_n, state, filtered, result):
             state["simple_done"] = True
         else:
             state["adv"]["3"] = "done"; state["adv"]["4"] = "idle"
-        _PVPRO_JOBS.pop(jid, None)
+        _update_job_record(job, committed=True)
+        state["pvpro_worker_pid"] = None
         return state, res
     # still running -> update progress
     state["pvpro_prog"] = {k: job.get(k) for k in ("phase", "current", "total", "message")}
@@ -2002,29 +2291,45 @@ def poll_cancellable_jobs(_n, state, data, filtered, result):
     ingest_id = state.get("ingest_job")
     if ingest_id:
         job = _INGEST_JOBS.get(ingest_id)
+        if not job:
+            message = _missing_job_message("Data-loading", ingest_id, state.get("ingest_worker_pid"))
+            state["ingest_job"] = None; state["ingest_worker_pid"] = None
+            return state, EMPTY_DATA, {}, {}, _alert(message)
         if job and job.get("phase") == "done":
             parsed = job.get("result") or EMPTY_DATA
-            _INGEST_JOBS.pop(ingest_id, None)
+            _update_job_record(job, committed=True)
             state["ingest_job"] = None
+            state["ingest_worker_pid"] = None
             return state, parsed, {}, {}, html.Div()
         if job and job.get("phase") == "error":
             message = job.get("error") or "Unknown data-loading error."
-            _INGEST_JOBS.pop(ingest_id, None)
+            _update_job_record(job, committed=True)
             state["ingest_job"] = None
+            state["ingest_worker_pid"] = None
             return state, EMPTY_DATA, {}, {}, _alert(f"Could not read the data: {message}")
 
     analysis_id = state.get("analysis_job")
     if analysis_id:
         job = _ANALYSIS_JOBS.get(analysis_id)
+        if not job:
+            kind = "Analysis"
+            message = _missing_job_message(kind, analysis_id, state.get("analysis_worker_pid"))
+            state["analysis_job"] = None; state["analysis_worker_pid"] = None
+            state["analysis_scope"] = None
+            if state["adv"].get("3") == "running_async":
+                state["adv"]["3"] = "idle"
+            result = dict(result or {}); result["error"] = message
+            return state, no_update, no_update, result, no_update
         if job and job.get("phase") in ("done", "error"):
             kind = job.get("kind")
             payload = job.get("result")
             error = job.get("error")
-            _ANALYSIS_JOBS.pop(analysis_id, None)
+            _update_job_record(job, committed=True)
             state["analysis_job"] = None
+            state["analysis_worker_pid"] = None
             state["analysis_scope"] = None
             if error:
-                if kind == "simple_yoy":
+                if kind in ("simple_yoy", "simple_prepare_pvpro"):
                     state["simple_done"] = True
                     result = {"simple": {"rate": None, "error": error}}
                 else:
@@ -2035,10 +2340,29 @@ def poll_cancellable_jobs(_n, state, data, filtered, result):
                 return state, no_update, no_update, result, no_update
             if kind == "simple_yoy":
                 state["simple_done"] = True
-                return state, no_update, no_update, payload or {}, no_update
+                payload = payload or {}
+                identified_data = payload.get("identified_data")
+                analysis_result = payload.get("result") or {}
+                return state, identified_data or no_update, no_update, analysis_result, no_update
+            if kind == "simple_prepare_pvpro":
+                payload = payload or {}
+                identified_data = payload.get("identified_data") or data
+                dg = _df_from_json(payload["df_good"])
+                jid = _launch_pvpro(dg, payload["mapped"], payload["kwargs"])
+                state["pvpro_job"] = jid
+                state["pvpro_mode"] = "simple"
+                state["pvpro_worker_pid"] = os.getpid()
+                state["pvpro_dur"] = payload.get("duration_years", 0.0)
+                state["pvpro_nkept"] = payload.get("n_kept", 0)
+                state["pvpro_window"] = payload.get("window", "")
+                state["pvpro_prog"] = {"phase": "starting", "current": 0, "total": 1,
+                                       "message": "Starting PVPRO…"}
+                state["simple_done"] = False
+                return state, identified_data, no_update, {}, no_update
             if kind == "advanced_1":
-                data = dict(data or EMPTY_DATA)
-                data["prescreen_figs"] = payload or []
+                payload = payload or {}
+                data = dict(payload.get("identified_data") or data or EMPTY_DATA)
+                data["prescreen_figs"] = payload.get("figs") or []
                 state["adv"]["1"] = "done"
                 state["adv"]["2"] = "idle"
                 state["adv"]["3"] = state["adv"]["4"] = "locked"
@@ -2275,12 +2599,14 @@ def ingest(upload_contents, ex_clicks, filename):
                 return (no_update,) * 5
             fresh.update(selected="upload", selected_label=filename or "your file")
             fresh["ingest_job"] = _launch_ingest(contents=upload_contents, filename=filename)
+            fresh["ingest_worker_pid"] = os.getpid()
         elif isinstance(trig, dict) and trig.get("type") == "example":
             if not any(ex_clicks or []):
                 return (no_update,) * 5
             ex = next(e for e in EXAMPLES if e["id"] == trig["index"])
             fresh.update(selected=ex["id"], selected_label=ex["label"])
             fresh["ingest_job"] = _launch_ingest(example_file=ex["file"])
+            fresh["ingest_worker_pid"] = os.getpid()
         else:
             return (no_update,) * 5
     except Exception as e:
@@ -2455,7 +2781,7 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
             state["pvpro_job"] = None; state["pvpro_prog"] = None; state["adv"]["3"] = "idle"
             return state, no_update, no_update, no_update
         if idx == "estimate-pvpro":
-            if not data.get("loaded"):
+            if not data.get("loaded") or not data.get("identified"):
                 return no_update, no_update, no_update, no_update
             result = {}
             try:
@@ -2515,11 +2841,19 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
             if state.get("simple_method") != "PVPRO":
                 data_snapshot = dict(data)
 
-                def _simple_work():
-                    df0 = _df_from_json(data_snapshot["df"])
+                def _simple_work(progress):
+                    progress(0, 12, "Preparing the uploaded time series…")
+                    identified0 = data_snapshot
+                    if not identified0.get("identified"):
+                        raw_df0 = _df_from_json(data_snapshot["df"])
+                        identified0 = run_parse(
+                            df=raw_df0, filename=data_snapshot.get("filename"),
+                            progress_callback=lambda c, _t, m: progress(c, 12, m))
+                    df0 = _df_from_json(identified0["df"])
                     dg0, n_raw0, n_kept0, _pie0, _power0 = apply_filter_chain(
-                        df0, data_snapshot["mapped"], data_snapshot["irra_key"],
-                        DEFAULT_STATE["filters"], FILTER_PARAM_DEFAULTS)
+                        df0, identified0["mapped"], identified0["irra_key"],
+                        DEFAULT_STATE["filters"], FILTER_PARAM_DEFAULTS,
+                        progress_callback=lambda c, _t, m: progress(c + 4, 12, m))
                     if dg0.empty:
                         raise ValueError("No points survived default filtering.")
                     start0, end0 = dg0.index.min(), dg0.index.max()
@@ -2528,79 +2862,90 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                         win0 = f"{pd.Timestamp(start0):%Y-%m-%d} \u2192 {pd.Timestamp(end0):%Y-%m-%d}"
                     except Exception:
                         win0 = ""
-                    daily0 = aggregate_daily(dg0, data_snapshot["irra_key"])
+                    progress(9, 10, "Aggregating daily normalized power…")
+                    daily0 = aggregate_daily(dg0, identified0["irra_key"])
+                    progress(10, 10, "Computing the year-on-year degradation rate…")
                     rate0, fig0 = compute_yoy(daily0, rolling_window=30, iqr_multiplier=1.5)
                     fig_json = fig0.to_json() if fig0 is not None else None
-                    return {"simple": {"rate": float(rate0) if rate0 == rate0 else None,
+                    analysis_result0 = {"simple": {"rate": float(rate0) if rate0 == rate0 else None,
                                        "fig": fig_json, "duration_years": float(dur0),
                                        "n_kept": n_kept0, "window": win0,
                                        "pct_kept": (n_kept0 / n_raw0 * 100) if n_raw0 else 0.0},
                             "multi": {"YOY": {"rate": float(rate0) if rate0 == rate0 else None,
                                                 "fig": fig_json}},
                             "duration_years": float(dur0), "n_kept": n_kept0, "window": win0}
+                    return {"identified_data": identified0, "result": analysis_result0}
 
                 state["analysis_job"] = _launch_analysis("simple_yoy", _simple_work)
+                state["analysis_worker_pid"] = os.getpid()
                 state["analysis_scope"] = "simple"
                 state["simple_done"] = False
                 return state, no_update, no_update, {}
-            try:
-                df = _df_from_json(data["df"])
-                dg, n_raw, n_kept, _pie, _power = apply_filter_chain(df, data["mapped"], data["irra_key"],
-                                                       DEFAULT_STATE["filters"], FILTER_PARAM_DEFAULTS)
-                if dg.empty:
+            data_snapshot = dict(data)
+            mp_snapshot = dict(mp)
+
+            def _prepare_pvpro(progress):
+                progress(0, 12, "Preparing the uploaded time series…")
+                identified0 = data_snapshot
+                if not identified0.get("identified"):
+                    raw_df0 = _df_from_json(data_snapshot["df"])
+                    identified0 = run_parse(
+                        df=raw_df0, filename=data_snapshot.get("filename"),
+                        progress_callback=lambda c, _t, m: progress(c, 12, m))
+                if not identified0.get("has_vi"):
+                    raise ValueError("PVPRO needs DC Voltage + DC Current columns, which weren't identified.")
+                df0 = _df_from_json(identified0["df"])
+                dg0, _n_raw0, n_kept0, _pie0, _power0 = apply_filter_chain(
+                    df0, identified0["mapped"], identified0["irra_key"],
+                    DEFAULT_STATE["filters"], FILTER_PARAM_DEFAULTS,
+                    progress_callback=lambda c, _t, m: progress(c + 4, 12, m))
+                if dg0.empty:
                     raise ValueError("No points survived default filtering.")
-                start, end = dg.index.min(), dg.index.max()
-                dur = (end - start).days / 365.25 if hasattr(end - start, "days") else 0.0
+                start0, end0 = dg0.index.min(), dg0.index.max()
+                dur0 = (end0 - start0).days / 365.25 if hasattr(end0 - start0, "days") else 0.0
                 try:
-                    win = f"{pd.Timestamp(start):%Y-%m-%d} \u2192 {pd.Timestamp(end):%Y-%m-%d}"
+                    win0 = f"{pd.Timestamp(start0):%Y-%m-%d} \u2192 {pd.Timestamp(end0):%Y-%m-%d}"
                 except Exception:
-                    win = ""
-                if state.get("simple_method") == "PVPRO":
-                    if not data.get("has_vi"):
-                        raise ValueError("PVPRO needs DC Voltage + DC Current columns, which weren't identified.")
-                    # auto-estimate module/array layout from the data
-                    try:
-                        est = estimate_pvpro_params(dg, data["mapped"], cells_in_series=_num(mp.get("cells"), 60))
-                        if isinstance(est.get("modules_per_string"), dict):
-                            mp["mps"] = est["modules_per_string"]["value"]
-                        if isinstance(est.get("parallel_strings"), dict):
-                            mp["ps"] = est["parallel_strings"]["value"]
-                    except Exception:
-                        pass
-                    kwargs = dict(cells_in_series=_num(mp.get("cells"), 60), modules_per_string=_num(mp.get("mps"), 1),
-                                  parallel_strings=_num(mp.get("ps"), 1), alpha_isc=_num(mp.get("alphaisc"), 0.0046),
-                                  technology=mp.get("tech") or "mono-c-Si", days_per_run=_num(mp.get("days"), 14),
-                                  iterations_per_year=_num(mp.get("iters"), 12))
-                    jid = _launch_pvpro(dg, data["mapped"], kwargs)
-                    state["pvpro_job"] = jid; state["pvpro_mode"] = "simple"
-                    state["pvpro_dur"] = float(dur); state["pvpro_nkept"] = n_kept; state["pvpro_window"] = win
-                    state["pvpro_prog"] = {"phase": "starting", "current": 0, "total": 1, "message": "Starting PVPRO\u2026"}
-                    state["simple_done"] = False
-                    return state, no_update, no_update, {}
-                daily = aggregate_daily(dg, data["irra_key"])
-                rate, fig = compute_yoy(daily, rolling_window=30, iqr_multiplier=1.5)
-                result = {"simple": {"rate": float(rate) if rate == rate else None,
-                                     "fig": fig.to_json() if fig is not None else None,
-                                     "duration_years": float(dur), "n_kept": n_kept, "window": win,
-                                     "pct_kept": (n_kept / n_raw * 100) if n_raw else 0.0},
-                          "multi": {"YOY": {"rate": float(rate) if rate == rate else None,
-                                            "fig": fig.to_json() if fig is not None else None}},
-                          "duration_years": float(dur), "n_kept": n_kept, "window": win}
-                state["simple_done"] = True
-            except Exception as e:
-                traceback.print_exc()
-                result = {"simple": {"rate": None, "error": str(e)}}
-                state["simple_done"] = True
-            return state, no_update, no_update, result
+                    win0 = ""
+                try:
+                    est0 = estimate_pvpro_params(
+                        dg0, identified0["mapped"], cells_in_series=_num(mp_snapshot.get("cells"), 60))
+                    if isinstance(est0.get("modules_per_string"), dict):
+                        mp_snapshot["mps"] = est0["modules_per_string"]["value"]
+                    if isinstance(est0.get("parallel_strings"), dict):
+                        mp_snapshot["ps"] = est0["parallel_strings"]["value"]
+                except Exception:
+                    pass
+                kwargs0 = dict(cells_in_series=_num(mp_snapshot.get("cells"), 60),
+                               modules_per_string=_num(mp_snapshot.get("mps"), 1),
+                               parallel_strings=_num(mp_snapshot.get("ps"), 1),
+                               alpha_isc=_num(mp_snapshot.get("alphaisc"), 0.0046),
+                               technology=mp_snapshot.get("tech") or "mono-c-Si",
+                               days_per_run=_num(mp_snapshot.get("days"), 14),
+                               iterations_per_year=_num(mp_snapshot.get("iters"), 12))
+                return {"identified_data": identified0, "df_good": _df_to_json(dg0),
+                        "mapped": identified0["mapped"], "kwargs": kwargs0,
+                        "duration_years": float(dur0), "n_kept": n_kept0, "window": win0}
+
+            state["analysis_job"] = _launch_analysis("simple_prepare_pvpro", _prepare_pvpro)
+            state["analysis_worker_pid"] = os.getpid()
+            state["analysis_scope"] = "simple"
+            state["simple_done"] = False
+            return state, no_update, no_update, {}
         if idx == "diagnose":
             multi = (result or {}).get("multi") or {}
             uses_pvpro = "PVPRO" in multi
             context = _context_str(data, result)
             jid = uuid.uuid4().hex[:10]
-            _DIAG_JOBS[jid] = {"done": False, "text": None}
+            now = time.time()
+            _DIAG_JOBS[jid] = {"done": False, "phase": "running", "message": "Preparing AI diagnosis…",
+                               "text": None, "error": None, "current": 0, "total": 1,
+                               "started_at": now, "updated_at": now, "worker_pid": os.getpid(),
+                               "history": [{"at": now, "phase": "running", "message": "Preparing AI diagnosis…"}]}
 
             def _dworker(jid=jid, ctx=context, pv=uses_pvpro):
                 try:
+                    _update_job_record(_DIAG_JOBS[jid], message="Sending analysis context to the diagnostic model…")
                     if _LLM_CLIENT is not None and _LLM_MODEL:
                         sysmsg = _DIAG_SYS_PVPRO if pv else _DIAG_SYS
                         resp = _LLM_CLIENT.chat.completions.create(model=_LLM_MODEL, messages=[
@@ -2609,9 +2954,11 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                         txt = resp.choices[0].message.content.strip()
                     else:
                         txt = "**Rule-based read** (set `OPENAI_API_KEY` for a full AI diagnosis):\n\n" + ctx
-                    _DIAG_JOBS[jid] = {"done": True, "text": txt}
+                    _update_job_record(_DIAG_JOBS[jid], done=True, phase="done", current=1, total=1,
+                                       message="AI diagnosis completed.", text=txt)
                 except Exception as e:
-                    _DIAG_JOBS[jid] = {"done": True, "text": f"(AI diagnosis unavailable: {e})"}
+                    _update_job_record(_DIAG_JOBS[jid], done=True, phase="error", message="AI diagnosis failed.",
+                                       error=str(e), text=f"(AI diagnosis unavailable: {e})")
 
             threading.Thread(target=_dworker, daemon=True).start()
             state["diag_job"] = jid
@@ -2628,19 +2975,29 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                 _reset_advanced_from(state, 1)
                 data_snapshot = dict(data)
 
-                def _prescreen_work():
-                    df0 = _df_from_json(data_snapshot["df"])
-                    figs0, _e0 = make_overview_figures(df0, data_snapshot["mapped"])
+                def _prescreen_work(progress):
+                    progress(0, 6, "Preparing the uploaded time series…")
+                    identified0 = data_snapshot
+                    if not identified0.get("identified"):
+                        raw_df0 = _df_from_json(data_snapshot["df"])
+                        identified0 = run_parse(
+                            df=raw_df0, filename=data_snapshot.get("filename"),
+                            progress_callback=lambda c, _t, m: progress(c, 6, m))
+                    df0 = _df_from_json(identified0["df"])
+                    progress(5, 6, "Building raw-signal quality figures…")
+                    figs0, _e0 = make_overview_figures(df0, identified0["mapped"])
                     jfigs0 = []
+                    progress(6, 6, "Serializing prescreening figures…")
                     for graph0 in (figs0 or []):
                         try:
                             fig0 = graph0.figure if hasattr(graph0, "figure") else graph0
                             jfigs0.append(go.Figure(fig0).to_json())
                         except Exception:
                             pass
-                    return jfigs0
+                    return {"identified_data": identified0, "figs": jfigs0}
 
                 state["analysis_job"] = _launch_analysis("advanced_1", _prescreen_work)
+                state["analysis_worker_pid"] = os.getpid()
                 state["analysis_scope"] = "advanced"
                 return state, no_update, {}, {}
             if n == 2:
@@ -2649,17 +3006,19 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                 filters_snapshot = dict(state["filters"])
                 fp_snapshot = dict(fp)
 
-                def _filter_work():
+                def _filter_work(progress):
+                    progress(0, 7, "Restoring the prescreened time series…")
                     df0 = _df_from_json(data_snapshot["df"])
                     dg0, n_raw0, n_kept0, pie0, power0 = apply_filter_chain(
                         df0, data_snapshot["mapped"], data_snapshot["irra_key"],
-                        filters_snapshot, fp_snapshot)
+                        filters_snapshot, fp_snapshot, progress_callback=progress)
                     if dg0.empty:
                         raise ValueError("No points survived filtering — loosen the thresholds.")
                     return {"df_good": _df_to_json(dg0), "n_raw": n_raw0, "n_kept": n_kept0,
                             "pie": pie0, "power": power0}
 
                 state["analysis_job"] = _launch_analysis("advanced_2", _filter_work)
+                state["analysis_worker_pid"] = os.getpid()
                 state["analysis_scope"] = "advanced"
                 return state, no_update, {}, {}
             if n == 3:
@@ -2684,6 +3043,7 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                                   iterations_per_year=_num(mp.get("iters"), 12))
                     jid = _launch_pvpro(dg, data["mapped"], kwargs)
                     state["adv"]["3"] = "running"; state["pvpro_job"] = jid; state["pvpro_mode"] = "advanced"
+                    state["pvpro_worker_pid"] = os.getpid()
                     state["pvpro_dur"] = float(dur); state["pvpro_nkept"] = filtered.get("n_kept", 0); state["pvpro_window"] = win
                     state["pvpro_prog"] = {"phase": "starting", "current": 0, "total": 1, "message": "Starting PVPRO\u2026"}
                     return state, no_update, no_update, {}
@@ -2692,12 +3052,14 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                 irra_snapshot = data["irra_key"]
                 nkept_snapshot = filtered.get("n_kept", 0)
 
-                def _metric_work():
-                    multi0 = run_methods(dg, irra_snapshot, methods, mp_snapshot, mapped=mapped_snapshot)
+                def _metric_work(progress):
+                    multi0 = run_methods(dg, irra_snapshot, methods, mp_snapshot,
+                                         mapped=mapped_snapshot, progress_callback=progress)
                     return {"multi": multi0, "duration_years": float(dur),
                             "n_kept": nkept_snapshot, "window": win}
 
                 state["analysis_job"] = _launch_analysis("advanced_3", _metric_work)
+                state["analysis_worker_pid"] = os.getpid()
                 state["analysis_scope"] = "advanced"
                 state["adv"]["3"] = "running_async"
                 return state, no_update, no_update, {}
