@@ -1,433 +1,274 @@
-/* =========================================================================
-   PV-COPILOT — light-gray editorial / agent-chat layout
-   Append this block to your existing assets/style.css
+/* ===== PV Copilot — new liquid-glass UI, scoped under .pvcopilot-root ===== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
-   Fonts: Arial (sans body/UI) and Times New Roman (serif accents).
-   No web fonts loaded — both are system fonts on every OS.
-   ========================================================================= */
+/* keep the pvtools site chrome (header logos row + gaps) white; the page paints
+   its own gradient only on .pvcopilot-root */
+html, body { background: #ffffff !important; }
 
-/* All rules scoped under .pvcopilot-root so the rest of pvtools is unaffected */
+.pvcopilot-root { --pvc-advanced-step-max-height:calc(100vh - 220px); position: relative; overflow: hidden; margin-top: -22px; margin-bottom: -54px; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color: #1c2540; font-size: 15px; line-height: 1.5;
+  background: linear-gradient(135deg, #dbe8ff 0%, #eef4fd 42%, #fdf6e3 100%); }
+.pvcopilot-root, .pvcopilot-root * { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+.pvcopilot-root [style*="monospace"], .pvcopilot-root pre, .pvcopilot-root code { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-.pvcopilot-root {
-    font-family: Arial, sans-serif;
-    color: #0f172a;
-    background: #f8fafc;
-    font-size: 15px;   /* base body size — bumped from default */
-    line-height: 1.55;
-}
+/* Use the same height ceiling as the scrollable Advanced Step panel. The extra
+   700px is the stable page chrome above/around that panel. The image is rendered
+   once at this maximum page height; step content only scrolls inside the panel. */
+.pvcopilot-root::before { content:""; position:absolute; top:0; right:0; bottom:auto; left:0;
+  height:max(calc(var(--pvc-advanced-step-max-height) + 700px), 100vh); z-index:0; pointer-events:none;
+  background-image:url('/assets/pv-array.png'); background-repeat:no-repeat;
+  background-position:center center; background-size:cover;
+  filter:blur(12px) saturate(1.12); transform:scale(1.04); transform-origin:center top; opacity:0.72; }
+.pvcopilot-root::after  { content:""; position: absolute; inset:0; z-index:0; pointer-events:none;
+  background: linear-gradient(150deg, rgba(247,250,255,0.72), rgba(238,244,253,0.66) 46%, rgba(255,252,244,0.78)); }
+.pvcopilot-root > * { position: relative; z-index: 1; }
 
-.pvcopilot-root ::-webkit-scrollbar { width: 8px; height: 8px; }
-.pvcopilot-root ::-webkit-scrollbar-track  { background: transparent; }
-.pvcopilot-root ::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 4px; }
-.pvcopilot-root ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.pvcopilot-root a { color: #2f6bff; text-decoration: none; }
+.pvcopilot-root ::selection { background: rgba(79,139,255,0.25); }
+.pvcopilot-root ::-webkit-scrollbar { width: 10px; height: 10px; }
+.pvcopilot-root ::-webkit-scrollbar-thumb { background: rgba(120,140,180,0.4); border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
+.pvcopilot-root button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+.pvcopilot-root input:focus-visible, .pvcopilot-root button:focus-visible { outline: 2px solid #4f8bff; outline-offset: 2px; }
 
-/* Slide-in animation (separate keyframe so it doesn't collide with pvtools' existing slideInUp) */
-@keyframes pvcopilot-slide-in-up {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
+.pvcopilot-shell { position: relative; z-index: 1; max-width: 1320px; margin: 0 auto; padding: 26px 16px 30px;
+  min-height: calc(100vh - 210px); display: flex; flex-direction: column; justify-content: center; }
 
-.pvcopilot-root .agent-msg {
-    animation: pvcopilot-slide-in-up 0.5s ease-out both;
+/* glass surfaces */
+.pvcopilot-root .glass {
+  background: linear-gradient(135deg, rgba(255,255,255,0.66), rgba(255,255,255,0.44));
+  backdrop-filter: blur(30px) saturate(1.5); -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  border: 1px solid rgba(255,255,255,0.72);
+  box-shadow: 0 14px 44px rgba(30,58,120,0.11), inset 0 1px 0 rgba(255,255,255,0.6);
+  border-radius: 28px;
 }
+.pvcopilot-root .glass-soft { background: rgba(255,255,255,0.42); border: 1px solid rgba(255,255,255,0.7); border-radius: 24px; }
 
-/* Buttons inside the copilot get a subtle hover lift */
-.pvcopilot-root button {
-    transition: all 0.15s ease;
-}
-.pvcopilot-root button:hover:not(:disabled) {
-    filter: brightness(1.06);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
-}
-.pvcopilot-root button:active:not(:disabled) {
-    transform: translateY(0);
-    box-shadow: none;
-}
+/* nav */
+.pvcopilot-root .nav { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.pvcopilot-root .nav-pills { display: flex; align-items: center; justify-content:flex-end; flex-wrap:wrap; gap: 10px; padding: 0; border-radius: 0; background: none; border: none; box-shadow: none; }
+.pvcopilot-root .nav-pill { padding: 9px 16px; border-radius: 14px; font-size: 14px; font-weight: 600; color: #374466; cursor: pointer;
+  background: linear-gradient(135deg, rgba(255,255,255,0.4), rgba(255,255,255,0.2));
+  backdrop-filter: blur(30px) saturate(1.5); -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  border: 1px solid rgba(255,255,255,0.55);
+  box-shadow: 0 10px 34px rgba(30,58,120,0.09), inset 0 1px 0 rgba(255,255,255,0.5); }
+.pvcopilot-root .nav-pill:hover { color: #2f6bff; transform: translateY(-1px); box-shadow: 0 9px 24px rgba(30,58,120,0.15); }
+.pvcopilot-root .nav-pill.active { color: #2f6bff; }
 
-/* Stepper row hover — subtle hover so it's obvious they're clickable */
-.pvcopilot-root div[id*='step-row'] {
-    cursor: pointer;
-}
-.pvcopilot-root div[id*='step-row']:hover {
-    background: #f1f5f9 !important;
-}
-/* The AI chat row keeps its pink->blue gradient on hover (a slight lift only). */
-.pvcopilot-root .ai-chat-row,
-.pvcopilot-root .ai-chat-row:hover {
-    background: linear-gradient(135deg, #fce7f3 0%, #dbeafe 100%) !important;
-}
-.pvcopilot-root .ai-chat-row:hover {
-    filter: brightness(1.02);
-}
+/* buttons */
+.pvcopilot-root .btn-primary, .pvcopilot-root .btn-run {
+  display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px; border: none; border-radius: 14px;
+  background: linear-gradient(135deg, #4b8bff, #2f6bff); color: #fff; font-weight: 700; font-size: 14.5px;
+  cursor: pointer; box-shadow: 0 10px 26px rgba(47,107,255,0.34); }
+.pvcopilot-root .btn-primary:hover, .pvcopilot-root .btn-run:hover { filter: brightness(1.05); }
+.pvcopilot-root .btn-run:disabled { filter: grayscale(0.4) opacity(0.6); cursor: not-allowed; box-shadow: none; }
 
-/* Chat — typing animation */
-@keyframes pvcopilot-blink {
-    0%, 50%   { opacity: 1; }
-    51%, 100% { opacity: 0; }
-}
-.pvcopilot-root .chat-typing-caret {
-    display: inline-block;
-    margin-left: 1px;
-    color: #0064AB;
-    animation: pvcopilot-blink 0.9s steps(2, end) infinite;
-    font-weight: 400;
-}
-/* Once the bubble is done typing, kill the caret entirely:
-   stop the keyframe animation AND hide the element. */
-.pvcopilot-root .chat-bubble-done .chat-typing-caret {
-    animation: none !important;
-    display: none !important;
-}
+/* animations */
+@keyframes pvc-riseIn { from { opacity: 0; transform: translateY(16px);} to { opacity: 1; transform: translateY(0);} }
+@keyframes pvc-slideIn { from { opacity: 0; transform: translateX(40px);} to { opacity: 1; transform: translateX(0);} }
+@keyframes pvc-pulseDot { 0%,100% { opacity: .35;} 50% { opacity: 1;} }
+.pvcopilot-root .rise { animation: pvc-riseIn .45s ease both; }
 
-/* Chat — thinking dots (pre-first-character pulse) */
-@keyframes pvcopilot-dots-pulse {
-    0%, 100% { opacity: 0.45; }
-    50%      { opacity: 1; }
-}
-.pvcopilot-root .chat-thinking-dots {
-    animation: pvcopilot-dots-pulse 1.2s ease-in-out infinite;
-}
+/* identified-variable mapping chips */
+.pvcopilot-root .varmap-chip { display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:13px; background: rgba(255,255,255,0.58); border: 1px solid rgba(255,255,255,0.7); }
+.pvcopilot-root .pill { font-size:10.5px; font-weight:600; line-height:1; border-radius:980px; padding:3px 8px; white-space:nowrap; }
+.pvcopilot-root .pill-note { color:#57606a; background:#f1f3f5; border:1px solid #d7dce0; }
+.pvcopilot-root .pill-warn { color:#8a6d00; background:#fff6e0; border:1px solid #f0dfa8; }
 
-/* Chat — bubble fade-in on mount */
-@keyframes pvcopilot-bubble-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-.pvcopilot-root #chat-history > div {
-    animation: pvcopilot-bubble-in 0.25s ease-out both;
-}
+/* plotly transparent */
+.pvcopilot-root .js-plotly-plot, .pvcopilot-root .plot-container { background: transparent !important; }
 
-/* Chat — example chip hover */
-.pvcopilot-root button[id*='chat-example']:hover {
-    background: #f8fafc !important;
-    border-color: #0064AB !important;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(0, 100, 171, 0.12);
-}
+/* number inputs */
+.pvcopilot-root input.pnum::-webkit-outer-spin-button, .pvcopilot-root input.pnum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pvcopilot-root input.pnum { -moz-appearance: textfield; appearance: textfield; }
 
-/* Example dataset buttons in Step 1: on hover, text + border shift to navy */
-.pvcopilot-root button[id*='load-example-btn']:hover,
-.pvcopilot-root button[id*='load-example-btn']:hover * {
-    color: #0064AB !important;
-    border-color: #0064AB !important;
-}
+/* hide dash undo/redo + legacy page title */
+.pvcopilot-root ._dash-undo-redo { display: none; }
+.pvcopilot-root .page-title { display: none; }
 
-/* Chat — composer input (both typed text and placeholder) */
-.pvcopilot-root #chat-composer,
-.pvcopilot-root #chat-composer::placeholder {
-    font-weight: 600 !important;
-}
-/* Chat — composer sits on a light-gray background; dark text + placeholder. */
-.pvcopilot-root #chat-composer {
-    color: #0f172a !important;
-    caret-color: #0f172a !important;
-    font-size: 14px !important;
-}
-.pvcopilot-root #chat-composer::placeholder {
-    color: #64748b !important;
-    font-size: 14px !important;
-}
+/* dmc.Select group ("category") titles — the dropdown renders in a body portal,
+   so this is intentionally NOT scoped under .pvcopilot-root */
+.pvcopilot-var-group { color:#2f6bff !important; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important; font-weight:700 !important; letter-spacing:0.02em; }
 
-/* <details>/<summary>: replace the default flush-against-text disclosure
-   triangle with a custom CSS triangle that has a real gap before the text. */
-.pvcopilot-root summary {
-    list-style: none;
-    cursor: pointer;
-    position: relative;
-    padding-left: 18px;
-}
-/* Remove the native marker in WebKit / Firefox / others */
-.pvcopilot-root summary::-webkit-details-marker { display: none; }
-.pvcopilot-root summary::marker { content: ""; }
+/* AI diagnosis markdown */
+.pvcopilot-root .pvc-md p { margin: 0 0 8px; }
+.pvcopilot-root .pvc-md ul { margin: 4px 0 8px; padding-left: 20px; }
+.pvcopilot-root .pvc-md li { margin: 2px 0; }
+.pvcopilot-root .pvc-md strong { color: #1c2540; font-weight: 700; }
+.pvcopilot-root .pvc-md code { background: rgba(120,140,180,0.15); padding: 1px 5px; border-radius: 5px; }
 
-/* Custom triangle (closed = ▸, open = ▾) — positioned absolutely so the
-   text-left padding controls the actual gap. */
-.pvcopilot-root summary::before {
-    content: "▸";
-    position: absolute;
-    left: 2px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #94a3b8;
-    font-size: 0.9em;
-    transition: transform 0.15s ease;
-}
-.pvcopilot-root details[open] > summary::before {
-    content: "▾";
+/* nav pop-up modal */
+.pvcopilot-root .pvc-modal-overlay { position: fixed; inset: 0; z-index: 5000; display: flex; align-items: center;
+  justify-content: center; padding: 40px 20px; background: rgba(20,30,55,0.34); backdrop-filter: blur(6px); animation: pvc-riseIn .25s ease both; }
+.pvcopilot-root .pvc-modal { position: relative; width: 100%; max-width: 720px; max-height: calc(100vh - 90px); overflow-y: auto;
+  border-radius: 24px; padding: 26px 30px 28px;
+  background: linear-gradient(150deg, rgba(255,255,255,0.96), rgba(244,248,255,0.94));
+  border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 30px 80px rgba(30,58,120,0.3); }
+.pvcopilot-root .pvc-modal-close { position: absolute; top: 18px; right: 18px; width: 36px; height: 36px; border: none;
+  border-radius: 12px; background: rgba(120,140,180,0.14); color: #455172; font-size: 16px; cursor: pointer; }
+.pvcopilot-root .pvc-modal-close:hover { background: rgba(120,140,180,0.24); }
+
+/* Team modal */
+.pvcopilot-root .pvc-team-modal { max-width:860px; }
+.pvcopilot-root .pvc-team-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.pvcopilot-root .pvc-team-card { min-width:0; padding:18px 14px 17px; border-radius:20px; overflow:hidden;
+  transition:transform .2s ease,box-shadow .2s ease,background .2s ease; }
+.pvcopilot-root .pvc-team-photo { display:block; width:min(100%,150px); aspect-ratio:1 / 1; margin:0 auto; object-fit:cover; border-radius:15px;
+  border:1px solid rgba(255,255,255,0.82); box-shadow:0 9px 24px rgba(30,58,120,0.12);
+  transition:transform .28s cubic-bezier(.2,.7,.2,1),box-shadow .28s ease; }
+.pvcopilot-root .pvc-team-card:hover { transform:translateY(-3px); box-shadow:0 19px 48px rgba(30,58,120,0.16),inset 0 1px 0 rgba(255,255,255,0.68); }
+.pvcopilot-root .pvc-team-card:hover .pvc-team-photo { transform:scale(1.08); box-shadow:0 14px 30px rgba(30,58,120,0.18); }
+.pvcopilot-root .pvc-team-copy { padding:14px 4px 0; text-align:center; }
+.pvcopilot-root .pvc-team-name { color:#1c2540; font-size:16px; line-height:1.25; font-weight:800; }
+.pvcopilot-root .pvc-team-role { min-height:38px; margin-top:5px; color:#2f6bff; font-size:12.5px; line-height:1.45; font-weight:700; }
+.pvcopilot-root .pvc-team-org { margin-top:8px; color:#71809e; font-size:10.5px; line-height:1.4; }
+@media (max-width:680px) {
+  .pvcopilot-root .pvc-team-grid { grid-template-columns:1fr; }
+  .pvcopilot-root .pvc-team-card { display:grid; grid-template-columns:110px minmax(0,1fr); gap:14px; align-items:center; }
+  .pvcopilot-root .pvc-team-photo { width:100%; }
+  .pvcopilot-root .pvc-team-copy { padding:0; text-align:left; }
+  .pvcopilot-root .pvc-team-role { min-height:0; }
 }
 
-/* Radio labels — keep inherited color (avoid Bootstrap link-blue / purple
-   :visited bleed).  The parent app's style.css has this rule scoped to the
-   single id #metric-selected-visible.  Now that we split the metric chooser
-   into two visible RadioItems (stat vs PVPRO) plus a hidden master, the
-   parent rule no longer covers the visible ones -- so without the addition
-   below they fall through to Bootstrap's default link color (often rendered
-   purple due to the browser's :visited state on the underlying anchor). */
-.pvcopilot-root .metric-radio-label,
-.pvcopilot-root .metric-radio-label:hover,
-.pvcopilot-root .metric-radio-label:focus,
-.pvcopilot-root .metric-radio-label:active,
-.pvcopilot-root .metric-radio-label:visited,
-.pvcopilot-root .metric-radio-label *,
-.pvcopilot-root #metric-stat-radio .form-check-label,
-.pvcopilot-root #metric-stat-radio .form-check-label:hover,
-.pvcopilot-root #metric-stat-radio .form-check-label:focus,
-.pvcopilot-root #metric-stat-radio .form-check-label:active,
-.pvcopilot-root #metric-stat-radio .form-check-label:visited,
-.pvcopilot-root #metric-stat-radio .form-check-label *,
-.pvcopilot-root #metric-pvpro-radio .form-check-label,
-.pvcopilot-root #metric-pvpro-radio .form-check-label:hover,
-.pvcopilot-root #metric-pvpro-radio .form-check-label:focus,
-.pvcopilot-root #metric-pvpro-radio .form-check-label:active,
-.pvcopilot-root #metric-pvpro-radio .form-check-label:visited,
-.pvcopilot-root #metric-pvpro-radio .form-check-label * {
-    color: inherit !important;
-    text-decoration: none !important;
+/* Data requirements: three signal tiers first, then one compact file checklist. */
+.pvcopilot-root .pvc-datareq-modal { max-width:900px; padding:30px 32px 28px;
+  background:linear-gradient(150deg,rgba(255,255,255,0.92),rgba(248,251,255,0.84));
+  backdrop-filter:blur(26px) saturate(1.24); -webkit-backdrop-filter:blur(26px) saturate(1.24);
+  border:1px solid rgba(255,255,255,0.78); box-shadow:0 30px 80px rgba(30,58,120,0.24),inset 0 1px 0 rgba(255,255,255,0.64); }
+.pvcopilot-root .pvc-datareq-section { margin-bottom:18px; }
+.pvcopilot-root .pvc-datareq-section-head { display:flex; align-items:baseline; gap:12px; margin:0 2px 10px; }
+.pvcopilot-root .pvc-datareq-section-title { flex:0 0 auto; color:#1c2540; font-size:14px; font-weight:800; }
+.pvcopilot-root .pvc-datareq-section-description { color:#71809e; font-size:11.5px; line-height:1.4; }
+.pvcopilot-root .pvc-datareq-signal-surface { padding:16px; border-radius:20px;
+  background:linear-gradient(135deg,rgba(79,139,255,0.13),rgba(210,229,255,0.22) 48%,rgba(255,228,169,0.14));
+  border:1px solid rgba(255,255,255,0.82); box-shadow:0 14px 34px rgba(30,58,120,0.09),inset 0 1px 0 rgba(255,255,255,0.68); }
+.pvcopilot-root .pvc-datareq-grid { display:grid; grid-template-columns:minmax(0,1fr) 26px minmax(0,1fr) 26px minmax(0,1fr);
+  gap:8px; align-items:stretch; }
+.pvcopilot-root .pvc-datareq-card { position: relative; min-width: 0; padding: 17px 17px 16px; border-radius: 18px;
+  overflow:hidden; background:linear-gradient(135deg,rgba(255,255,255,0.76),rgba(248,251,255,0.56));
+  backdrop-filter:blur(18px) saturate(1.22); -webkit-backdrop-filter:blur(18px) saturate(1.22);
+  border:1px solid rgba(255,255,255,0.88); box-shadow:0 10px 24px rgba(30,58,120,0.075),inset 0 1px 0 rgba(255,255,255,0.7); }
+.pvcopilot-root .pvc-datareq-plus { display:flex; align-items:center; justify-content:center; align-self:center; width:26px; height:26px;
+  border-radius:50%; color:#7183a8; background:rgba(255,255,255,0.72); border:1px solid rgba(160,181,218,0.42);
+  font-size:18px; line-height:1; font-weight:500; }
+.pvcopilot-root .pvc-datareq-card-head { display:flex; align-items:center; justify-content:flex-start; gap:8px; margin-bottom:13px; }
+.pvcopilot-root .pvc-datareq-level { padding:4px 8px; border-radius:980px; color:var(--req-accent); background:var(--req-tint);
+  font-size:9.5px; line-height:1; font-weight:800; letter-spacing:.045em; white-space:nowrap; }
+.pvcopilot-root .pvc-datareq-title { margin-bottom:10px; color:#1c2540; font-size:15px; line-height:1.25; font-weight:800; }
+.pvcopilot-root .pvc-datareq-fields { display:flex; flex-wrap:wrap; gap:6px; min-height:29px; margin-bottom:11px; }
+.pvcopilot-root .pvc-datareq-field { padding:5px 9px; border-radius:9px; color:#4f5f80; background:rgba(255,255,255,0.82);
+  border:1px solid rgba(160,181,218,0.46); font-size:11.5px; line-height:1.2; font-weight:700; }
+.pvcopilot-root .pvc-datareq-description { margin:0; color:#5a6784; font-size:11.8px; line-height:1.48; }
+.pvcopilot-root .pvc-datareq-file { padding:16px 18px 17px; border-radius:18px;
+  background:linear-gradient(135deg,rgba(79,139,255,0.12),rgba(215,232,255,0.24) 55%,rgba(255,255,255,0.22));
+  border:1px solid rgba(255,255,255,0.82); box-shadow:0 14px 34px rgba(30,58,120,0.085),inset 0 1px 0 rgba(255,255,255,0.68); }
+.pvcopilot-root .pvc-datareq-file-head { display:flex; align-items:baseline; gap:12px; margin-bottom:13px; }
+.pvcopilot-root .pvc-datareq-file-kicker { color:#2f6bff; font-size:10px; font-weight:800; letter-spacing:.08em; white-space:nowrap; }
+.pvcopilot-root .pvc-datareq-file-title { color:#1c2540; font-size:13.5px; font-weight:750; }
+.pvcopilot-root .pvc-datareq-check-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.pvcopilot-root .pvc-datareq-check { min-width:0; padding:10px 12px; border-radius:12px; background:rgba(255,255,255,0.68);
+  backdrop-filter:blur(16px) saturate(1.18); -webkit-backdrop-filter:blur(16px) saturate(1.18);
+  border:1px solid rgba(255,255,255,0.88); box-shadow:0 7px 18px rgba(30,58,120,0.055),inset 0 1px 0 rgba(255,255,255,0.66); }
+.pvcopilot-root .pvc-datareq-check-label { margin-bottom:3px; color:#6c7ea8; font-size:9.5px; font-weight:800; letter-spacing:.07em; }
+.pvcopilot-root .pvc-datareq-check-value { color:#1c2540; font-size:13px; line-height:1.25; font-weight:800; }
+.pvcopilot-root .pvc-datareq-check-note { margin-top:3px; color:#8090ad; font-size:10.5px; line-height:1.3; }
+.pvcopilot-root .pvc-datareq-note { display:flex; align-items:flex-start; gap:9px; margin-top:12px; padding:0 3px;
+  color:#5a6784; font-size:11.5px; line-height:1.45; }
+.pvcopilot-root .pvc-datareq-note-icon { flex:0 0 auto; color:#2f6bff; font-size:14px; line-height:1.2; }
+@media (max-width:760px) {
+  .pvcopilot-root .pvc-datareq-modal { padding:24px 20px 22px; }
+  .pvcopilot-root .pvc-datareq-signal-surface { padding:12px; }
+  .pvcopilot-root .pvc-datareq-grid { grid-template-columns:1fr; }
+  .pvcopilot-root .pvc-datareq-plus { margin:0 auto; }
+  .pvcopilot-root .pvc-datareq-section-head { display:block; }
+  .pvcopilot-root .pvc-datareq-section-description { margin-top:3px; }
+  .pvcopilot-root .pvc-datareq-check-grid { grid-template-columns:1fr; }
+  .pvcopilot-root .pvc-datareq-file-head { display:block; }
+  .pvcopilot-root .pvc-datareq-file-title { margin-top:4px; }
 }
 
-/* dcc.RadioItems renders each option as a <label> (no class).  The above
-   rule only covers labels with className="metric-radio-label" OR labels
-   inside the metric radios with the Bootstrap class.  Also catch plain
-   <label> children inside the two metric radios as a belt-and-braces
-   measure. */
-.pvcopilot-root #metric-stat-radio label,
-.pvcopilot-root #metric-stat-radio label:hover,
-.pvcopilot-root #metric-stat-radio label:visited,
-.pvcopilot-root #metric-stat-radio label *,
-.pvcopilot-root #metric-pvpro-radio label,
-.pvcopilot-root #metric-pvpro-radio label:hover,
-.pvcopilot-root #metric-pvpro-radio label:visited,
-.pvcopilot-root #metric-pvpro-radio label * {
-    color: #0f172a !important;        /* INK */
-    text-decoration: none !important;
-}
+/* universal hover feedback on buttons + selectable cards */
+.pvcopilot-root button { transition: box-shadow .14s ease, transform .12s ease, background .15s ease, filter .12s ease, border-color .12s ease; }
+.pvcopilot-root button:hover { box-shadow: 0 6px 18px rgba(30,58,120,0.14); }
+.pvcopilot-root button:active { transform: translateY(1px); }
+.pvcopilot-root .nav-pill:hover { background: rgba(79,139,255,0.14); color: #2f6bff; }
+.pvcopilot-root .btn-run:hover, .pvcopilot-root .btn-primary:hover { transform: translateY(-1px); }
+.pvcopilot-root .glass-soft:hover, .pvcopilot-root .varmap-chip { transition: box-shadow .14s ease; }
+/* dmc select + dropdown hover */
+.pvcopilot-root .mantine-Select-input:hover { border-color: rgba(79,139,255,0.6) !important; }
 
-/* PVPRO radio option: lay out so the input + label content sit side-by-
-   side, and the label-content span fills the remaining row width.
-   Dash's dcc.RadioItems renders each option as:
-       <label class="dash-options-list-option">
-         <span class="dash-options-list-option-wrapper"><input ...></span>
-         <span class="dash-options-list-option-text">{our content}</span>
-       </label>
-   We flex the label so the two inner spans become flex siblings, then
-   give the text span flex:1 so it stretches.  This is what finally lets
-   the inner title-row Div (with the logo pinned right) get the full row
-   width to push the logo to the right edge. */
-.pvcopilot-root #metric-pvpro-radio .dash-options-list-option {
-    display: flex !important;
-    align-items: flex-start !important;
-    width: 100% !important;
-}
-.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-wrapper {
-    flex-shrink: 0;
-    /* No margin-top -- alignment is handled by line-height:1 on the
-       title row so the radio dot center lines up with PVPRO's cap-height. */
-}
-.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-text {
-    flex: 1 1 auto !important;
-    min-width: 0 !important;
-    display: block !important;
-}
-/* Top-align the radio input with the "PVPRO" text.  The default 1.55
-   body line-height adds vertical space above the glyph; tightening just
-   the title row to line-height:1 brings the text up to where the radio
-   dot is sitting. */
-.pvcopilot-root #metric-pvpro-radio .dash-options-list-option-text
-       > div:first-child {
-    line-height: 1.1 !important;
-}
+/* data-load spinner accent */
+.pvcopilot-root ._dash-loading, .pvcopilot-root .dash-spinner * { color: #2f6bff !important; }
 
-/* Exception: the IMPORTANT badge needs to keep its white text against the
-   navy pill background -- otherwise the rules above force it to inherit
-   the ink-dark label color and the badge becomes unreadable.  The selector
-   has to match or exceed the specificity of the #metric-*-radio rules
-   that force INK, so we list every radio-scoped form explicitly. */
-.pvcopilot-root .important-badge,
-.pvcopilot-root .important-badge *,
-.pvcopilot-root #metric-stat-radio  .important-badge,
-.pvcopilot-root #metric-stat-radio  .important-badge *,
-.pvcopilot-root #metric-pvpro-radio .important-badge,
-.pvcopilot-root #metric-pvpro-radio .important-badge *,
-.pvcopilot-root #metric-stat-radio  label .important-badge,
-.pvcopilot-root #metric-stat-radio  label .important-badge *,
-.pvcopilot-root #metric-pvpro-radio label .important-badge,
-.pvcopilot-root #metric-pvpro-radio label .important-badge * {
-    color: #ffffff !important;
-}
+/* upload arrow hover zoom */
+.pvcopilot-root .pvc-up-icon { transition: transform .2s ease; }
+.pvcopilot-root .pvc-upload:hover .pvc-up-icon { transform: scale(1.12) translateY(-2px); }
 
-/* <details>/<summary> caret styling */
-.pvcopilot-root details > summary {
-    list-style: none;
-    font-size: 14px;
+/* Local busy overlays: every mask is clipped to the smallest result/input host. */
+.pvcopilot-root .pvc-busy-host,
+.pvcopilot-root .pvc-upload-host { position: relative; min-width: 0; }
+.pvcopilot-root .pvc-upload-host { min-height: 230px; align-self: stretch; overflow: hidden; border-radius: 22px; }
+.pvcopilot-root .pvc-upload-host > #upload-data {
+  position: absolute !important; inset: 0 !important; display: flex !important;
+  width: auto !important; height: auto !important; min-height: 0 !important; box-sizing: border-box;
 }
-.pvcopilot-root details > summary::-webkit-details-marker {
-    display: none;
+.pvcopilot-root .pvc-upload-host > #upload-data > .pvc-upload {
+  display: flex !important; width: 100% !important; height: 100% !important;
+  min-height: 0 !important; box-sizing: border-box;
 }
-.pvcopilot-root details > summary::before {
-    content: "▸ ";
-    transition: transform 0.2s;
-    display: inline-block;
-    color: #64748b;
-}
-.pvcopilot-root details[open] > summary::before {
-    content: "▾ ";
-}
+.pvcopilot-root .pvc-upload-host > #upload-data > .pvc-upload > div { width: 100%; height: 100%; min-height: 0; }
+.pvcopilot-root .pvc-panel-busy-host { position: relative; min-width: 0; border-radius: 24px; overflow: hidden; }
+.pvcopilot-root .pvc-panel-busy-host > .glass-soft { width: 100%; }
+.pvcopilot-root .pvc-panel-busy-host > .pvc-busy { border-radius: 24px; }
+.pvcopilot-root .pvc-busy { position: absolute; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 16px; background: rgba(238,244,253,0.62); backdrop-filter: blur(4px); border-radius: 28px; }
+.pvcopilot-root .pvc-busy.show { display: flex; }
+.pvcopilot-root .pvc-upload-busy { border-radius: 22px; }
+.pvcopilot-root .pvc-busy-text { font-size: 15px; font-weight: 700; color: #1c2540; }
+.pvcopilot-root .pvc-busy-close { position: absolute; top: 12px; right: 12px; z-index: 2; width: 34px; height: 34px;
+  padding: 0; border: 1px solid rgba(120,140,180,0.28); border-radius: 11px; background: rgba(255,255,255,0.82);
+  color: #455172; font-size: 24px; font-weight: 400; line-height: 30px; cursor: pointer;
+  box-shadow: 0 5px 16px rgba(30,58,120,0.12); }
+.pvcopilot-root .pvc-busy-close:hover { color: #b42318; background: rgba(255,255,255,0.96); border-color: rgba(180,70,70,0.35); }
+.pvcopilot-root .pvc-spinner { width: 52px; height: 52px; border-radius: 50%; border: 4px solid rgba(79,139,255,0.25);
+  border-top-color: #2f6bff; animation: pvc-spin .8s linear infinite; }
+@keyframes pvc-spin { to { transform: rotate(360deg); } }
 
-/* Recolor dash-bootstrap checkboxes to NAVY (matches the rest of the app's
-   accents).  This is what wins over the inline `accentColor: NAVY` set on
-   the Python side, because Bootstrap's .form-check-input rule is also
-   !important.  Keep both in sync. */
-.pvcopilot-root .form-check-input:checked {
-    background-color: #0064AB !important;
-    border-color:     #0064AB !important;
-}
-.pvcopilot-root .form-check-input:focus {
-    border-color:     #0064AB !important;
-    box-shadow: 0 0 0 0.15rem rgba(0, 100, 171, 0.18) !important;
-}
+/* whole selectable block hover (methods/filters) */
+.pvcopilot-root .pvc-sel-block { transition: box-shadow .14s ease, transform .12s ease, border-color .14s ease; }
+.pvcopilot-root .pvc-sel-block:hover { box-shadow: 0 8px 22px rgba(30,58,120,0.13); transform: translateY(-1px); border-color: rgba(79,139,255,0.5); }
+.pvcopilot-root .pvc-sel-block button:hover { box-shadow: none; }
 
-/* Hide the legacy page-title only inside the copilot */
-.pvcopilot-root .page-title {
-    display: none;
-}
+/* controlled "fold" bar used to tuck away a step's settings once its result is
+   shown (Step 2 filters, Step 3 metric selection). State lives in app-state, so
+   a re-run can force it back to folded. */
+.pvcopilot-root .pvc-foldbar { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 13px 18px; border: 1px solid rgba(120,140,180,0.28); border-radius: 14px; background: rgba(255,255,255,0.5);
+  font-size: 13px; font-weight: 700; color: #374466; cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.pvcopilot-root .pvc-foldbar:hover { color: #2f6bff; background: rgba(79,139,255,0.07); border-color: rgba(79,139,255,0.4); box-shadow: none; }
+.pvcopilot-root .pvc-foldbar .pvc-chev { font-size: 12px; color: #8090ad; transition: color .14s ease; }
+.pvcopilot-root .pvc-foldbar:hover .pvc-chev { color: #2f6bff; }
 
-/* Inputs and number fields — readable size */
-.pvcopilot-root input[type="text"],
-.pvcopilot-root input[type="number"] {
-    font-size: 14px !important;
-    font-family: Arial, sans-serif;
-}
+/* PVPRO parameter pills (Advanced mode) — short name shown, full name on hover.
+   The tooltip uses the button's data-full attribute and sits BELOW the pill so
+   it never gets clipped by the card above it. */
+.pvcopilot-root .pvc-pvpro-pill { position: relative; transition: box-shadow .14s ease, transform .12s ease, background .15s ease, border-color .12s ease; }
+.pvcopilot-root .pvc-pvpro-pill:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(30,58,120,0.16); border-color: rgba(79,139,255,0.55); }
+.pvcopilot-root .pvc-pvpro-pill::after {
+  content: attr(data-full); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(-3px);
+  padding: 6px 11px; border-radius: 9px; font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap; letter-spacing: 0.01em;
+  color: #eef4ff; background: rgba(24,34,60,0.94); box-shadow: 0 8px 22px rgba(20,30,55,0.28);
+  opacity: 0; pointer-events: none; z-index: 40; transition: opacity .13s ease, transform .13s ease; }
+.pvcopilot-root .pvc-pvpro-pill::before {
+  content: ""; position: absolute; top: calc(100% + 3px); left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-bottom-color: rgba(24,34,60,0.94);
+  opacity: 0; pointer-events: none; z-index: 40; transition: opacity .13s ease; }
+.pvcopilot-root .pvc-pvpro-pill:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pvcopilot-root .pvc-pvpro-pill:hover::before { opacity: 1; }
 
-/* Plotly default override */
-.pvcopilot-root .js-plotly-plot {
-    font-size: 13px;
-}
-
-/* Responsive: on narrow screens, stack the two panels vertically.
-   At wider breakpoints (>= 900px) they sit side-by-side. */
-@media (max-width: 900px) {
-    .pvcopilot-root .pvcopilot-shell {
-        flex-direction: column !important;
-        gap: 16px !important;
-    }
-    /* Both sidebar-render wrapper and chat panel take the full width */
-    .pvcopilot-root .pvcopilot-shell > div {
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    /* Drop fixed heights so each panel grows to its natural content height. */
-    .pvcopilot-root .pvcopilot-shell > div > div,
-    .pvcopilot-root .pvcopilot-shell > div:nth-child(2),
-    .pvcopilot-root #sidebar-render > div {
-        width: 100% !important;
-        height: auto !important;
-        min-height: 0 !important;
-        max-height: none !important;
-        overflow-y: visible !important;
-    }
-    /* The sidebar uses a flex:1 spacer to push About + Sign in to the bottom
-       on wide screens. On mobile that creates a giant blank gap — collapse it. */
-    .pvcopilot-root #sidebar-render > div > div[style*="flex: 1"],
-    .pvcopilot-root #sidebar-render > div > div[style*="flex:1"] {
-        flex: 0 0 auto !important;
-        height: 0 !important;
-    }
-}
-
-/* =========================================================================
-   Mode switcher (Simple / Advanced) — compact segmented control.
-   The generic .pvcopilot-root button:hover lift looks wrong on flat pills,
-   so neutralize it here and use a soft background change instead.  We also
-   pin the active/idle backgrounds across hover/focus/active so a click (or
-   clicking elsewhere) can't leave the pill in a washed-out state.
-   ========================================================================= */
-.pvcopilot-root #mode-tabs button,
-.pvcopilot-root #mode-tabs button:hover:not(:disabled),
-.pvcopilot-root #mode-tabs button:focus,
-.pvcopilot-root #mode-tabs button:active:not(:disabled) {
-    transform: none !important;
-    filter: none !important;
-    box-shadow: none;
-    outline: none !important;
-}
-/* Idle pill: transparent, with a subtle slate wash on hover only. */
-.pvcopilot-root #mode-tabs button.mode-tab-idle {
-    background: transparent !important;
-}
-.pvcopilot-root #mode-tabs button.mode-tab-idle:hover:not(:disabled) {
-    background: #e2e8f0 !important;
-}
-/* Active pill: solid navy fill + soft shadow in EVERY state. */
-.pvcopilot-root #mode-tabs button.mode-tab-active,
-.pvcopilot-root #mode-tabs button.mode-tab-active:hover:not(:disabled),
-.pvcopilot-root #mode-tabs button.mode-tab-active:focus,
-.pvcopilot-root #mode-tabs button.mode-tab-active:active:not(:disabled) {
-    background: #0064AB !important;
-    box-shadow: 0 1px 3px rgba(0, 100, 171, 0.25) !important;
-}
-/* =========================================================================
-   Variable-mapping dropdown — category ("group") titles in navy blue.
-
-   NOTE: intentionally NOT scoped under .pvcopilot-root. The dmc.Select
-   dropdown is rendered in a portal at <body> (comboboxProps withinPortal),
-   so it lives OUTSIDE .pvcopilot-root and a scoped rule can't reach it.
-   Instead the Select is given classNames={"groupLabel": "pvcopilot-var-group"}
-   (see pvcopilot.py), and this uniquely-named class keeps the change local to
-   these dropdowns without affecting any other dmc.Select in pvtools.
-   ========================================================================= */
-.pvcopilot-var-group {
-    color: #0064AB !important;          /* NAVY — matches the app's accents */
-    font-family: Arial, sans-serif !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.02em;
-}
-
-/* =========================================================================
-   PVPRO numeric stepper — hide the browser's native number spinner.
-   Each PVPRO field supplies its own − / + buttons (see _pvpro_num_field in
-   pvcopilot.py); the native spinner is not just redundant but actively
-   harmful here, because in this Dash version clicking it blanks the value.
-   Scoped under .pvcopilot-root (these inputs live in the page, not a portal).
-   ========================================================================= */
-.pvcopilot-root input.pvpro-num::-webkit-outer-spin-button,
-.pvcopilot-root input.pvpro-num::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-.pvcopilot-root input.pvpro-num {
-    -moz-appearance: textfield;
-    appearance: textfield;
-    text-align: center !important;   /* beat any global input text-align rule */
-}
-
-/* =========================================================================
-   Page background continuity.
-   The pvtools shell frames this page between a full-width black top nav and a
-   black footer. Without this rule the shared page <body> shows through as
-   WHITE bands — above the light-gray content and below it (between the content
-   and the footer) — breaking the backdrop. Paint the body the same #f8fafc so
-   the background reads as one continuous light-gray field between the bars.
-
-   NOTE: intentionally NOT scoped under .pvcopilot-root — the gaps are OUTSIDE
-   the page root (they are the shared body/shell showing through), so a scoped
-   rule can't reach them. #f8fafc is a neutral near-white page tone and matches
-   .pvcopilot-root exactly.
-   ========================================================================= */
-html, body {
-    background: #f8fafc !important;
-}
-
-/* =========================================================================
-   PVPRO auto-fill / estimate note — float-and-fade in.
-   Applied via className="pvcopilot-note-float-in" on the note built after an
-   estimate finishes, so the "Pre-filled from your data …" line animates in
-   (rather than snapping) when the result lands.
-   ========================================================================= */
-@keyframes pvcopilot-note-float-in {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-.pvcopilot-root .pvcopilot-note-float-in {
-    animation: pvcopilot-note-float-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
+/* Technology dropdown matched to the number inputs */
+.pvcopilot-root .pvc-dd .Select-control,
+.pvcopilot-root .pvc-dd .Select__control {
+  border: 1px solid rgba(120,140,180,0.4) !important; border-radius: 10px !important;
+  background: rgba(255,255,255,0.7) !important; min-height: 38px !important; box-shadow: none !important; font-size: 13px; }
+.pvcopilot-root .pvc-dd .Select__control--is-focused { border-color: #4f8bff !important; }
+.pvcopilot-root .pvc-dd .Select-value, .pvcopilot-root .pvc-dd .Select__single-value { color: #1c2540 !important; }

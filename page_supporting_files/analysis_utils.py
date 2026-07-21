@@ -1168,6 +1168,22 @@ VAR_COLORS = {
     "current":     "#9bcc4e",   # lime green
 }
 
+# Blue -> green sequential palette for the five PVPRO single-diode reference
+# parameters (Pmp, Vmp, Imp, Voc, Isc), in canonical order.  This is the
+# single source of truth for the "5-parameter" color scheme: it is consumed
+# BOTH by the trend plots here (compute_pvpro / _one_panel) and by the
+# parameter selector pills/tabs in pvcopilot.py, so a pill's accent color
+# matches the color of the trend it reveals.  Applies in Simple and Advanced
+# modes alike (the figures are the same); only the pill *layout* is
+# Advanced-only.
+PVPRO_VAR_COLORS = {
+    "p_mp_ref": "#1558b0",   # blue
+    "v_mp_ref": "#1a86c7",   # cyan-blue
+    "i_mp_ref": "#12998e",   # teal
+    "v_oc_ref": "#2fa855",   # green
+    "i_sc_ref": "#7cc242",   # lime green
+}
+
 
 def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 
@@ -2852,8 +2868,9 @@ def compute_pvpro(df,
         rate = rates[col]
         rate_str = f"({rate:+.2f} %/yr)" if np.isfinite(rate) else "(n/a)"
 
-        # Per-quantity color from the shared palette.
-        trend_color   = VAR_COLORS[PVPRO_COLOR_KEY[col]]
+        # Per-parameter color from the blue->green PVPRO palette (falls back
+        # to the shared per-quantity palette for any unexpected column).
+        trend_color   = PVPRO_VAR_COLORS.get(col, VAR_COLORS[PVPRO_COLOR_KEY[col]])
         # Scatter is a translucent shade of the trend color.  Alpha 0.3
         # keeps individual points faint so the trend line stands out.
         scatter_color = _hex_to_rgba(trend_color, alpha=0.3)
