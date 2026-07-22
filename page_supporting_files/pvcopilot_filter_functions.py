@@ -262,6 +262,68 @@ def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
     return normal_indices, outlier_indices
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# NEW-FILTERS (ported from the developments branch, on trial): stale-data
+# detection via pvanalytics. If it makes results worse, delete the function
+# below and grep "NEW-FILTERS" in pages/pvcopilot.py for the UI/callback wiring.
+# ═════════════════════════════════════════════════════════════════════════════
+def stale_data_filter(df: pd.DataFrame, mapped_variables_dict: dict,
+                      window: int = 6, rtol: float = 1e-5, atol: float = 1e-4):
+    """
+    Flags stretches where a sensor "froze" — consecutive near-identical
+    readings — using pvanalytics.quality.gaps.stale_values_diff.
+
+    A frozen irradiance sensor stuck at e.g. 412.7 W/m² passes range and IQR
+    filters (it is inside [0, 1500] and not a statistical outlier) but is
+    fiction: normalizing real power by a fake constant irradiance injects
+    steps into the trend, and a frozen power logger reads as a degradation
+    plateau. Both irradiance and power are checked; a row is removed if
+    either signal is stale there.
+
+    Runs of exact zeros are NOT flagged — nighttime irradiance/power is
+    legitimately constant at 0. Only frozen *nonzero* runs are treated as
+    sensor faults. The first `window`-1 points of each run are kept
+    (mark='tail'), since the initial reading of a frozen run is usually real.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe with DatetimeIndex.
+    mapped_variables_dict : dict
+        Column name mapping, e.g. {'DC Power': ..., 'Irradiance': ...}.
+    window : int, default 6
+        Minimum number of consecutive near-identical readings for a run to
+        count as stale (e.g. 6 points = 1.5 h of 15-min data).
+    rtol, atol : float
+        Relative/absolute tolerances for "near-identical" (see
+        pvanalytics.quality.gaps.stale_values_diff).
+
+    Returns
+    -------
+    normal_indices, outlier_indices : pd.Index
+    """
+    from pvanalytics.quality import gaps
+
+    stale_mask = pd.Series(False, index=df.index)
+
+    for role in ('Irradiance', 'DC Power'):
+        key = mapped_variables_dict.get(role)
+        if not key or key not in df.columns:
+            continue
+        series = pd.to_numeric(df[key], errors='coerce')
+        stale = gaps.stale_values_diff(series.fillna(np.inf),
+                                       window=max(int(window), 2),
+                                       rtol=rtol, atol=atol, mark='tail')
+        # Nighttime zeros are legitimately constant — only nonzero runs are faults.
+        stale &= series.abs() > atol
+        print(f"  Stale data ({role}, window={window})   : flagged {stale.sum()} pts")
+        stale_mask |= stale
+
+    normal_indices  = df.index[~stale_mask]
+    outlier_indices = df.index[stale_mask]
+    return normal_indices, outlier_indices
+
+
 def detect_clear_days(df: pd.DataFrame, irradiance_key: str,
                       smoothness_threshold: float = 0.3,
                       energy_threshold: float = 0.5,

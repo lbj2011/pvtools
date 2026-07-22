@@ -5,6 +5,8 @@ Lazy layout loading while keeping callbacks registered.
 Works with Dash + Gunicorn + Heroku.
 """
 
+from pathlib import Path
+
 from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
 import time
@@ -12,6 +14,11 @@ from flask import request
 import importlib
 import traceback
 import sys
+from dotenv import load_dotenv
+
+# Load .env before importing any pages: modules like field_chat.py read
+# OPENAI_API_KEY at import time. Explicit path so it works from any cwd.
+load_dotenv(Path(__file__).parent / ".env")
 
 from app import app
 

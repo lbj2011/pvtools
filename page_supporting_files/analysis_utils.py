@@ -1435,6 +1435,75 @@ def low_irra_power_filter(df, mapped_variables_dict,
     return normal_indices, outlier_indices
 
 # ================================
+# RATE RELIABILITY (ported from bugFixes)
+# ================================
+# Real panel degradation is a small negative number. Outside this band the
+# figure almost always reflects weather, sampling noise or un-normalizable
+# data rather than aging.
+DEGRADATION_PLAUSIBLE_MIN = -3.0
+DEGRADATION_PLAUSIBLE_MAX = 0.5
+
+# A per-year degradation trend fit to a handful of daily points is unreliable --
+# a few noisy days swing the slope to absurd values (+33%/yr from 4 points). We
+# still REPORT a rate below this many daily points, but flag it as unreliable
+# (with the reason) rather than presenting it as trustworthy.
+MIN_TREND_POINTS = 20
+
+# An internal uncertainty band wider than this (%/yr) means the year-over-year
+# changes disagree too much for the single number to be trusted.
+MAX_CI_WIDTH = 3.0
+
+
+def rate_is_plausible(rd):
+    """True if a degradation rate (%/yr) is finite and within the plausible band
+    (roughly a small negative number). Used to flag unreliable results rather
+    than presenting them as trustworthy."""
+    try:
+        return bool(np.isfinite(rd) and
+                    DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
+    except Exception:
+        return False
+
+
+def degradation_reliability(rd, n_points=None, has_irradiance=True,
+                            duration_years=None, ci_width=None):
+    """Decide whether a (computed) degradation rate is trustworthy, and if not,
+    WHY -- so the UI can show the rate alongside 'unreliable because ...'.
+
+    `ci_width` is the width of an internal bootstrap uncertainty band in %/yr.
+    It is NEVER displayed as a range -- it only feeds this flag: a band wider
+    than MAX_CI_WIDTH means the spread of year-over-year changes is too large
+    for the single number to be trusted.
+
+    Returns (is_reliable, reasons). reasons is a list of plain-English strings;
+    an empty list means the rate looks reliable.
+    """
+    reasons = []
+    if n_points is not None and n_points < MIN_TREND_POINTS:
+        reasons.append(
+            f"only {n_points} daily data point(s) survived filtering "
+            f"(a reliable trend needs at least {MIN_TREND_POINTS})")
+    if not has_irradiance:
+        reasons.append(
+            "there is no irradiance column, so power isn't weather-normalized "
+            "(year-to-year weather then looks like degradation)")
+    if duration_years is not None and duration_years < 2:
+        reasons.append(
+            f"the data spans only {duration_years:.1f} year(s) — under 2 years is "
+            "too short to separate real aging from seasonal weather")
+    if not rate_is_plausible(rd):
+        reasons.append(
+            f"the computed rate ({rd:+.1f}%/yr) is outside the physically "
+            "plausible range (real degradation is roughly 0 to −3%/yr)")
+    if ci_width is not None and np.isfinite(ci_width) and ci_width > MAX_CI_WIDTH:
+        reasons.append(
+            f"the year-over-year changes disagree with each other by about "
+            f"±{ci_width / 2:.1f}%/yr — too scattered for this single number "
+            "to be trusted")
+    return (len(reasons) == 0), reasons
+
+
+# ================================
 # DAILY AGGREGATION
 # ================================
 def aggregate_daily(df_f, irradiance_col):
@@ -1453,7 +1522,9 @@ def aggregate_daily(df_f, irradiance_col):
 # YoY
 # ================================
 def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5):
-    series = series.dropna()
+    # sort_index: an unsorted daily series (out-of-order upload) would zigzag
+    # the trend line back and forth across the time axis.
+    series = series.dropna().sort_index()
     yoy = []
 
     for t in series.index:

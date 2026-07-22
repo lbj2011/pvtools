@@ -42,9 +42,11 @@ from page_supporting_files.analysis_utils import (
     parse_contents, make_overview_figures, normalize, low_irra_power_filter,
     aggregate_daily, compute_yoy, compute_lr, compute_hw, compute_arima,
     compute_csd, get_full_code, estimate_pvpro_params, compute_pvpro,
+    rate_is_plausible, degradation_reliability,  # NEW-WARNINGS
 )
 from page_supporting_files.pvcopilot_filter_functions import (
     identify_outliers_iqr, clear_sky_filter, basic_value_filter,
+    stale_data_filter,  # NEW-FILTERS
 )
 try:
     # Single source of truth for the 5-parameter blue->green scheme, shared
@@ -196,20 +198,24 @@ FILTER_LABELS = {
     "clearsky": "Clear-sky filter",
     "irr": "Low irradiance / power filter",
     "iqr": "Outlier removal (IQR)",
+    "stale": "Stale / frozen data filter",  # NEW-FILTERS
 }
 FILTER_EXPLAIN = {
     "tz": "Aligns timestamps to local solar time and corrects daylight-saving jumps.",
     "clearsky": "Keeps timestamps whose irradiance profile is smooth and cloud-free, so the fit sees comparable conditions.",
     "irr": "Drops low-light points (irradiance below the threshold) where the power ratio is noisy.",
     "iqr": "Removes statistical outliers in the normalized series using an inter-quartile-range rule.",
+    "stale": "Drops runs of near-identical nonzero readings where a sensor or logger froze; nighttime zeros are never flagged.",  # NEW-FILTERS
 }
-FILTER_PARAM_DEFAULTS = {"irr_thresh": 300, "clearsky_smooth": 0.3, "clearsky_energy": 0.5, "iqr": 1.5}
+FILTER_PARAM_DEFAULTS = {"irr_thresh": 300, "clearsky_smooth": 0.3, "clearsky_energy": 0.5, "iqr": 1.5,
+                         "stale_window": 6}  # NEW-FILTERS
 # which tunable params each filter exposes (label shown in its "Customize parameters" panel)
 FILTER_PARAMS = {
     "tz": [],
     "clearsky": [("clearsky_smooth", "Smoothness threshold"), ("clearsky_energy", "Energy threshold")],
     "irr": [("irr_thresh", "Irradiance threshold (W/m²)")],
     "iqr": [("iqr", "IQR multiplier")],
+    "stale": [("stale_window", "Window (consecutive points)")],  # NEW-FILTERS
 }
 METHOD_PARAM_DEFAULTS = {"yoy_window": 30, "yoy_iqr": 1.5, "hw_period": 12, "csd_period": 12,
                          "arima_p": 1, "arima_d": 1, "arima_q": 0, "arima_s": 12}
@@ -229,7 +235,7 @@ METHOD_PARAMS = {
 DEFAULT_STATE = {
     "selected": None, "selected_label": "", "mode": "simple", "simple_done": False,
     "adv": {"1": "idle", "2": "locked", "3": "locked", "4": "locked"}, "adv_tab": 1,
-    "filters": {"tz": True, "clearsky": True, "irr": True, "iqr": True},
+    "filters": {"tz": True, "clearsky": True, "irr": True, "iqr": True, "stale": True},  # NEW-FILTERS: stale on by default
     "fparams": dict(FILTER_PARAM_DEFAULTS),
     "methods": ["YOY"],
     "mparams": {**METHOD_PARAM_DEFAULTS, **PVPRO_PARAM_DEFAULTS},
@@ -301,7 +307,13 @@ def _df_to_json(df):
 
 def _df_from_json(s):
     df = pd.read_json(s, orient="split")
-    df.index = pd.to_datetime(df.index, errors="ignore")
+    # Only convert date-like (string/object) indexes back to datetimes. A plain
+    # integer row index (e.g. a CSV upload stored before time identification)
+    # must be left alone: pd.to_datetime reads integers as NANOSECONDS since
+    # epoch, collapsing every timestamp to 1970-01-01 and rendering all
+    # time-axis graphs as a single vertical line.
+    if not isinstance(df.index, pd.DatetimeIndex) and not pd.api.types.is_numeric_dtype(df.index):
+        df.index = pd.to_datetime(df.index, errors="ignore")
     return df
 
 
@@ -442,17 +454,18 @@ def run_parse(contents=None, filename=None, df=None, progress_callback=None):
             "detected": dict(mapped), "quality_tags": qtags,
             "filename": filename or "your_data", "n_raw": n, "completeness": round(completeness, 1),
             "mapping": _build_mapping(df, mapped),
+            "mapping_notes": list(notes or []),  # NEW-WARNINGS: surfaced in the data-quality panel
             "has_vi": bool(mapped.get("DC Voltage") and mapped.get("DC Current"))}
 
 
 def apply_filter_chain(df, mapped, irra_key, selected, fparams, progress_callback=None):
     n_raw = int(len(df))
-    _report(progress_callback, 1, 7, "Applying basic value and sensor-range checks…")
+    _report(progress_callback, 1, 8, "Applying basic value and sensor-range checks…")
     bv_normal, _ = basic_value_filter(df, mapped)
     df = df.loc[bv_normal].copy()
     clearsky_mask = pd.Series(True, index=df.index)
     if selected.get("clearsky", True):
-        _report(progress_callback, 2, 7, "Detecting clear-sky periods…")
+        _report(progress_callback, 2, 8, "Detecting clear-sky periods…")
         try:
             cs_idx, _ = clear_sky_filter(df, irra_key,
                                          smoothness_threshold=_num(fparams.get("clearsky_smooth"), 0.3),
@@ -460,18 +473,29 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams, progress_callbac
             clearsky_mask = pd.Series(df.index.isin(cs_idx), index=df.index)
         except Exception:
             clearsky_mask = pd.Series(True, index=df.index)
-    _report(progress_callback, 3, 7, "Normalizing power and correcting temperature…")
+    # NEW-FILTERS: stale mask is computed on the raw signals here, before
+    # normalization and before the timezone correction re-labels the index.
+    stale_mask = pd.Series(True, index=df.index)
+    if selected.get("stale", True):
+        _report(progress_callback, 3, 8, "Detecting stale / frozen sensor readings…")
+        try:
+            st_idx, _ = stale_data_filter(df, mapped,
+                                          window=int(_num(fparams.get("stale_window"), 6)))
+            stale_mask = pd.Series(df.index.isin(st_idx), index=df.index)
+        except Exception:
+            stale_mask = pd.Series(True, index=df.index)
+    _report(progress_callback, 4, 8, "Normalizing power and correcting temperature…")
     df_f = normalize(df, mapped, gamma=-0.004)   # temperature correction (always applied)
-    mask = pd.Series(clearsky_mask.values, index=df_f.index)
+    mask = pd.Series(clearsky_mask.values & stale_mask.values, index=df_f.index)
     if selected.get("tz", True):
-        _report(progress_callback, 4, 7, "Aligning timezone and daylight-saving timestamps…")
+        _report(progress_callback, 5, 8, "Aligning timezone and daylight-saving timestamps…")
         try:
             df_f.index = pd.to_datetime(df_f.index).tz_localize("UTC").tz_convert("US/Pacific")
             mask.index = df_f.index
         except Exception:
             pass
     if selected.get("irr", True):
-        _report(progress_callback, 5, 7, "Removing low-irradiance and low-power points…")
+        _report(progress_callback, 6, 8, "Removing low-irradiance and low-power points…")
         try:
             keep_idx, _ = low_irra_power_filter(df_f, mapped,
                                                 irr_thresh=_num(fparams.get("irr_thresh"), 300),
@@ -480,7 +504,7 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams, progress_callbac
         except Exception:
             pass
     if selected.get("iqr", True):
-        _report(progress_callback, 6, 7, "Removing statistical outliers…")
+        _report(progress_callback, 7, 8, "Removing statistical outliers…")
         try:
             ni, _ = identify_outliers_iqr(df_f, "norm", iqr_multiplier=_num(fparams.get("iqr"), 1.5))
             mask &= df_f.index.isin(ni)
@@ -489,7 +513,7 @@ def apply_filter_chain(df, mapped, irra_key, selected, fparams, progress_callbac
     kept = mask.values.astype(bool)
     df_good = df_f.loc[df_f.index[kept]]
     n_kept = int(len(df_good))
-    _report(progress_callback, 7, 7, "Building filtering summary figures…")
+    _report(progress_callback, 8, 8, "Building filtering summary figures…")
     pie_json, power_json = _filter_figures(df_f, kept, n_raw, n_kept)
     return df_good, n_raw, n_kept, pie_json, power_json
 
@@ -568,8 +592,11 @@ def run_one_metric(daily, method, mparams, df_good=None, mapped=None):
     raise ValueError(f"Unknown metric: {method}")
 
 
-def run_methods(df_good, irra_key, methods, mparams, mapped=None, progress_callback=None):
-    """Run every selected statistical method; return {method: {rate, fig}}."""
+def run_methods(df_good, irra_key, methods, mparams, mapped=None, progress_callback=None,
+                duration_years=None):
+    """Run every selected statistical method; return {method: {rate, fig, reasons}}.
+    `reasons` (NEW-WARNINGS) lists why the computed rate should not be trusted
+    (too few daily points, short record, implausible value); empty = reliable."""
     total = max(1, len(methods) + 1)
     _report(progress_callback, 1, total, "Aggregating the filtered time series…")
     daily = aggregate_daily(df_good, irra_key)
@@ -578,8 +605,13 @@ def run_methods(df_good, irra_key, methods, mparams, mapped=None, progress_callb
         _report(progress_callback, pos, total, f"Running {METHOD_LABEL.get(m, m)}…")
         try:
             rate, fig = run_one_metric(daily, m, mparams, df_good=df_good, mapped=mapped)
-            out[m] = {"rate": float(rate) if rate == rate else None,
-                      "fig": fig.to_json() if fig is not None else None}
+            rate_f = float(rate) if rate == rate else None
+            _, reasons = (degradation_reliability(rate_f, n_points=len(daily),
+                                                  duration_years=duration_years)
+                          if rate_f is not None else (True, []))
+            out[m] = {"rate": rate_f,
+                      "fig": fig.to_json() if fig is not None else None,
+                      "reasons": reasons}
         except Exception as e:
             traceback.print_exc()
             out[m] = {"rate": None, "fig": None, "error": str(e)}
@@ -1022,6 +1054,15 @@ def simple_body(state, data, result):
             html.Div("Analysis failed", style={"fontSize": "16px", "fontWeight": 800, "marginBottom": "6px", "color": "#b23"}),
             html.Div(str(smp["error"]), style={"fontSize": "13px", "color": SUB, "marginBottom": "16px"}),
             html.Button([icon_bolt(15), html.Span("Try again")], id={"type": "act", "index": "run-simple"}, n_clicks=0, className="btn-run")])
+    # NEW-WARNINGS: a sub-1-year dataset blocks the calculation entirely.
+    if smp.get("blocked_duration") is not None:
+        return html.Div(className="rise", children=[
+            duration_block_banner(smp["blocked_duration"]),
+            html.Button([html.Span("←", style={"fontSize": "16px", "fontWeight": 800}), html.Span("Return")],
+                        id={"type": "act", "index": "simple-reset"}, n_clicks=0, style={
+                "display": "inline-flex", "alignItems": "center", "gap": "7px", "padding": "11px 18px",
+                "border": "1px solid rgba(120,140,180,0.4)", "borderRadius": "13px", "background": "rgba(255,255,255,0.6)",
+                "color": "#374466", "fontWeight": 600, "fontSize": "13.5px", "cursor": "pointer", "marginTop": "4px"})])
     rate = smp.get("rate")
     fig = pio.from_json(smp["fig"]) if smp.get("fig") else None
     rate_card = html.Div(style={"borderRadius": "20px", "padding": "26px", "display": "flex", "flexDirection": "column",
@@ -1046,7 +1087,13 @@ def simple_body(state, data, result):
         html.Div("Normalized power trend", style={"fontSize": "15px", "fontWeight": 700, "marginBottom": "8px"}),
         dcc.Graph(figure=fig, config=GRAPH_CONFIG) if fig is not None
         else html.Div("No trend figure for this metric.", style={"color": SUB, "fontSize": "13px"})])
+    # NEW-WARNINGS: data-quality notes + reliability banners above the result.
+    _n_notes, _notes_component = data_quality_notes(
+        None, data.get("mapped"), extra_notes=data.get("mapping_notes"))
+    _red = implausible_rate_banner(rate)
+    _amber = None if _red is not None else unreliable_rate_banner(rate, smp.get("reasons") or [])
     return html.Div(className="rise", children=[
+        *( [b for b in (_notes_component, _red, _amber) if b is not None] ),
         html.Div(style={"display": "grid", "gridTemplateColumns": "300px 1fr", "gap": "20px", "alignItems": "stretch"},
                  children=[rate_card, trend_card]),
         diagnostics_block(result),
@@ -1217,6 +1264,144 @@ def _meta_row(label, value):
                     style={"fontSize": "13.5px", "margin": "3px 0"})
 
 
+# --------------------------------------------------------------------------- warnings
+# NEW-WARNINGS (ported from bugFixes, restyled for the new UI): tinted glass
+# callouts — amber for "trust with caution", red for "don't trust this".
+_WARN_TONES = {
+    "amber": {"dot": "linear-gradient(135deg,#ffc45e,#ff9f0a)", "glow": "0 0 0 4px rgba(255,159,10,0.15)",
+              "bg": "linear-gradient(135deg,rgba(255,159,10,0.10),rgba(255,214,130,0.16))",
+              "border": "1px solid rgba(255,159,10,0.32)", "title": "#7a5200"},
+    "red": {"dot": "linear-gradient(135deg,#ff7a6e,#ff3b30)", "glow": "0 0 0 4px rgba(255,59,48,0.13)",
+            "bg": "linear-gradient(135deg,rgba(255,59,48,0.09),rgba(255,140,110,0.13))",
+            "border": "1px solid rgba(255,59,48,0.30)", "title": "#8a1c1c"},
+}
+
+
+def _warn_dot(tone):
+    t = _WARN_TONES[tone]
+    return html.Span(style={"width": "11px", "height": "11px", "borderRadius": "50%", "flexShrink": 0,
+                            "background": t["dot"], "boxShadow": t["glow"], "marginRight": "10px"})
+
+
+def _warn_title_row(tone, title, right=None):
+    kids = [_warn_dot(tone),
+            html.Span(title, style={"fontWeight": 800, "fontSize": "13.5px", "letterSpacing": "-0.01em",
+                                    "color": _WARN_TONES[tone]["title"]})]
+    if right is not None:
+        kids.append(right)
+    return html.Div(kids, style={"display": "flex", "alignItems": "center"})
+
+
+def _warn_card(tone, children):
+    t = _WARN_TONES[tone]
+    return html.Div(children, className="rise", style={
+        "background": t["bg"], "border": t["border"], "borderRadius": "16px",
+        "padding": "14px 18px", "marginBottom": "14px",
+        "boxShadow": "0 6px 18px rgba(30,58,120,0.05)", "backdropFilter": "blur(8px)"})
+
+
+_WARN_BODY_STYLE = {"fontSize": "13px", "color": SUB, "lineHeight": "1.55",
+                    "marginTop": "6px", "marginLeft": "21px"}
+
+
+def data_quality_notes(df, mapping, extra_notes=None, include_missing=True):
+    """Single collapsed disclosure listing missing-data items and what each
+    implies for the degradation result. `extra_notes` folds the AC-fallback /
+    ambiguous-column / time-by-value warnings parse_contents emits into the
+    same toggle. Returns (n_notes, component); component is None when there is
+    nothing to flag, so callers can skip rendering entirely."""
+    mapping = mapping or {}
+    notes = list(extra_notes or [])
+
+    if include_missing:
+        irra_key = mapping.get("Irradiance")
+        has_irr = bool(irra_key) and (df is None or irra_key in getattr(df, "columns", []))
+        if not has_irr:
+            notes.append("No irradiance column — power is NOT irradiance-normalized, so the "
+                         "degradation rate is not weather-corrected and is less reliable.")
+        temp_key = mapping.get("Module temperature")
+        has_temp = bool(temp_key) and (df is None or temp_key in getattr(df, "columns", []))
+        if has_irr and not has_temp:
+            notes.append("No module-temperature column — normalization uses irradiance only, "
+                         "with no temperature correction.")
+
+    if not notes:
+        return 0, None
+
+    n = len(notes)
+    component = _warn_card("amber", html.Details([
+        html.Summary(_warn_title_row(
+            "amber", f"{n} data-quality note{'s' if n != 1 else ''}",
+            right=html.Span("Show details", style={"marginLeft": "auto", "fontSize": "12px",
+                                                   "color": MUTE, "fontWeight": 600})),
+            style={"cursor": "pointer", "listStyle": "none"}),
+        html.Ul([html.Li(t, style={"marginBottom": "5px"}) for t in notes],
+                style={**_WARN_BODY_STYLE, "marginTop": "10px", "marginBottom": 0, "paddingLeft": "18px"}),
+    ]))
+    return n, component
+
+
+def duration_block_banner(duration_years):
+    """Prominent red banner shown when the dataset spans less than a year:
+    the degradation analysis is blocked for this dataset."""
+    months = int(round((duration_years or 0) * 12))
+    return _warn_card("red", [
+        _warn_title_row("red", "Not enough data for degradation analysis"),
+        html.Div(f"This dataset spans only about {months} month{'s' if months != 1 else ''} — "
+                 "less than the 1 year the analysis needs, so the degradation "
+                 "calculation is disabled for this dataset.", style=_WARN_BODY_STYLE)])
+
+
+def unreliable_rate_banner(rd, reasons):
+    """Amber banner shown ABOVE a degradation result that was computed but isn't
+    trustworthy, listing the specific reason(s). Returns None when there are no
+    reasons (the rate is reliable), so callers can skip it. The rate itself is
+    still displayed -- this just tells the user not to trust it, and why."""
+    if not reasons:
+        return None
+    try:
+        title = f"This {rd:+.1f}%/year rate isn't reliable"
+    except (TypeError, ValueError):
+        title = "This rate isn't reliable"
+    return _warn_card("amber", [
+        _warn_title_row("amber", title),
+        html.Div("It was still computed, but treat it with caution because:", style=_WARN_BODY_STYLE),
+        html.Ul([html.Li(r, style={"marginBottom": "4px"}) for r in reasons],
+                style={**_WARN_BODY_STYLE, "marginTop": "4px", "marginBottom": 0, "paddingLeft": "39px"})])
+
+
+def implausible_rate_banner(rd):
+    """Red banner shown above a degradation result whose rate is outside the
+    plausible band (positive or very large). Returns None when the rate is fine.
+    Real degradation is a small negative number; an implausible value almost
+    always means un-normalizable (no irradiance) or too-sparse data."""
+    if rd is None or rate_is_plausible(rd):
+        return None
+    return _warn_card("red", [
+        _warn_title_row("red", f"Unreliable result ({rd:.1f}%/year)"),
+        html.Div("This is outside the physically plausible range for panel degradation "
+                 "(a small negative number, roughly 0 to −3%/year). It usually means the "
+                 "data has no irradiance to normalize against, or too few / too sparse "
+                 "points — so this number reflects weather and sampling noise, not real "
+                 "aging.", style=_WARN_BODY_STYLE)])
+
+
+def _result_warning_banners(result):
+    """All warning banners for a computed result: one amber unreliable-rate
+    banner per flagged method (red implausible banner takes precedence when the
+    rate is outside the plausible band)."""
+    banners = []
+    multi = (result or {}).get("multi") or {}
+    for mid, r in multi.items():
+        rate, reasons = r.get("rate"), r.get("reasons") or []
+        red = implausible_rate_banner(rate)
+        if red is not None:
+            banners.append(red)
+        elif reasons:
+            banners.append(unreliable_rate_banner(rate, reasons))
+    return banners
+
+
 def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
     # `as_pills` = Advanced-mode layout: the PVPRO parameter selector is a row
     # of pills across the TOP of the trend figure (short name only, full name
@@ -1229,6 +1414,12 @@ def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
         return html.Div()
     dur = result.get("duration_years", 0.0)
     window = result.get("window", "")
+
+    # NEW-WARNINGS: reliability banners sit above whichever result layout renders.
+    _warns = _result_warning_banners(result)
+
+    def _with_warns(component):
+        return html.Div([*_warns, component]) if _warns else component
 
     # -------- single metric --------
     if len(items) == 1:
@@ -1292,10 +1483,10 @@ def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
                 inner = html.Div([selector, graph], style={"display": "flex", "flexDirection": "column", "height": "100%"})
             else:
                 inner = html.Div([selector, graph], style={"display": "flex", "gap": "14px", "alignItems": "stretch", "height": "100%"})
-            return html.Div(className="rise", style={"display": "grid", "gridTemplateColumns": "290px minmax(0,1fr)",
+            return _with_warns(html.Div(className="rise", style={"display": "grid", "gridTemplateColumns": "290px minmax(0,1fr)",
                             "gap": "18px", "alignItems": "stretch"}, children=[
                 card,
-                html.Div(inner, className="glass-soft", style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})])
+                html.Div(inner, className="glass-soft", style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})]))
 
         if err:
             body = html.Div(f"Error: {err}", style={"fontSize": "12.5px", "color": "#b23"})
@@ -1307,10 +1498,10 @@ def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
             body = [_fig_title("Power trend"),
                     dcc.Graph(figure=fig, config=GRAPH_CONFIG) if fig is not None
                     else html.Div("No figure.", style={"fontSize": "12px", "color": MUTE})]
-        return html.Div(className="rise", style={"display": "grid", "gridTemplateColumns": "290px minmax(0,1fr)",
+        return _with_warns(html.Div(className="rise", style={"display": "grid", "gridTemplateColumns": "290px minmax(0,1fr)",
                         "gap": "18px", "alignItems": "stretch"}, children=[
             card, html.Div(body if isinstance(body, list) else [body], className="glass-soft",
-                           style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})])
+                           style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})]))
 
     # -------- multiple metrics: summary + bar, then combined trend --------
     labels, rates, colors = [], [], []
@@ -1375,7 +1566,7 @@ def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
     combined.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False, tickfont=dict(family="Inter", color=MUTE))
     combined.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False, range=yr,
                           autorange=(yr is None), tickfont=dict(family="Inter", color=MUTE))
-    return html.Div(className="rise", children=[
+    return _with_warns(html.Div(className="rise", children=[
         html.Div(style={"display": "grid", "gridTemplateColumns": "300px minmax(0,1fr)", "gap": "18px", "alignItems": "stretch", "marginBottom": "14px"}, children=[
             summary,
             html.Div([_fig_title("Annual degradation rate \u2014 method comparison"),
@@ -1383,7 +1574,7 @@ def result_cards(result, pvpro_fig="p_mp_ref", as_pills=False):
                      className="glass-soft", style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})]),
         html.Div([_fig_title("Power trend \u2014 all selected methods"),
                   dcc.Graph(figure=combined, config=GRAPH_CONFIG)],
-                 className="glass-soft", style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})])
+                 className="glass-soft", style={"padding": "16px 18px", "background": "rgba(255,255,255,0.7)"})]))
 
 
 def diagnostics_block(result):
@@ -1428,10 +1619,15 @@ def advanced_body(state, data, filtered, result):
             figs_block = html.Div(style={"background": "rgba(255,255,255,0.82)", "border": "1px solid rgba(255,255,255,0.85)",
                 "borderRadius": "18px", "padding": "10px 14px", "boxShadow": "0 6px 18px rgba(30,58,120,0.06)",
                 "display": "grid", "gridTemplateColumns": "repeat(2,minmax(0,1fr))", "gap": "8px 18px"}, children=fig_items)
+            # NEW-WARNINGS: consolidated data-quality disclosure (missing
+            # irradiance/temperature + the parse-time mapping notes).
+            _n_notes, notes_component = data_quality_notes(
+                None, data.get("mapped"), extra_notes=data.get("mapping_notes"))
             content = html.Div(className="rise", children=[
                 html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(3,1fr)", "gap": "10px"}, children=[
                     _metric("Rows", f"{data.get('n_raw', 0):,}"), _metric("Completeness", f"{data.get('completeness', 0)}%"),
                     _metric("Columns identified", str(data.get("n_columns") or len(data.get("columns") or [])))]),
+                (html.Div(notes_component, style={"marginTop": "14px"}) if notes_component is not None else html.Div()),
                 html.Div("Identified variables — edit any mapping, then re-plot", style={"fontSize": "13px", "fontWeight": 700, "color": "#374466", "margin": "18px 0 10px"}),
                 mapping_editor(data),
                 html.Div(id="apply-wrap", style={"display": "none"},
@@ -1598,8 +1794,12 @@ def advanced_body(state, data, filtered, result):
                 pvpro_section,
                 (html.Div("\u26a0 PVPRO needs DC Voltage + DC Current columns, which weren't identified in this dataset.",
                           style={"marginTop": "12px", "fontSize": "12.5px", "color": "#8a6d00", "fontWeight": 600}) if needs_vi else html.Div()),
-                html.Div(html.Button(["Calculate degradation  \u2192"], id={"type": "run-step", "index": 3}, n_clicks=0, className="btn-run"),
-                         style={"marginTop": "20px"})])
+                # NEW-WARNINGS: a sub-1-year filtered record can't support a
+                # degradation trend \u2014 the run button is replaced by a red banner.
+                (html.Div(duration_block_banner(filtered.get("duration_years")), style={"marginTop": "20px"})
+                 if (filtered or {}).get("duration_years") is not None and filtered["duration_years"] < 1.0
+                 else html.Div(html.Button(["Calculate degradation  \u2192"], id={"type": "run-step", "index": 3}, n_clicks=0, className="btn-run"),
+                               style={"marginTop": "20px"}))])
             done3 = status == "done" and (result or {}).get("multi")
             # Once results are on screen, fold the metric selection to save space.
             kids = ([_fold_settings("Metrics selected \u2014 click to unfold or modify", sel,
@@ -2258,7 +2458,13 @@ def poll_pvpro(_n, state, filtered, result):
     if job["phase"] == "done":
         r = job.get("result") or {}
         state["pvpro_job"] = None; state["pvpro_prog"] = None
-        res = {"multi": {"PVPRO": {"rate": r.get("rate"), "figs_all": r.get("figs") or {}, "rates": r.get("rates") or {}}},
+        # NEW-WARNINGS: PVPRO reliability (no daily-point count here — the
+        # duration and plausibility checks still apply).
+        _pv_rate = r.get("rate")
+        _, _pv_reasons = (degradation_reliability(_pv_rate, duration_years=state.get("pvpro_dur"))
+                          if _pv_rate is not None else (True, []))
+        res = {"multi": {"PVPRO": {"rate": _pv_rate, "figs_all": r.get("figs") or {}, "rates": r.get("rates") or {},
+                                   "reasons": _pv_reasons}},
                "duration_years": state.get("pvpro_dur", 0.0), "n_kept": state.get("pvpro_nkept", 0),
                "window": state.get("pvpro_window", "")}
         if simple:
@@ -2347,6 +2553,13 @@ def poll_cancellable_jobs(_n, state, data, filtered, result):
             if kind == "simple_prepare_pvpro":
                 payload = payload or {}
                 identified_data = payload.get("identified_data") or data
+                # NEW-WARNINGS: sub-1-year record — show the blocked banner
+                # instead of launching PVPRO.
+                if payload.get("blocked_duration") is not None:
+                    state["simple_done"] = True
+                    return (state, identified_data, no_update,
+                            {"simple": {"rate": None, "blocked_duration": payload["blocked_duration"]}},
+                            no_update)
                 dg = _df_from_json(payload["df_good"])
                 jid = _launch_pvpro(dg, payload["mapped"], payload["kwargs"])
                 state["pvpro_job"] = jid
@@ -2842,37 +3055,48 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                 data_snapshot = dict(data)
 
                 def _simple_work(progress):
-                    progress(0, 12, "Preparing the uploaded time series…")
+                    progress(0, 14, "Preparing the uploaded time series…")
                     identified0 = data_snapshot
                     if not identified0.get("identified"):
                         raw_df0 = _df_from_json(data_snapshot["df"])
                         identified0 = run_parse(
                             df=raw_df0, filename=data_snapshot.get("filename"),
-                            progress_callback=lambda c, _t, m: progress(c, 12, m))
+                            progress_callback=lambda c, _t, m: progress(c, 14, m))
                     df0 = _df_from_json(identified0["df"])
                     dg0, n_raw0, n_kept0, _pie0, _power0 = apply_filter_chain(
                         df0, identified0["mapped"], identified0["irra_key"],
                         DEFAULT_STATE["filters"], FILTER_PARAM_DEFAULTS,
-                        progress_callback=lambda c, _t, m: progress(c + 4, 12, m))
+                        progress_callback=lambda c, _t, m: progress(c + 4, 14, m))
                     if dg0.empty:
                         raise ValueError("No points survived default filtering.")
                     start0, end0 = dg0.index.min(), dg0.index.max()
                     dur0 = (end0 - start0).days / 365.25 if hasattr(end0 - start0, "days") else 0.0
+                    # NEW-WARNINGS: a sub-1-year record can't support a degradation
+                    # trend -- return a blocked marker instead of a rate.
+                    if dur0 < 1.0:
+                        return {"identified_data": identified0,
+                                "result": {"simple": {"rate": None, "blocked_duration": float(dur0)}}}
                     try:
                         win0 = f"{pd.Timestamp(start0):%Y-%m-%d} \u2192 {pd.Timestamp(end0):%Y-%m-%d}"
                     except Exception:
                         win0 = ""
-                    progress(9, 10, "Aggregating daily normalized power…")
+                    progress(13, 14, "Aggregating daily normalized power…")
                     daily0 = aggregate_daily(dg0, identified0["irra_key"])
-                    progress(10, 10, "Computing the year-on-year degradation rate…")
+                    progress(14, 14, "Computing the year-on-year degradation rate…")
                     rate0, fig0 = compute_yoy(daily0, rolling_window=30, iqr_multiplier=1.5)
                     fig_json = fig0.to_json() if fig0 is not None else None
-                    analysis_result0 = {"simple": {"rate": float(rate0) if rate0 == rate0 else None,
+                    rate0_f = float(rate0) if rate0 == rate0 else None
+                    # NEW-WARNINGS: reliability reasons for the computed rate.
+                    _, reasons0 = (degradation_reliability(rate0_f, n_points=len(daily0),
+                                                           duration_years=float(dur0))
+                                   if rate0_f is not None else (True, []))
+                    analysis_result0 = {"simple": {"rate": rate0_f,
                                        "fig": fig_json, "duration_years": float(dur0),
                                        "n_kept": n_kept0, "window": win0,
+                                       "reasons": reasons0,
                                        "pct_kept": (n_kept0 / n_raw0 * 100) if n_raw0 else 0.0},
-                            "multi": {"YOY": {"rate": float(rate0) if rate0 == rate0 else None,
-                                                "fig": fig_json}},
+                            "multi": {"YOY": {"rate": rate0_f,
+                                                "fig": fig_json, "reasons": reasons0}},
                             "duration_years": float(dur0), "n_kept": n_kept0, "window": win0}
                     return {"identified_data": identified0, "result": analysis_result0}
 
@@ -2903,6 +3127,9 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                     raise ValueError("No points survived default filtering.")
                 start0, end0 = dg0.index.min(), dg0.index.max()
                 dur0 = (end0 - start0).days / 365.25 if hasattr(end0 - start0, "days") else 0.0
+                # NEW-WARNINGS: sub-1-year record blocks the analysis.
+                if dur0 < 1.0:
+                    return {"identified_data": identified0, "blocked_duration": float(dur0)}
                 try:
                     win0 = f"{pd.Timestamp(start0):%Y-%m-%d} \u2192 {pd.Timestamp(end0):%Y-%m-%d}"
                 except Exception:
@@ -3014,8 +3241,12 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                         filters_snapshot, fp_snapshot, progress_callback=progress)
                     if dg0.empty:
                         raise ValueError("No points survived filtering — loosen the thresholds.")
+                    # NEW-WARNINGS: duration of the surviving record; a sub-1-year
+                    # span blocks the Calculate Degradation step (red banner).
+                    span0 = dg0.index.max() - dg0.index.min()
+                    dur0 = span0.days / 365.25 if hasattr(span0, "days") else 0.0
                     return {"df_good": _df_to_json(dg0), "n_raw": n_raw0, "n_kept": n_kept0,
-                            "pie": pie0, "power": power0}
+                            "pie": pie0, "power": power0, "duration_years": float(dur0)}
 
                 state["analysis_job"] = _launch_analysis("advanced_2", _filter_work)
                 state["analysis_worker_pid"] = os.getpid()
@@ -3030,6 +3261,12 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
                 dg = _df_from_json(filtered["df_good"])
                 start, end = dg.index.min(), dg.index.max()
                 dur = (end - start).days / 365.25 if hasattr(end - start, "days") else 0.0
+                # NEW-WARNINGS: backstop — the UI already replaces the Calculate
+                # button with a red banner for sub-1-year records.
+                if dur < 1.0:
+                    raise ValueError(
+                        f"This dataset spans only about {int(round(dur * 12))} months — "
+                        "less than the 1 year the degradation analysis needs.")
                 try:
                     win = f"{pd.Timestamp(start):%Y-%m-%d} \u2192 {pd.Timestamp(end):%Y-%m-%d}"
                 except Exception:
@@ -3054,7 +3291,8 @@ def interactions(mode_c, tab_c, filter_c, method_c, smp_c, pfig_c, step_c, act_c
 
                 def _metric_work(progress):
                     multi0 = run_methods(dg, irra_snapshot, methods, mp_snapshot,
-                                         mapped=mapped_snapshot, progress_callback=progress)
+                                         mapped=mapped_snapshot, progress_callback=progress,
+                                         duration_years=float(dur))
                     return {"multi": multi0, "duration_years": float(dur),
                             "n_kept": nkept_snapshot, "window": win}
 
@@ -3090,7 +3328,7 @@ def _fallback_code(data, state, metric):
              "from page_supporting_files.analysis_utils import (",
              f"    normalize, low_irra_power_filter, aggregate_daily, {disp},)",
              "from page_supporting_files.pvcopilot_filter_functions import (",
-             "    basic_value_filter, clear_sky_filter, identify_outliers_iqr,)",
+             "    basic_value_filter, clear_sky_filter, identify_outliers_iqr, stale_data_filter,)",
              "",
              f'df = pd.read_parquet("{data.get("filename", "data")}")',
              f"mapped = {mapped!r}",
@@ -3100,6 +3338,9 @@ def _fallback_code(data, state, metric):
     if "clearsky" in fsel:
         lines.append("cs, _ = clear_sky_filter(df, irra_key, smoothness_threshold=0.3, energy_threshold=0.5)")
         lines.append("df = df.loc[df.index.isin(cs)]")
+    if "stale" in fsel:
+        lines.append("st, _ = stale_data_filter(df, mapped, window=6)")
+        lines.append("df = df.loc[df.index.isin(st)]")
     lines.append(f"df = normalize(df, mapped, gamma={-0.004 if 'tempcorr' in fsel else 0.0})")
     if "irr" in fsel:
         lines.append("keep, _ = low_irra_power_filter(df, mapped, irr_thresh=300, power_ratio=0.02, norm_lower=0.01, norm_upper_pct=99)")
