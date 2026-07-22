@@ -657,6 +657,8 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # guarantees the same file maps the same way every run.
         _p("Identifying data columns…")
         cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        _p(f"LLM column identification: model={LLM_MODEL}; columns={len(colnames)}; "
+           f"signature={cache_key[:12]}; timeout=60s")
         raw_candidates = _llm_cache_get(cache_key)
         # Only SAVE the mapping once the dataset is confirmed GOOD downstream.
         # On a miss we hold the freshly-identified result "pending" and let the
@@ -665,7 +667,8 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         _cache_miss = raw_candidates is None
 
         if _cache_miss:
-            _p("Asking AI to identify your columns…")
+            _p(f"LLM cache miss; sending column-only request to {LLM_MODEL}…")
+            llm_started = time.time()
             # Call LLM. Pin temperature=0 + a fixed seed (best-effort determinism).
             # Some models reject these params -- fall back to a plain call if so.
             try:
@@ -674,21 +677,33 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0,
                     seed=0,
+                    timeout=60,
                 )
             except (openai.BadRequestError, openai.UnprocessableEntityError):
                 # Only retry without the params when the model REJECTS them (a 4xx).
                 # A timeout / connection / rate-limit error must NOT trigger a second
                 # full call here -- that would stack another timeout on top.
+                _p("LLM rejected temperature/seed parameters; retrying once without them…")
                 response = client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[{"role": "user", "content": prompt}],
+                    timeout=60,
                 )
 
             res_text = response.choices[0].message.content.strip()
+            usage = getattr(response, "usage", None)
+            _p(f"LLM response received in {time.time() - llm_started:.1f}s; "
+               f"prompt tokens={getattr(usage, 'prompt_tokens', '?') if usage else '?'}; "
+               f"completion tokens={getattr(usage, 'completion_tokens', '?') if usage else '?'}; "
+               f"response={len(res_text):,} characters")
             cleaned = res_text.lstrip("`").lstrip("json").rstrip("`")
             result = json.loads(cleaned)
             raw_candidates = result.get("candidates", {}) or {}
+            _p(f"LLM JSON validated; candidate roles={len(raw_candidates)}; "
+               f"candidate columns={sum(len(v) if isinstance(v, list) else 1 for v in raw_candidates.values())}")
             # NOTE: deliberately NOT saved here -- see commit_llm_cache().
+        else:
+            _p(f"LLM cache hit for signature {cache_key[:12]}; external API call skipped")
 
         def _cands(role):
             """Candidate column names the LLM proposed for a role (best-first),
@@ -1027,6 +1042,8 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             mapped_variables_dict["Irradiance"] = irr_col
         if temp_col:
             mapped_variables_dict["Module temperature"] = temp_col
+        _p("Column mapping resolved: " + "; ".join(
+            f"{role}={col}" for role, col in mapped_variables_dict.items()))
 
         # Flag kept-but-gappy columns (5-50% missing): usable, but the user
         # should treat the result carefully. (>50% missing was already dropped.)
@@ -1138,6 +1155,14 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             ])
 
     except Exception as e:
+        error_detail = traceback.format_exc(limit=20)
+        _p(f"LLM/column-identification failure: {type(e).__name__}: {e}")
+        _p("LLM traceback: " + error_detail.replace("\n", " | "))
+        try:
+            df.attrs["_parse_error"] = f"LLM/column-identification failure: {type(e).__name__}: {e}"
+            df.attrs["_parse_traceback"] = error_detail
+        except Exception:
+            pass
         summary_table = html.Div(
             f"Error during LLM analysis or parsing: {e}",
             className="alert alert-warning"
@@ -1166,6 +1191,22 @@ VAR_COLORS = {
     "temperature": "#8ec4e8",   # light blue
     "voltage":     "#2a8e7a",   # teal
     "current":     "#9bcc4e",   # lime green
+}
+
+# Blue -> green sequential palette for the five PVPRO single-diode reference
+# parameters (Pmp, Vmp, Imp, Voc, Isc), in canonical order.  This is the
+# single source of truth for the "5-parameter" color scheme: it is consumed
+# BOTH by the trend plots here (compute_pvpro / _one_panel) and by the
+# parameter selector pills/tabs in pvcopilot.py, so a pill's accent color
+# matches the color of the trend it reveals.  Applies in Simple and Advanced
+# modes alike (the figures are the same); only the pill *layout* is
+# Advanced-only.
+PVPRO_VAR_COLORS = {
+    "p_mp_ref": "#1558b0",   # blue
+    "v_mp_ref": "#1a86c7",   # cyan-blue
+    "i_mp_ref": "#12998e",   # teal
+    "v_oc_ref": "#2fa855",   # green
+    "i_sc_ref": "#7cc242",   # lime green
 }
 
 
@@ -2568,7 +2609,10 @@ def compute_pvpro(df,
         except Exception:
             pass
 
-    _report("prepare", 0, 1, "Validating inputs and pulling V/I/G/T columns")
+    _report("prepare", 0, 1,
+            f"Validating PVPRO input: rows={len(df):,}; cells={cells_in_series}; "
+            f"modules/string={modules_per_string}; parallel strings={parallel_strings}; "
+            f"technology={technology}; irradiance threshold={irradiance_threshold:g} W/m²")
     # -------------------------------------------------------------
     # 1. Validate inputs and pull the four required columns.
     # -------------------------------------------------------------
@@ -2594,6 +2638,10 @@ def compute_pvpro(df,
     df_p = df_p[df_p[irr_key] > irradiance_threshold]
     # Drop obviously non-operating points (V*I <= 0).
     df_p = df_p[(df_p[v_key] > 0) & (df_p[i_key] > 0)]
+
+    _report("prepare", 0, 1,
+            f"PVPRO input cleaning retained {len(df_p):,}/{len(df):,} rows; "
+            f"V={v_key}; I={i_key}; G={irr_key}; T={tm_key}")
 
     if len(df_p) < 100:
         raise ValueError(
@@ -2632,7 +2680,9 @@ def compute_pvpro(df,
     # -------------------------------------------------------------
     # 3. Use the whole-dataset top-decile points to get a stable p0.
     # -------------------------------------------------------------
-    _report("p0", 0, 1, "Estimating starting parameters from top-decile irradiance")
+    _report("p0", 0, 1,
+            f"Estimating SDM starting parameters from top-decile irradiance; "
+            f"technology={technology}; cells={cells_in_series}; alpha_Isc={alpha_isc:g}")
     p0_global = _estimate_p0_simple(
         G_arr, Tc_arr, V_arr, I_arr,
         cells_in_series, alpha_isc, Eg_ref, dEgdT,
@@ -2661,6 +2711,9 @@ def compute_pvpro(df,
         window_starts.append(cur)
         cur = cur + pd.Timedelta(days=step_days)
     n_total_windows = len(window_starts)
+    _report("prepare", 0, max(n_total_windows, 1),
+            f"PVPRO window plan: {n_total_windows} windows; {t_start_all:%Y-%m-%d} to {t_end_all:%Y-%m-%d}; "
+            f"{days_per_run} days/window; step={step_days} days; minimum points/window={min_points_per_window}")
 
     rows = []
     # Warm-start state: after the first successful fit, reuse that fit's
@@ -2673,6 +2726,10 @@ def compute_pvpro(df,
     # global p0 for the *next* attempt rather than propagating bad state.
     p0_warm = dict(p0_global)
     for w_idx, cur in enumerate(window_starts):
+        win_end = cur + pd.Timedelta(days=days_per_run)
+        # Boolean window mask.
+        idx_w = (df_p.index >= cur) & (df_p.index < win_end)
+        n_w = int(idx_w.sum())
         # Report progress at the START of this window so the UI advances
         # as soon as work begins, not only after it finishes.  Each report
         # call is also a momentary GIL yield (it acquires a short lock),
@@ -2680,13 +2737,8 @@ def compute_pvpro(df,
         _report(
             "fitting", w_idx, n_total_windows,
             f"Fitting window {w_idx + 1} / {n_total_windows} "
-            f"({cur.strftime('%Y-%m-%d')})",
+            f"({cur.strftime('%Y-%m-%d')}); points={n_w}",
         )
-
-        win_end = cur + pd.Timedelta(days=days_per_run)
-        # Boolean window mask.
-        idx_w = (df_p.index >= cur) & (df_p.index < win_end)
-        n_w = int(idx_w.sum())
         if n_w >= min_points_per_window:
             G_w  = G_arr[idx_w]
             Tc_w = Tc_arr[idx_w]
@@ -2742,6 +2794,11 @@ def compute_pvpro(df,
                 # window starts from a known-stable point instead of
                 # propagating the bad state forward.
                 p0_warm = dict(p0_global)
+                _report("fitting", w_idx, n_total_windows,
+                        f"Window {w_idx + 1}/{n_total_windows} fit failed; resetting warm-start parameters")
+        else:
+            _report("fitting", w_idx, n_total_windows,
+                    f"Window {w_idx + 1}/{n_total_windows} skipped: {n_w} points < required {min_points_per_window}")
 
         # Yield the GIL so the polling HTTP callback in the main Dash thread
         # can be served between windows. Without this, scipy's L-BFGS-B holds
@@ -2768,7 +2825,8 @@ def compute_pvpro(df,
     # the linear-slope rate for each electrical quantity and report them
     # all in the result figure.
     # -------------------------------------------------------------
-    _report("trend", 0, 1, "Computing degradation rates")
+    _report("trend", 0, 1,
+            f"Computing degradation rates from {len(rows)}/{n_total_windows} successful window fits")
     from sklearn.linear_model import LinearRegression as _LR
 
     def _linear_rate(series):
@@ -2852,8 +2910,9 @@ def compute_pvpro(df,
         rate = rates[col]
         rate_str = f"({rate:+.2f} %/yr)" if np.isfinite(rate) else "(n/a)"
 
-        # Per-quantity color from the shared palette.
-        trend_color   = VAR_COLORS[PVPRO_COLOR_KEY[col]]
+        # Per-parameter color from the blue->green PVPRO palette (falls back
+        # to the shared per-quantity palette for any unexpected column).
+        trend_color   = PVPRO_VAR_COLORS.get(col, VAR_COLORS[PVPRO_COLOR_KEY[col]])
         # Scatter is a translucent shade of the trend color.  Alpha 0.3
         # keeps individual points faint so the trend line stands out.
         scatter_color = _hex_to_rgba(trend_color, alpha=0.3)
@@ -2920,5 +2979,7 @@ def compute_pvpro(df,
         "i_sc_ref": _one_panel("i_sc_ref", height=180),
     }
 
-    _report("done", n_total_windows, n_total_windows, "Done")
+    _report("done", n_total_windows, n_total_windows,
+            f"PVPRO done: successful fits={len(rows)}/{n_total_windows}; "
+            f"Pmp rate={rd:+.4f}%/yr; generated figures={len(figs)}")
     return rd, figs, rates

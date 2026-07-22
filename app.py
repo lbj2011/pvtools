@@ -9,6 +9,9 @@ from flask import request, abort
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
+    # PV Copilot polls background jobs frequently.  Keep the browser tab title
+    # stable instead of flashing Dash's default "Updating..." on every poll.
+    update_title=None,
     meta_tags=[{
         "name": "google-site-verification",
         "content": "S1RjgJU6ZoVdko93JeLNEnn5viVxN1cXL2me3LB9J5I",

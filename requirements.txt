@@ -45,7 +45,8 @@ pvcz>=0.3.0
 vocmax>=0.0.21
 ivcorrection>=0.1.1
 openai>=1.62.0
-diskcache>=5.6   # PVPRO background-job store (multi-worker safe)
+diskcache>=5.6   # background-job store shared by workers in one container
+redis>=5.0       # cross-container background-job store when REDIS_URL is configured
 geopy>=2.4.1
 # rdtools>=2.1.8
 # xgboost==1.7.6

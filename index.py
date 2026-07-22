@@ -26,6 +26,7 @@ import pages.home
 import pages.field_degradation
 import pages.pv_image
 import pages.pvcopilot
+import pages.pvcopilot_260701
 import pages.string_length_calculator
 import pages.iv_correction_tool
 import pages.pv_climate_stressors
@@ -46,6 +47,7 @@ routes = {
     "/home": "home",
     "/pv-image": "pv_image",
     "/pv-copilot": "pvcopilot",
+    "/pv-copilot-260701": "pvcopilot_260701",
     "/field-degradation": "field_degradation",
     "/iv-curve-correction-tool": "iv_correction_tool",
     "/string-length-calculator": "string_length_calculator",
@@ -112,6 +114,9 @@ navbar = dbc.NavbarSimple(
                 ),
                 dbc.DropdownMenuItem(
                     "PVcopilot", href='/pv-copilot'
+                ),
+                dbc.DropdownMenuItem(
+                    "PVcopilot — 260701", href='/pv-copilot-260701'
                 ),
                 dbc.DropdownMenuItem(
                     "Worldwide PV Field Performance", href='/field-degradation'

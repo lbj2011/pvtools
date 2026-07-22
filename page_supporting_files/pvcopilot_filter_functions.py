@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt # Import for plotting
 
 def auto_fix_timezone(df, time_key, power_key, target_tz="local"):
     """
