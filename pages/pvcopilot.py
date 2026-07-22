@@ -1779,6 +1779,7 @@ data_agent_body = html.Div([
         "Run prescreening",
         id="analyze-btn",
         n_clicks=0,
+        className="pvc-step1-intro-item pvc-primary-action",
         style={
             "width": "100%",
             "padding": "12px 16px",
@@ -1795,15 +1796,10 @@ data_agent_body = html.Div([
         }
     ),
     html.Div(
-        "Detects variables and previews the raw signal (2–10 seconds)",
+        "",
         id="analyze-caption",
-        style={
-            "fontSize": "13px",
-            "color": INK_SOFT,
-            "marginTop": "6px",
-            "textAlign": "center",
-            "fontFamily": "Archivo, system-ui, sans-serif",
-        }
+        className="pvc-step1-intro-item",
+        style={"display": "none"},
     ),
     # Live status line — hidden until Analyze is clicked, then driven by the
     # analyze-status-interval poll while the callback runs.
@@ -1815,6 +1811,7 @@ data_agent_body = html.Div([
                       style={"color": INK_SOFT, "marginLeft": "2px"}),
         ],
         id="analyze-status-line",
+        className="pvc-step1-intro-item",
         style={"display": "none"},
     ),
     dcc.Store(id="analyze-status-token"),
@@ -1834,7 +1831,14 @@ data_agent_body = html.Div([
             }
         ),
     ),
-], style={"fontFamily": "Archivo, system-ui, sans-serif"})
+    html.Button(
+        ["Next step ", html.Span("→")],
+        id="advanced-next-step-1",
+        n_clicks=0,
+        className="pvc-next-step-button",
+    ),
+], id="advanced-data-body", className="pvc-advanced-step-body",
+   style={"fontFamily": "Archivo, system-ui, sans-serif"})
 
 
 # =============================================================================
@@ -1863,65 +1867,17 @@ def _shared_example_btn(btn_id, label, description):
 
 shared_upload_header = html.Div(
     [
-        html.Div("LOAD YOUR DATA", className="pvc-upload-kicker", style={
-            "fontSize": "15px", "color": ACCENT, "fontWeight": "800",
-            "fontFamily": "Archivo, system-ui, sans-serif", "textTransform": "uppercase",
-            "letterSpacing": "0.12em", "marginBottom": "10px",
-        }),
-        html.Div(
-            [
-                "Drop a ",
-                html.B("CSV, Excel, or Parquet"),
-                " file, or try an example dataset. Then pick a mode below.",
-            ],
-            style={
-                "fontSize": "16px", "color": INK, "lineHeight": "1.6",
-                "fontFamily": "Archivo, system-ui, sans-serif", "marginBottom": "16px",
-            }
-        ),
-
-        # Data requirements disclosure
-        html.Details(
-            [
-                html.Summary(
-                    [
-                        html.Span("IMPORTANT", className="important-badge", style={
-                            "fontSize": "10px", "fontWeight": "700", "color": "white",
-                            "background": NAVY, "padding": "2px 8px",
-                            "borderRadius": "999px", "letterSpacing": "0.06em",
-                            "marginRight": "10px", "verticalAlign": "middle",
-                        }),
-                        html.Span("Click to see data requirements"),
-                    ],
-                    style={
-                        "cursor": "pointer", "fontSize": "14px", "color": INK,
-                        "fontFamily": "Archivo, system-ui, sans-serif", "fontWeight": "700",
-                        "marginBottom": "8px",
-                    }
-                ),
-                html.Ul(
-                    [
-                        html.Li([html.Span("Columns: ", style={"color": INK_SOFT}), html.B("time, power, irradiance, temperature")]),
-                        html.Li([html.Span("Duration: ", style={"color": INK_SOFT}), html.B("≥ 2 years"), " for reliable degradation"]),
-                        html.Li([html.Span("Resolution: ", style={"color": INK_SOFT}), html.B("1–6 hours")]),
-                    ],
-                    style={
-                        "fontSize": "14px", "color": INK, "paddingLeft": "18px",
-                        "lineHeight": "1.7", "marginBottom": "0", "marginTop": "10px",
-                        "padding": "12px 14px 12px 32px", "background": "#eff6ff",
-                        "border": "1px solid #bfdbfe", "borderRadius": "16px",
-                        "fontFamily": "Archivo, system-ui, sans-serif",
-                    }
-                ),
-            ],
-            style={"marginBottom": "16px"}
-        ),
-
         html.Div(
             [
                 # Upload box
                 html.Div(
                     [
+                        html.Button(
+                            "Data requirements",
+                            id={"type": "pvc-main-nav", "index": "datareq"},
+                            n_clicks=0,
+                            className="pvc-datareq-button",
+                        ),
                         dcc.Upload(
                             id="upload-data",
                             className="pvc-upload",
@@ -1950,12 +1906,6 @@ shared_upload_header = html.Div(
                                 "backgroundColor": "rgba(255,255,255,0.34)", "cursor": "pointer",
                                 "transition": "all 0.15s ease",
                             }
-                        ),
-                        html.Div(
-                            html.Div("Awaiting file…",
-                                     style={"color": INK_SOFT, "fontSize": "13px",
-                                            "fontFamily": "Archivo, system-ui, sans-serif"}),
-                            id="upload-status-output", className="pvc-upload-status",
                         ),
                     ],
                     className="pvc-upload-column",
@@ -1989,6 +1939,9 @@ shared_upload_header = html.Div(
             ],
             className="pvc-upload-grid",
         ),
+        # Empty until a file/example is loaded; success and error messages span
+        # the full upload + examples block instead of changing one column's height.
+        html.Div(id="upload-status-output", className="pvc-upload-status"),
     ],
     className="pvc-upload-section",
     style={
@@ -2000,7 +1953,7 @@ shared_upload_header = html.Div(
 # =============================================================================
 # CHAT — AGENT 2 · FILTER
 # =============================================================================
-def filter_row(checkbox_id, label, customize_body=None):
+def filter_row(checkbox_id, label, description, customize_body=None):
     parts = [
         html.Div(
             [
@@ -2022,6 +1975,9 @@ def filter_row(checkbox_id, label, customize_body=None):
             style={"display": "flex", "alignItems": "center"}
         )
     ]
+    parts.append(
+        html.P(description, className="pvc-advanced-filter-description")
+    )
     if customize_body is not None:
         parts.append(html.Details([
             html.Summary("Customize parameters", style={
@@ -2043,7 +1999,7 @@ def filter_row(checkbox_id, label, customize_body=None):
                 "fontSize": "14px",
             })
         ]))
-    return html.Div(parts, style={"marginBottom": "12px"})
+    return html.Div(parts, className="pvc-advanced-filter-content")
 
 
 _param_input_style = {
@@ -2215,14 +2171,54 @@ filter_agent_body = html.Div([
         style={"display": "none"}
     ),
 
-    section_label("Recommended filters"),
+    html.Button(
+        [
+            html.Span("✓", className="pvc-step-fold-check"),
+            html.Span("Filters applied", className="pvc-step-fold-title"),
+            html.Span("Click to show or hide filter settings", className="pvc-step-fold-help"),
+            html.Span("⌄", className="pvc-step-fold-arrow"),
+        ],
+        id="toggle-filter-settings",
+        n_clicks=0,
+        className="pvc-step-fold-summary",
+    ),
+
+    html.Div(section_label("Recommended filters"), className="pvc-step-config-item"),
     html.Div(
         [
-            filter_row("cb-timezone",       "Time zone & DST correction"),
-            filter_row("cb-low-irra-power", "Low irradiance / power filter", low_irra_params),
-            filter_row("cb-outlier",        "Outlier removal (IQR)",          outlier_params),
-            filter_row("cb-clearsky",       "Clear-sky filter",               clearsky_params),
+            html.Div(
+                filter_row(
+                    "cb-timezone", "Time zone & DST correction",
+                    "Aligns timestamps to local solar time and corrects daylight-saving jumps.",
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            html.Div(
+                filter_row(
+                    "cb-clearsky", "Clear-sky filter",
+                    "Keeps smooth, cloud-free irradiance profiles for comparable operating conditions.",
+                    clearsky_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            html.Div(
+                filter_row(
+                    "cb-low-irra-power", "Low irradiance / power filter",
+                    "Drops low-light points where the power-to-irradiance relationship is noisy.",
+                    low_irra_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            html.Div(
+                filter_row(
+                    "cb-outlier", "Outlier removal (IQR)",
+                    "Removes statistical outliers in the normalized series using an IQR rule.",
+                    outlier_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
         ],
+        className="pvc-advanced-filter-grid pvc-step-config-item",
         style={
             "padding": "16px 18px",
             "background": "#f8fafc",
@@ -2235,9 +2231,10 @@ filter_agent_body = html.Div([
     dcc.Store(id="_cb-sync-dummy"),
 
     html.Button(
-        "Apply Filters",
+        ["Apply filters ", html.Span("→")],
         id="filter-btn",
         n_clicks=0,
+        className="pvc-step-config-item pvc-primary-action",
         style={
             "width": "100%",
             "padding": "12px 16px",
@@ -2253,7 +2250,7 @@ filter_agent_body = html.Div([
     ),
 
     # Collapsible filter explanations (descriptions, equations, references)
-    filter_explanations_block(),
+    html.Div(filter_explanations_block(), className="pvc-step-config-item"),
 
     # Output area
     dcc.Loading(
@@ -2265,7 +2262,14 @@ filter_agent_body = html.Div([
             style={"marginTop": "22px"}
         ),
     ),
-], style={"fontFamily": "Archivo, system-ui, sans-serif"})
+    html.Button(
+        ["Next step ", html.Span("→")],
+        id="advanced-next-step-2",
+        n_clicks=0,
+        className="pvc-next-step-button",
+    ),
+], id="advanced-filter-body", className="pvc-advanced-step-body",
+   style={"fontFamily": "Archivo, system-ui, sans-serif"})
 
 
 # =============================================================================
@@ -2296,7 +2300,6 @@ metric_options = [
         "label": html.Div([
             html.B("LR", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
             html.Span(" — Linear regression", style={"color": INK_SOFT, "fontSize": "14px"}),
-            html.Div("No tunable parameters.", style={"fontSize": "13px", "color": INK_SOFT, "fontStyle": "italic", "marginTop": "2px"}),
             dcc.Input(id="param-yoy-iqr-dummy", style={"display": "none"}),
         ]),
         "value": "LR",
@@ -2589,8 +2592,58 @@ def _metric_category_heading(text):
     })
 
 
+def _ai_diagnostic_panel(prefix):
+    """Shared result-level AI diagnosis panel with mode-specific component IDs."""
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div("AI diagnosis", className="pvc-ai-diagnostic-title"),
+                    html.Button(
+                        "Restart",
+                        id=f"{prefix}-ai-diagnostic-restart",
+                        n_clicks=0,
+                        className="pvc-ai-diagnostic-restart",
+                        style={"display": "none"},
+                    ),
+                ],
+                className="pvc-ai-diagnostic-header",
+            ),
+            html.Button(
+                [html.Span("✦", className="pvc-ai-diagnostic-icon"), "Diagnose with AI"],
+                id=f"{prefix}-ai-diagnostic-btn",
+                n_clicks=0,
+                hidden=False,
+                className="pvc-ai-diagnostic-button pvc-primary-action",
+            ),
+            dcc.Loading(
+                type="circle",
+                color=ACCENT,
+                children=html.Div(
+                    id=f"{prefix}-ai-diagnostic-output",
+                    className="pvc-ai-diagnostic-output",
+                ),
+            ),
+        ],
+        id=f"{prefix}-ai-diagnostic-card",
+        className="pvc-ai-diagnostic-card",
+        style={"display": "none"},
+    )
+
+
 calc_agent_body = html.Div([
-    section_label("Choose a metric"),
+    html.Button(
+        [
+            html.Span("✓", className="pvc-step-fold-check"),
+            html.Span("Degradation calculated", className="pvc-step-fold-title"),
+            html.Span("Click to show or hide metric settings", className="pvc-step-fold-help"),
+            html.Span("⌄", className="pvc-step-fold-arrow"),
+        ],
+        id="toggle-metric-settings",
+        n_clicks=0,
+        className="pvc-step-fold-summary",
+    ),
+    html.Div(section_label("Choose a metric"), className="pvc-step-config-item"),
     html.Div([
         # Category 1 — statistical / trend methods (YoY, LR, HW, ARIMA, CSD).
         # Heading on the left, "Select all / Clear all" toggle on the right.
@@ -2673,7 +2726,7 @@ calc_agent_body = html.Div([
             ),
             style={"display": "none"},
         ),
-    ], style={
+    ], className="pvc-step-config-item pvc-advanced-metric-panel", style={
         "padding": "16px 18px",
         "background": "#f8fafc",
         "border": f"1px solid {BORDER}",
@@ -2684,9 +2737,10 @@ calc_agent_body = html.Div([
     dcc.Store(id="_rb-sync-dummy"),
 
     html.Button(
-        "Calculate Degradation",
+        ["Calculate degradation ", html.Span("→")],
         id="run-btn",
         n_clicks=0,
+        className="pvc-step-config-item pvc-primary-action",
         style={
             "width": "100%",
             "padding": "12px 16px",
@@ -2702,7 +2756,7 @@ calc_agent_body = html.Div([
     ),
 
     # Collapsible metric explanations (descriptions, equations, references)
-    metric_explanations_block(),
+    html.Div(metric_explanations_block(), className="pvc-step-config-item"),
 
     # FAST methods (YoY/LR/HW/ARIMA/CSD) render under the dcc.Loading spinner.
     # `target_components` scopes the spinner to ONLY the degradation-output's
@@ -2723,7 +2777,15 @@ calc_agent_body = html.Div([
     # and the dcc.Loading overlay must not flicker on top of it on every
     # tick — that's why it's a sibling, not a child, of the Loading.
     html.Div(id="pvpro-progress-output", style={"marginTop": "22px"}),
-], style={"fontFamily": "Archivo, system-ui, sans-serif"})
+    _ai_diagnostic_panel("advanced"),
+    html.Button(
+        ["Next step ", html.Span("→")],
+        id="advanced-next-step-3",
+        n_clicks=0,
+        className="pvc-next-step-button",
+    ),
+], id="advanced-calc-body", className="pvc-advanced-step-body",
+   style={"fontFamily": "Archivo, system-ui, sans-serif"})
 
 
 # =============================================================================
@@ -2751,6 +2813,7 @@ code_agent_body = html.Div([
         "Generate Full Python Code",
         id="generate-code-btn",
         n_clicks=0,
+        className="pvc-primary-action",
         style={
             "width": "100%",
             "padding": "12px 16px",
@@ -2825,7 +2888,7 @@ def build_hero(eyebrow, sub_children):
                 "fontSize": "15px",
                 "color": ACCENT,
                 "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "600",
+                "fontWeight": "800",
                 "textTransform": "uppercase",
                 "letterSpacing": "0.12em",
                 "marginBottom": "12px",
@@ -2833,7 +2896,8 @@ def build_hero(eyebrow, sub_children):
             html.H1("Agentic PV Degradation Analysis", style={
                 "fontSize": "40px",
                 "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "700",
+                "fontWeight": "850",
+                "letterSpacing": "-0.02em",
                 "color": INK,
                 "lineHeight": "1.05",
                 "margin": "0 0 12px",
@@ -2886,7 +2950,7 @@ common_header = html.Div(
                 "fontSize": "15px",
                 "color": ACCENT,
                 "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "600",
+                "fontWeight": "800",
                 "textTransform": "uppercase",
                 "letterSpacing": "0.12em",
                 "marginBottom": "12px",
@@ -2894,7 +2958,8 @@ common_header = html.Div(
             html.H1("Agentic PV Degradation Analysis", style={
                 "fontSize": "44px",
                 "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "700",
+                "fontWeight": "850",
+                "letterSpacing": "-0.02em",
                 "color": INK,
                 "lineHeight": "1.08",
                 "margin": "0 0 12px",
@@ -2954,25 +3019,6 @@ landing_upload_block = html.Div(
 )
 
 
-# Advanced-mode hero middle content — the four-agent bullet list.
-_advanced_hero_bullets = html.Ul(
-    [
-        html.Li([html.B("Three steps"), " — Prescreen, Filter, Degradation — step by step."]),
-        html.Li([html.B("You stay in control"), " — review and tweak each stage."]),
-        html.Li([html.B("Executable Python"), " — optional script to run locally."]),
-    ],
-    style={
-        "fontSize": "16px",
-        "color": INK_SOFT,
-        "lineHeight": "1.7",
-        "fontFamily": "Archivo, system-ui, sans-serif",
-        "maxWidth": "680px",
-        "paddingLeft": "20px",
-        "marginBottom": "0",
-    }
-)
-
-
 # Simple-mode hero middle content — bullets describing the auto pipeline.
 _simple_hero_bullets = html.Ul(
     [
@@ -2994,118 +3040,145 @@ _simple_hero_bullets = html.Ul(
 
 chat_stream = html.Div(
     [
-        # Conversation
         html.Div(
             [
-                # Mode explanation (same box style as Simple mode).
-                html.Div(
-                    html.Ul(
-                        [
-                            html.Li([html.B("Three steps"), " — you run and review each one."],
-                                    style={"marginBottom": "8px"}),
-                            html.Li([html.B("Prescreen, filter, compute"), " — tune every stage."],
-                                    style={"marginBottom": "8px"}),
-                            html.Li([html.B("Optional Python"), " — export a runnable script."],
-                                    style={"marginBottom": "0"}),
-                        ],
-                        style={"margin": "0", "paddingLeft": "22px",
-                               "fontSize": "15px", "color": INK_SOFT, "lineHeight": "1.6",
-                               "fontFamily": "Archivo, system-ui, sans-serif"},
-                    ),
-                    style={
-                        "padding": "18px 20px",
-                        "background": "rgba(241, 245, 249, 0.5)",
-                        "border": f"1px dashed {BORDER_STRONG}",
-                        "borderRadius": "16px",
-                        "marginBottom": "24px",
-                    },
-                ),
-
-                # Agent 1 — Data (always visible)
-                html.Div(
-                    agent_message(
-                        "data",
-                        data_agent_body,
-                        intro="Load, inspect, and identify variables."
-                    ),
-                    id="agent-data-wrap",
-                ),
-
-                # Agent 2 — Filter (hidden until step 1 done)
+                # Persistent four-step rail. Completion unlocks later steps;
+                # the viewed step is controlled independently by a UI store.
                 html.Div(
                     [
-                        html.Div(id="agent-filter-locked", children=locked_placeholder("filter", "Filter Agent", 2)),
-                        html.Div(
-                            agent_message(
-                                "filter",
-                                filter_agent_body,
-                                intro="Outliers, low irradiance, clear-sky filtering."
-                            ),
-                            id="agent-filter-content",
-                            style={"display": "none"},
-                        ),
+                        html.Button([
+                            html.Div([
+                                html.Span("01", className="pvc-advanced-step-number"),
+                                html.Span("✓", className="pvc-advanced-step-check"),
+                            ], className="pvc-advanced-step-badge"),
+                            html.Div([
+                                html.Div("Data prescreening", className="pvc-advanced-step-name"),
+                                html.Div("Raw signals & quality", className="pvc-advanced-step-caption"),
+                            ], className="pvc-advanced-step-copy"),
+                            html.Span("›", className="pvc-advanced-step-chevron"),
+                        ], id={"type": "advanced-step-tab", "step": 1}, n_clicks=0,
+                           disabled=False,
+                           className="pvc-advanced-rail-card pvc-advanced-step-1 is-active"),
+                        html.Button([
+                            html.Div([
+                                html.Span("02", className="pvc-advanced-step-number"),
+                                html.Span("✓", className="pvc-advanced-step-check"),
+                            ], className="pvc-advanced-step-badge"),
+                            html.Div([
+                                html.Div("Intelligent filtering", className="pvc-advanced-step-name"),
+                                html.Div("Configure & review", className="pvc-advanced-step-caption"),
+                            ], className="pvc-advanced-step-copy"),
+                            html.Span("›", className="pvc-advanced-step-chevron"),
+                        ], id={"type": "advanced-step-tab", "step": 2}, n_clicks=0,
+                           disabled=True,
+                           className="pvc-advanced-rail-card pvc-advanced-step-2 is-locked"),
+                        html.Button([
+                            html.Div([
+                                html.Span("03", className="pvc-advanced-step-number"),
+                                html.Span("✓", className="pvc-advanced-step-check"),
+                            ], className="pvc-advanced-step-badge"),
+                            html.Div([
+                                html.Div("Degradation model", className="pvc-advanced-step-name"),
+                                html.Div("Metrics & calculation", className="pvc-advanced-step-caption"),
+                            ], className="pvc-advanced-step-copy"),
+                            html.Span("›", className="pvc-advanced-step-chevron"),
+                        ], id={"type": "advanced-step-tab", "step": 3}, n_clicks=0,
+                           disabled=True,
+                           className="pvc-advanced-rail-card pvc-advanced-step-3 is-locked"),
+                        html.Button([
+                            html.Div([
+                                html.Span("04", className="pvc-advanced-step-number"),
+                                html.Span("✓", className="pvc-advanced-step-check"),
+                            ], className="pvc-advanced-step-badge"),
+                            html.Div([
+                                html.Div("Code generation", className="pvc-advanced-step-name"),
+                                html.Div("Optional export", className="pvc-advanced-step-caption"),
+                            ], className="pvc-advanced-step-copy"),
+                            html.Span("›", className="pvc-advanced-step-chevron"),
+                        ], id={"type": "advanced-step-tab", "step": 4}, n_clicks=0,
+                           disabled=True,
+                           className="pvc-advanced-rail-card pvc-advanced-step-4 is-locked"),
                     ],
-                    id="agent-filter-wrap",
+                    className="pvc-advanced-rail",
                 ),
 
-                # Agent 3 — Degradation (hidden until step 2 done)
-                html.Div(
-                    [
-                        html.Div(id="agent-calc-locked", children=locked_placeholder("calc", "Degradation Agent", 3)),
-                        html.Div(
-                            agent_message(
-                                "calc",
-                                calc_agent_body,
-                                intro="Estimate the annual degradation rate."
-                            ),
-                            id="agent-calc-content",
-                            style={"display": "none"},
-                        ),
-                    ],
-                    id="agent-calc-wrap",
-                ),
-
-                # ── Optional add-on: Code export (NOT a numbered step) ──────
-                # Separated from the 3-step pipeline by a divider so it reads
-                # as a bonus tool.  Locked until Degradation (step 3) is done.
-                html.Div(style={
-                    "borderTop": f"1px solid {BORDER}",
-                    "margin": "8px 0 28px",
-                }),
+                # Existing functional bodies are preserved verbatim and only
+                # mounted in a new single-panel host.
                 html.Div(
                     [
                         html.Div(
-                            id="agent-code-locked",
-                            children=locked_placeholder("code", "Code Agent", 3, addon=True),
+                            [
+                                html.Div("STEP 01", className="pvc-advanced-panel-kicker"),
+                                html.H2("Data prescreening", className="pvc-advanced-panel-title"),
+                                html.P(
+                                    "Validate the raw power, irradiance and temperature signals before analysis; "
+                                    "detect variables and preview the raw signals (2–10 seconds).",
+                                    className="pvc-advanced-panel-description",
+                                ),
+                                data_agent_body,
+                            ],
+                            id="agent-data-wrap",
+                            className="pvc-advanced-stage pvc-advanced-stage-data",
                         ),
                         html.Div(
-                            agent_message(
-                                "code",
-                                code_agent_body,
-                                intro="Optional — bundle everything into a runnable Python script."
-                            ),
-                            id="agent-code-content",
-                            style={"display": "none"},
+                            [
+                                html.Div(id="agent-filter-locked", children=locked_placeholder("filter", "Filter Agent", 2)),
+                                html.Div([
+                                    html.Div("STEP 02", className="pvc-advanced-panel-kicker"),
+                                    html.H2("Intelligent filtering", className="pvc-advanced-panel-title"),
+                                    html.P(
+                                        "Tune the filters applied before fitting — all are on by default with best-practice thresholds.",
+                                        className="pvc-advanced-panel-description",
+                                    ),
+                                    filter_agent_body,
+                                ], id="agent-filter-content", style={"display": "none"}),
+                            ],
+                            id="agent-filter-wrap",
+                            className="pvc-advanced-stage pvc-advanced-stage-filter",
+                        ),
+                        html.Div(
+                            [
+                                html.Div(id="agent-calc-locked", children=locked_placeholder("calc", "Degradation Agent", 3)),
+                                html.Div([
+                                    html.Div("STEP 03", className="pvc-advanced-panel-kicker"),
+                                    html.H2("Degradation model", className="pvc-advanced-panel-title"),
+                                    html.P(
+                                        "Pick one or more metrics (and tune their parameters), then run to compare degradation rates.",
+                                        className="pvc-advanced-panel-description",
+                                    ),
+                                    calc_agent_body,
+                                ], id="agent-calc-content", style={"display": "none"}),
+                            ],
+                            id="agent-calc-wrap",
+                            className="pvc-advanced-stage pvc-advanced-stage-calc",
+                        ),
+                        html.Div(
+                            [
+                                html.Div(
+                                    id="agent-code-locked",
+                                    children=locked_placeholder("code", "Code Agent", 3, addon=True),
+                                ),
+                                html.Div([
+                                    html.Div("STEP 04", className="pvc-advanced-panel-kicker"),
+                                    html.H2("Code generation", className="pvc-advanced-panel-title"),
+                                    html.P(
+                                        "Export a runnable Python script that reproduces the workflow you configured.",
+                                        className="pvc-advanced-panel-description",
+                                    ),
+                                    code_agent_body,
+                                ], id="agent-code-content", style={"display": "none"}),
+                            ],
+                            id="agent-code-wrap",
+                            className="pvc-advanced-stage pvc-advanced-stage-code",
                         ),
                     ],
-                    id="agent-code-wrap",
+                    className="pvc-advanced-panel",
                 ),
-
             ],
-            style={
-                "maxWidth": "none",
-                "padding": "0",
-            }
+            className="pvc-advanced-layout",
         ),
-
-        # ── (The "Ask the Assistant" chat now lives OUTSIDE chat_stream, in
-        #     `chat_qa_block`, so it can be shared by both Simple and Advanced
-        #     modes.  See below. ───────────────────────────────────────────
     ],
-    style={
-        "flex": "1",
-        "minWidth": "0",
-    }
+    className="pvc-advanced-workspace",
 )
 
 
@@ -3371,7 +3444,15 @@ floating_chat_widget = html.Div(
 # =============================================================================
 def _mode_tab(label, sub, mode_key, active):
     """One pill in the mode switcher — capsule-shaped, single line."""
-    glyph = "⚡" if mode_key == "simple" else "⚙"
+    glyph = (
+        html.Span(
+            className="pvc-bolt-icon",
+            style={"color": "#ffffff" if active else INK_SOFT},
+            **{"aria-hidden": "true"},
+        )
+        if mode_key == "simple"
+        else "⚙"
+    )
     return html.Button(
         [
             html.Span(glyph, className="pvc-mode-glyph", style={
@@ -3449,9 +3530,9 @@ def _simple_analyze_style(disabled):
         "border": "none",
         "borderRadius": "999px",
         "fontSize": "14px",          # matches the mode-tab label size
-        "fontWeight": "700",
+        "fontWeight": "850",
         "fontFamily": "Archivo, system-ui, sans-serif",
-        "letterSpacing": "0.01em",
+        "letterSpacing": "-0.02em",
         "whiteSpace": "nowrap",
     }
     if disabled:
@@ -3482,13 +3563,6 @@ _SIMPLE_EXPLAINER_BULLETS = [
     ("Fully automatic", " — runs the full default pipeline (prescreen → filter → degradation)."),
     ("Preset parameters & metric", " — defaults chosen for you; use Advanced mode to tune them."),
 ]
-
-_ADVANCED_EXPLAINER_BULLETS = [
-    ("Three steps", " — you run and review each one."),
-    ("Prescreen, filter, compute", " — tune every stage."),
-    ("Optional Python", " — export a runnable script."),
-]
-
 
 def _simple_pvpro_btn_style(disabled):
     """Pill button for the Simple-mode PVPRO box (matches Analyze button)."""
@@ -3617,7 +3691,7 @@ def _simple_pvpro_params_block():
                       "boxSizing": "border-box"}),
         ],
         id="simple-pvpro-params-details",
-        open=True,
+        open=False,
         style={"marginTop": "0"},
         ),
     ], style={"position": "relative", "marginTop": "12px"})
@@ -3761,22 +3835,55 @@ simple_mode_panel = html.Div(
 
                 html.Div(
                     html.Button(
-                        [html.Span("⚡", style={"marginRight": "8px"}), "Run analysis"],
+                        [
+                            html.Span(
+                                className="pvc-bolt-icon",
+                                style={"color": "#ffffff"},
+                                **{"aria-hidden": "true"},
+                            ),
+                            html.Span("Run analysis"),
+                        ],
                         id="simple-analyze-btn",
                         n_clicks=0,
-                        disabled=True,
-                        className="pvc-simple-run-button",
-                        style=_simple_analyze_style(disabled=True),
+                        disabled=False,
+                        className="pvc-simple-run-button pvc-primary-action",
+                        style=_simple_analyze_style(disabled=False),
                     ),
                     className="pvc-simple-run-row",
                 ),
+                html.Div(id="simple-status", className="pvc-simple-progress"),
             ],
+            id="simple-start-view",
             className="pvc-simple-start",
         ),
 
-        # Status + result (shared by both methods).
-        html.Div(id="simple-status", style={"marginTop": "16px"}),
-        html.Div(id="simple-result", style={"marginTop": "8px"}),
+        # The start panel stays visible while work runs. Once either method
+        # succeeds, simple-stash swaps it for this result view in-place.
+        html.Div(
+            [
+                html.Div(id="simple-result"),
+                _ai_diagnostic_panel("simple"),
+                html.Div(
+                    [
+                        html.Button(
+                            [html.Span("←", className="pvc-simple-result-action-icon"), "Return"],
+                            id="simple-result-return",
+                            n_clicks=0,
+                            className="pvc-simple-result-return",
+                        ),
+                        html.Button(
+                            ["Open Advanced mode to tune every step ", html.Span("→")],
+                            id="simple-result-advanced",
+                            n_clicks=0,
+                            className="pvc-simple-result-advanced",
+                        ),
+                    ],
+                    className="pvc-simple-result-actions",
+                ),
+            ],
+            id="simple-result-view",
+            style={"display": "none"},
+        ),
         # PVPRO long-running progress renders here while a fit is in flight.
         html.Div(id="simple-pvpro-progress-output", style={"marginTop": "16px"}),
     ],
@@ -4009,12 +4116,105 @@ def whatsnew_modal():
     return _modal_shell("What's new", "Version history.", "Recent releases and major changes.", rows)
 
 
+def datareq_modal():
+    """Data-requirements window adapted from the 260701 interface."""
+    def section_heading(title, description):
+        return html.Div(className="pvc-datareq-section-head", children=[
+            html.Div(title, className="pvc-datareq-section-title"),
+            html.Div(description, className="pvc-datareq-section-description"),
+        ])
+
+    def signal_card(level, title, fields, description, accent, tint):
+        return html.Div(
+            className="glass pvc-datareq-card",
+            style={"--req-accent": accent, "--req-tint": tint},
+            children=[
+                html.Div(html.Span(level, className="pvc-datareq-level"),
+                         className="pvc-datareq-card-head"),
+                html.Div(
+                    [html.Span(field, className="glass-soft pvc-datareq-field") for field in fields],
+                    className="pvc-datareq-fields",
+                ),
+                html.Div(title, className="pvc-datareq-title"),
+                html.P(description, className="pvc-datareq-description"),
+            ],
+        )
+
+    signal_grid = html.Div(className="pvc-datareq-signal-surface", children=[
+        html.Div(className="pvc-datareq-grid", children=[
+            signal_card(
+                "REQUIRED", "Core analysis", ["Time", "Power"],
+                "The minimum signals needed to calculate a degradation trend.",
+                "#c43d4b", "rgba(196,61,75,0.11)",
+            ),
+            html.Div("+", className="glass-soft pvc-datareq-plus", **{"aria-hidden": "true"}),
+            signal_card(
+                "RECOMMENDED", "Cleaner normalization", ["Irradiance", "Module temperature"],
+                "Adds irradiance normalization and temperature correction.",
+                "#159468", "rgba(21,148,104,0.10)",
+            ),
+            html.Div("+", className="glass-soft pvc-datareq-plus", **{"aria-hidden": "true"}),
+            signal_card(
+                "PVPRO ONLY", "Physics diagnostics", ["DC voltage", "DC current"],
+                "Unlocks Pmp, Voc, Isc and other single-diode parameter trends.",
+                "#667085", "rgba(102,112,133,0.12)",
+            ),
+        ]),
+    ])
+
+    def checklist_item(label, value, note):
+        return html.Div(className="glass-soft pvc-datareq-check", children=[
+            html.Div(label, className="pvc-datareq-check-label"),
+            html.Div(value, className="pvc-datareq-check-value"),
+            html.Div(note, className="pvc-datareq-check-note"),
+        ])
+
+    checklist = html.Div(className="pvc-datareq-file", children=[
+        html.Div(className="pvc-datareq-check-grid", children=[
+            checklist_item("FORMAT", "CSV, Excel, or Parquet", "One file per upload"),
+            checklist_item("HISTORY", "2+ years", "Longer records are better"),
+            checklist_item("SAMPLING", "1–6 hours", "Consistent intervals preferred"),
+        ]),
+    ])
+
+    note = html.Div(className="pvc-datareq-note", children=[
+        html.Span("✦", className="pvc-datareq-note-icon"),
+        html.Span([
+            html.B("Column names can vary. "),
+            "PV Copilot identifies likely signals automatically, and you can review the mapping before analysis.",
+        ]),
+    ])
+
+    return _modal_shell(
+        "Data requirements", "Prepare your dataset.", "",
+        [
+            html.Div(className="pvc-datareq-section", children=[
+                section_heading(
+                    "Signals to include",
+                    "Begin with the required pair, then add signals when your analysis needs them.",
+                ),
+                signal_grid,
+            ]),
+            html.Div(className="pvc-datareq-section", children=[
+                section_heading(
+                    "File format & coverage",
+                    "Upload one time-series file with enough history and a consistent sampling interval.",
+                ),
+                checklist,
+            ]),
+            note,
+        ],
+        modal_class="pvc-datareq-modal",
+    )
+
+
 def render_modal(view):
     return {
         "whatsnew": whatsnew_modal,
         "team": team_modal,
         "cite": cite_modal,
         "methods": methods_modal,
+        "datareq": datareq_modal,
     }.get(view, lambda: None)()
 
 
@@ -4051,6 +4251,13 @@ _page_body = html.Div([
 
     # NEW: track which steps are complete
     dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
+    # Advanced navigation is intentionally separate from completion: finishing
+    # a step unlocks the next tab without moving the user away from the result.
+    dcc.Store(id="advanced-active-step", data=1),
+    # Completed Advanced steps default to a compact result-first view. These
+    # stores remember when the user explicitly reopens their settings.
+    dcc.Store(id="advanced-filter-expanded", data=False),
+    dcc.Store(id="advanced-metric-expanded", data=False),
 
     # NEW: which analysis mode is active — "simple" (default) or "advanced".
     dcc.Store(id="ui-mode", data="simple"),
@@ -4112,26 +4319,7 @@ _page_body = html.Div([
                     # Top navigation spans the complete page width.
                     html.Div(
                         [
-                            html.Div(
-                                [
-                                    html.Div("▚", style={
-                                        "width": "42px", "height": "42px", "borderRadius": "13px",
-                                        "display": "flex", "alignItems": "center", "justifyContent": "center",
-                                        "background": "linear-gradient(135deg,#4f8bff,#ffd36a)",
-                                        "color": "white", "fontSize": "23px", "fontWeight": "900",
-                                        "boxShadow": "0 8px 22px rgba(47,107,255,0.25)",
-                                    }),
-                                    html.Div([
-                                        html.Div("PV Copilot", style={
-                                            "fontSize": "20px", "fontWeight": "800", "letterSpacing": "-0.02em",
-                                        }),
-                                        html.Div("Degradation analysis, end-to-end", style={
-                                            "fontSize": "11.5px", "fontWeight": "500", "color": MUTED,
-                                        }),
-                                    ]),
-                                ],
-                                style={"display": "flex", "alignItems": "center", "gap": "12px"},
-                            ),
+                            html.Div("PV Copilot", className="pvc-brand-wordmark"),
                             nav_pills(),
                         ],
                         className="nav",
@@ -4176,14 +4364,6 @@ _page_body = html.Div([
                                                 ],
                                                 className="pvc-analyze-header",
                                             ),
-                                            html.Div(
-                                                "Pick a mode, then run the analysis on "
-                                                "the data you loaded above.",
-                                                style={"fontSize": "15px", "color": INK_SOFT,
-                                                       "fontFamily": "Archivo, system-ui, sans-serif",
-                                                       "marginBottom": "16px"},
-                                            ),
-
                                             # SIMPLE-MODE PANEL — visible by default.
                                             html.Div(
                                                 simple_mode_panel,
@@ -4198,7 +4378,8 @@ _page_body = html.Div([
                                                 style={"display": "none"},
                                             ),
                                         ],
-                                        className="glass rise",
+                                        id="analyze-section-card",
+                                        className="glass rise pvc-analyze-card is-hidden",
                                         style={
                                             "padding": "32px 40px 36px",
                                             "background": "linear-gradient(135deg, rgba(255,255,255,0.66), rgba(255,255,255,0.44))",
@@ -4207,7 +4388,7 @@ _page_body = html.Div([
                                             "boxShadow": "0 14px 44px rgba(30,58,120,0.10)",
                                             "backdropFilter": "blur(30px) saturate(1.5)",
                                             "WebkitBackdropFilter": "blur(30px) saturate(1.5)",
-                                            "marginBottom": "22px",
+                                            "marginBottom": "0",
                                             "gridColumn": "1 / -1",
                                             "gridRow": "4",
                                         },
@@ -4231,7 +4412,7 @@ _page_body = html.Div([
                     "gridTemplateRows": "auto auto auto auto auto",
                     "alignItems": "flex-start",
                     "columnGap": "0",
-                    "rowGap": "22px",
+                    "rowGap": "12px",
                     "background": "transparent",
                     "fontFamily": "Archivo, system-ui, sans-serif",
                     "color": INK,
@@ -4240,36 +4421,11 @@ _page_body = html.Div([
                 }
             ),
 
-            # Page footer — below the shell, full width of the container
-            html.Div(
-                [
-                    html.Hr(style={"border": "none", "borderTop": f"1px solid {BORDER}", "margin": "0 0 10px"}),
-                    html.Div(
-                        [
-                            "Built at LBNL · Questions or feedback? ",
-                            html.A("baojieli@lbl.gov",
-                                href="mailto:baojieli@lbl.gov",
-                                style={"color": MUTED,
-                                       "textDecoration": "none",
-                                       "fontWeight": "400"}
-                            ),
-                        ],
-                        style={
-                            "fontSize": "12px",
-                            "color": MUTED,
-                            "textAlign": "center",
-                            "padding": "0 0 8px",
-                            "fontFamily": "Archivo, system-ui, sans-serif",
-                        }
-                    ),
-                ],
-                style={"marginTop": "10px"}
-            ),
         ],
         fluid=False,
         style={
-            "paddingTop": "26px", "paddingBottom": "40px",
-            "maxWidth": "1180px", "position": "relative", "zIndex": "1",
+            "paddingTop": "26px", "paddingBottom": "8px",
+            "maxWidth": "1320px", "position": "relative", "zIndex": "1",
         }
     ),
 ],
@@ -4538,12 +4694,7 @@ def update_upload_status(filename):
             className="slide-in-top",
         )
         return [msg, "upload", "", filename]
-    return [
-        html.Div("Awaiting file…",
-                 style={"color": INK_SOFT, "fontSize": "13px",
-                        "fontFamily": "Archivo, system-ui, sans-serif"}),
-        None, "", None
-    ]
+    return ["", None, "", None]
 
 
 @app.callback(
@@ -4898,8 +5049,8 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Arial", color=INK),
-        margin=dict(l=50, r=20, t=14, b=45),
-        height=220,
+        margin=dict(l=62, r=24, t=22, b=52),
+        height=310,
         showlegend=False,
     )
     bar_fig.update_xaxes(showgrid=False, zeroline=False)
@@ -4952,16 +5103,15 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
         _x_range = None
 
     combined.update_layout(
-        title="Power trend — all selected methods",
+        title=None,
         xaxis_title="Time",
         yaxis_title="Power (W)",
         template="plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Arial", color=INK),
-        margin=dict(l=50, r=150, t=50, b=40),
-        title_font=dict(family="Arial", size=18, color=INK),
-        height=300,
+        margin=dict(l=64, r=190, t=22, b=54),
+        height=390,
         # Legend: vertical, placed OUTSIDE the plot on the right so it never
         # overlaps the trend lines. Transparent background.
         legend=dict(orientation="v", yanchor="top", y=1.0,
@@ -4977,79 +5127,47 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
     finite = [(m, rd) for (m, rd, _f) in results
               if rd is not None and np.isfinite(rd)]
 
-    # Headline rate: render as "<min> to <max>%  /year" — only the second
-    # number carries the % sign, "to" is italic, and "/year" is a small
-    # trailing unit (matches the single-method hero-number styling).
-    _big = {"fontSize": "40px", "fontFamily": "Archivo, system-ui, sans-serif",
-            "fontWeight": "700", "color": VALUE_MAJOR, "lineHeight": "1.1"}
-    _to = {"fontSize": "26px", "fontFamily": "Archivo, system-ui, sans-serif",
-           "fontStyle": "italic", "color": VALUE_MAJOR, "margin": "0 8px"}
-    _yr = {"fontSize": "18px", "color": INK_SOFT, "marginLeft": "6px",
-           "fontFamily": "Archivo, system-ui, sans-serif", "fontStyle": "italic"}
     if finite:
-        rates_only = [rd for (_m, rd) in finite]
-        rmin, rmax = min(rates_only), max(rates_only)
-        if rmin == rmax:
-            headline = [html.Span(f"{rmax:+.2f}%", style=_big),
-                        html.Span("/year", style=_yr)]
-        else:
-            headline = [html.Span(f"{rmin:+.2f}", style=_big),
-                        html.Span("to", style=_to),
-                        html.Span(f"{rmax:+.2f}%", style=_big),
-                        html.Span("/year", style=_yr)]
+        rates_only = np.asarray([rd for (_m, rd) in finite], dtype=float)
+        mean_rate = float(np.mean(rates_only))
+        spread_rate = float(np.std(rates_only))
+        headline = f"{mean_rate:+.2f} ± {spread_rate:.2f}"
     else:
-        headline = [html.Span("n/a", style=_big)]
+        headline = "n/a"
 
-    summary_block = html.Div([
-        html.Div(headline, style={"marginBottom": "14px",
-                                  "display": "flex", "alignItems": "baseline",
-                                  "flexWrap": "wrap"}),
-        html.Div([
-            html.Div([html.Span("Methods: ", style={"color": INK_SOFT}),
-                      html.B(", ".join(bar_labels), style={"color": VALUE_DETAIL})],
-                     style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Duration: ", style={"color": INK_SOFT}),
-                      html.B(f"{duration_years:.1f} years",
-                             style={"color": VALUE_DETAIL})],
-                     style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Window: ", style={"color": INK_SOFT}),
-                      html.B(f"{start_date.strftime('%Y-%m-%d') if hasattr(start_date,'strftime') else start_date}  →  {end_date.strftime('%Y-%m-%d') if hasattr(end_date,'strftime') else end_date}",
-                             style={"fontFamily": "Archivo, system-ui, sans-serif",
-                                    "fontSize": "13px", "color": VALUE_DETAIL})],
-                     style={"fontSize": "14px"}),
-        ], style={"fontFamily": "Archivo, system-ui, sans-serif"}),
+    start_text = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else start_date
+    end_text = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else end_date
+    summary_block = html.Div(className="pvc-advanced-multi-summary", children=[
+        html.Div("Degradation summary", className="pvc-advanced-result-kicker"),
+        html.Div(headline, className="pvc-advanced-multi-rate"),
+        html.Div("%/year", className="pvc-advanced-multi-unit"),
+        html.Div(className="pvc-advanced-result-details", children=[
+            html.Div([html.Span("Methods: "), html.Strong(", ".join(bar_labels))]),
+            html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
+            html.Div([html.Span("Window: "), html.Strong(f"{start_text} → {end_text}")]),
+        ]),
     ])
 
-    return html.Div([
-        # Row 0: full-width section heading.
-        html.Div("annual degradation rate — method comparison", style={
-            "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "16px",
-            "fontFamily": "Archivo, system-ui, sans-serif",
-        }),
-        # Row 1: results (left) + rate-by-method bar chart (right), side by
-        # side. Wraps to stacked on narrow screens.
-        html.Div([
-            html.Div(summary_block,
-                     style={"flex": "1 1 300px", "minWidth": "260px"}),
-            html.Div(dcc.Graph(figure=bar_fig,
-                               config={"displayModeBar": False}),
-                     style={"flex": "1 1 360px", "minWidth": "300px"}),
-        ], style={"display": "flex", "gap": "22px", "alignItems": "flex-start",
-                  "flexWrap": "wrap", "marginBottom": "18px"}),
-        # Row 2: combined power-trend overlay (full width).
-        html.Div(dcc.Graph(
-            figure=combined,
-            config={"displaylogo": False, "scrollZoom": True,
-                    "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-        )),
-    ], className="slide-in-up", style={
-        "padding": "20px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "16px",
-        "marginTop": "16px",
-    })
+    return html.Div(className="pvc-advanced-multi-result slide-in-up", children=[
+        html.Div(className="pvc-advanced-multi-top", children=[
+            summary_block,
+            html.Div(className="pvc-advanced-result-chart-card", children=[
+                html.Div("Annual degradation rate — method comparison",
+                         className="pvc-advanced-result-kicker"),
+                dcc.Graph(figure=bar_fig, config={"displayModeBar": False, "responsive": True}),
+            ]),
+        ]),
+        html.Div(className="pvc-advanced-result-chart-card pvc-advanced-multi-trend", children=[
+            html.Div("Power trend — all selected methods",
+                     className="pvc-advanced-result-kicker"),
+            dcc.Graph(
+                figure=combined,
+                config={"displaylogo": False, "scrollZoom": True,
+                        "modeBarButtonsToRemove": ["select2d", "lasso2d"],
+                        "responsive": True},
+            ),
+        ]),
+    ])
 
 
 # =============================================================================
@@ -5173,13 +5291,10 @@ def analyze_uploaded_data_callback(
         # Initial progress UI: status block + debug panel. The polling
         # Interval lives in the page layout (initially disabled); we
         # enable it here.
-        initial_ui = html.Div([
-            _pvpro_progress_ui(
-                phase="starting", current=0, total=1,
-                message="Spinning up PVPRO worker…", elapsed_s=0,
-            ),
-            _pvpro_debug_panel(current_job_id=job_id),
-        ])
+        initial_ui = _pvpro_progress_ui(
+            phase="starting", current=0, total=1,
+            message="Spinning up PVPRO worker…", elapsed_s=0,
+        )
         # Clear any previous fast-method output, send the progress UI to its
         # own (Loading-free) container, disable the run button, enable poll.
         return ["", initial_ui, True, "Running PVPRO…",
@@ -5263,13 +5378,26 @@ def analyze_uploaded_data_callback(
 
     # Restyle the figure
     if fig is not None:
+        if len(fig.data) > 0:
+            fig.data[0].name = "Daily-aggregated Power"
+            if hasattr(fig.data[0], "marker"):
+                fig.data[0].marker.update(size=8, opacity=0.58, color="#9fcaf1")
+        if len(fig.data) > 1:
+            fig.data[1].name = f"{selected_metric} trend"
+            if hasattr(fig.data[1], "line"):
+                fig.data[1].line.update(color="#0878c9", width=3)
         fig.update_layout(
+            title=None,
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Arial", color=INK),
-            margin=dict(l=50, r=20, t=50, b=60),
-            title=dict(font=dict(family="Arial", size=18, color=INK), x=0, xanchor="left"),
-            height=340,
+            font=dict(family="Archivo, Arial, sans-serif", color=INK_SOFT, size=13),
+            margin=dict(l=64, r=28, t=20, b=86),
+            height=390,
+            legend=dict(
+                orientation="h", x=.5, xanchor="center", y=-.22, yanchor="top",
+                bgcolor="rgba(0,0,0,0)", font=dict(size=12, color=INK_SOFT),
+            ),
+            hovermode="x unified",
         )
         fig.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
         fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
@@ -5278,60 +5406,36 @@ def analyze_uploaded_data_callback(
     end_date   = df_filtered.index.max()
     duration_years = (end_date - start_date).days / 365.25
 
-    # Editorial summary with HUGE rate display
+    # Editorial summary with featured rate display.
     rate_pct = rd / 100
     # Single unified rate color across methods (major-value blue).
     rate_color = VALUE_MAJOR
 
-    summary_block = html.Div([
-        html.Div("annual degradation rate", style={
-            "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-            "fontFamily": "Archivo, system-ui, sans-serif",
-        }),
-        html.Div([
-            html.Span(f"{rate_pct:.2%}", style={
-                "fontSize": "56px",
-                "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "700",
-                "color": rate_color,
-                "lineHeight": "1",
-            }),
-            html.Span("/year", style={
-                "fontSize": "20px",
-                "color": INK_SOFT,
-                "marginLeft": "8px",
-                "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontStyle": "italic",
-            }),
-        ], style={"marginBottom": "16px"}),
-        html.Div([
-            # All three are supporting/detail values -- plain dark text.
-            html.Div([html.Span("Method: ",   style={"color": INK_SOFT}),
-                      html.B(selected_metric, style={"color": VALUE_DETAIL})],
-                     style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Duration: ", style={"color": INK_SOFT}),
-                      html.B(f"{duration_years:.1f} years",
-                             style={"color": VALUE_DETAIL})],
-                     style={"fontSize": "14px", "marginBottom": "3px"}),
-            html.Div([html.Span("Window: ",   style={"color": INK_SOFT}),
-                      html.B(f"{start_date.strftime('%Y-%m-%d') if hasattr(start_date,'strftime') else start_date}  →  {end_date.strftime('%Y-%m-%d') if hasattr(end_date,'strftime') else end_date}",
-                            style={"fontFamily": "Archivo, system-ui, sans-serif",
-                                   "fontSize": "13px", "color": VALUE_DETAIL})],
-                     style={"fontSize": "14px"}),
-        ], style={"fontFamily": "Archivo, system-ui, sans-serif"}),
+    start_text = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else start_date
+    end_text = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else end_date
+    summary_block = html.Div(className="pvc-advanced-single-summary", children=[
+        html.Div("Annual degradation rate", className="pvc-advanced-result-kicker"),
+        html.Div(className="pvc-advanced-single-rate", children=[
+            html.Span(f"{rate_pct:.2%}", className="pvc-advanced-single-rate-value"),
+            html.Span("/year", className="pvc-advanced-single-rate-unit"),
+        ]),
+        html.Div(className="pvc-advanced-result-details", children=[
+            html.Div([html.Span("Method: "), html.Strong(selected_metric)]),
+            html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
+            html.Div([html.Span("Window: "), html.Strong(f"{start_text} → {end_text}")]),
+        ]),
     ])
 
-    degradation_layout = html.Div([
-        html.Div(summary_block, style={"marginBottom": "20px"}),
-        html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})),
-    ], className="slide-in-up", style={
-        "padding": "20px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "16px",
-        "marginTop": "16px",
-    })
+    degradation_layout = html.Div(className="pvc-advanced-single-result slide-in-up", children=[
+        summary_block,
+        html.Div(className="pvc-advanced-result-chart-card", children=[
+            html.Div("Power trend", className="pvc-advanced-result-kicker"),
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "displaylogo": False, "responsive": True},
+            ),
+        ]),
+    ])
 
     result_dict = {
         "rate_pct_per_year": round(float(rate_pct) * 100, 4),
@@ -5422,8 +5526,7 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
 
         # Genuine multi-worker bug -- show the diagnostic banner alongside
         # the debug panel so the user can inspect what happened.
-        lost_ui = html.Div([
-            html.Div(
+        lost_ui = html.Div(
                 "PVPRO progress lost — this worker has never seen the job "
                 "that was started. If you're on a multi-worker deployment, "
                 "enable diskcache (set PVPRO_DISKCACHE_DIR + install "
@@ -5437,9 +5540,7 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
                     "fontSize": "13px",
                     "fontFamily": "Archivo, system-ui, sans-serif",
                 },
-            ),
-            _pvpro_debug_panel(current_job_id=job_id),
-        ])
+            )
         return [lost_ui, False, "Calculate Degradation",
                 no_update, {}, True]
 
@@ -5454,16 +5555,13 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
     # branch and a late poll never leaves the user looking at an old
     # progress bar.
     if phase not in ("done", "error", "rendered"):
-        ui = html.Div([
-            _pvpro_progress_ui(
+        ui = _pvpro_progress_ui(
                 phase=phase,
                 current=job.get("current", 0),
                 total=job.get("total", 1),
                 message=job.get("message", ""),
                 elapsed_s=elapsed,
-            ),
-            _pvpro_debug_panel(current_job_id=job_id),
-        ])
+            )
         return [ui, True, "Running PVPRO…", no_update, job_store, False]
 
     # --- Failed ---
@@ -5472,10 +5570,7 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
         # clobber the error UI we're about to render.
         _pvpro_update_job(job_id, phase="rendered")
         return [
-            html.Div([
-                _no_data_alert(f"PVPRO failed: {job.get('error', 'unknown error')}"),
-                _pvpro_debug_panel(current_job_id=job_id),
-            ]),
+            _no_data_alert(f"PVPRO failed: {job.get('error', 'unknown error')}"),
             False, "Calculate Degradation", {}, {}, True,
         ]
 
@@ -5615,7 +5710,7 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
         # phase="rendered" mid-construction and take an early code path that
         # competes with this branch (the race that caused the 96%-stuck bug).
         _pvpro_update_job(job_id, phase="rendered")
-        return [html.Div([final_layout, _pvpro_debug_panel(current_job_id=job_id)]),
+        return [final_layout,
                 False, "Calculate Degradation",
                 result_dict, {}, True]
     finally:
@@ -5634,8 +5729,8 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
 # panel, no diagnostic dict) -- callers that need the diagnostic context can
 # read `rates`/`rd` directly.
 # =============================================================================
-def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
-                         duration_years, elapsed):
+def _render_pvpro_layout_legacy(rd, figs, rates, start_str, end_str,
+                                duration_years, elapsed):
     rates = rates or {}
     figs = figs or {}
     rate_pct = rd / 100 if (rd is not None and np.isfinite(rd)) else 0.0
@@ -5786,6 +5881,250 @@ def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
     })
 
 
+def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
+                         duration_years, elapsed):
+    """Render the Advanced PVPRO dashboard as a summary plus tabbed trend."""
+    del elapsed  # retained in the shared call signature; not shown in results.
+    figs = figs or {}
+    rates = rates or {}
+    rate_pct = rd / 100 if (rd is not None and np.isfinite(rd)) else 0.0
+    quantities = [
+        ("p_mp_ref", "Pmp"),
+        ("v_mp_ref", "Vmp"),
+        ("i_mp_ref", "Imp"),
+        ("v_oc_ref", "Voc"),
+        ("i_sc_ref", "Isc"),
+    ]
+
+    summary = html.Div(className="pvc-advanced-pvpro-summary", children=[
+        html.Div("Annual degradation rate", className="pvc-advanced-result-kicker"),
+        html.Div(className="pvc-advanced-pvpro-rate", children=[
+            html.Span(f"{rate_pct:.2%}", className="pvc-advanced-pvpro-rate-value"),
+            html.Span("/year", className="pvc-advanced-pvpro-rate-unit"),
+        ]),
+        html.Div(className="pvc-advanced-result-details", children=[
+            html.Div([html.Span("Method: "), html.Strong("PVPRO")]),
+            html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
+            html.Div([html.Span("Window: "), html.Strong(f"{start_str} → {end_str}")]),
+        ]),
+    ])
+
+    selectors = []
+    charts = []
+    for index, (key, short) in enumerate(quantities):
+        active = index == 0
+        selectors.append(html.Button(
+            short,
+            id={"type": "advanced-pvpro-result-param", "key": key},
+            n_clicks=0,
+            className="pvc-advanced-pvpro-param is-active" if active
+                      else "pvc-advanced-pvpro-param",
+        ))
+
+        raw_fig = figs.get(key)
+        if raw_fig is None:
+            chart = html.Div(
+                "Trend unavailable for this parameter.",
+                className="pvc-advanced-pvpro-chart-empty",
+            )
+        else:
+            figure = go.Figure(raw_fig)
+            parameter_rate = rates.get(key, float("nan"))
+            finite_rate = parameter_rate is not None and np.isfinite(parameter_rate)
+            rate_label = "n/a" if not finite_rate else f"{parameter_rate:+.2f} %/yr"
+            figure.update_layout(
+                title=dict(
+                    text=f"<b>{short}</b> (ref) &nbsp; ({rate_label})",
+                    x=.5, xanchor="center", font=dict(size=16, color=INK),
+                ),
+                height=390,
+                autosize=True,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="Archivo, Arial, sans-serif", color=INK_SOFT, size=13),
+                margin=dict(l=66, r=24, t=62, b=50),
+                showlegend=False,
+                hovermode="x unified",
+            )
+            figure.update_xaxes(
+                showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+                zeroline=False, linecolor="rgba(105,135,180,0.16)",
+            )
+            figure.update_yaxes(
+                showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+                zeroline=False, linecolor="rgba(105,135,180,0.16)",
+            )
+            chart = dcc.Graph(
+                figure=figure,
+                config={"displayModeBar": False, "displaylogo": False, "responsive": True},
+                className="pvc-advanced-pvpro-graph",
+            )
+
+        charts.append(html.Div(
+            chart,
+            id={"type": "advanced-pvpro-result-chart", "key": key},
+            className="pvc-advanced-pvpro-chart",
+            style={} if active else {"display": "none"},
+        ))
+
+    trends = html.Div(className="pvc-advanced-pvpro-trends", children=[
+        html.Div(selectors, className="pvc-advanced-pvpro-params"),
+        html.Div(charts, className="pvc-advanced-pvpro-chart-stage"),
+    ])
+    return html.Div(
+        [summary, trends],
+        className="pvc-advanced-pvpro-result slide-in-up",
+    )
+
+
+@app.callback(
+    Output({"type": "advanced-pvpro-result-param", "key": ALL}, "className"),
+    Output({"type": "advanced-pvpro-result-chart", "key": ALL}, "style"),
+    Input({"type": "advanced-pvpro-result-param", "key": ALL}, "n_clicks"),
+    State({"type": "advanced-pvpro-result-param", "key": ALL}, "id"),
+    State({"type": "advanced-pvpro-result-chart", "key": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def switch_advanced_pvpro_result(_clicks, button_ids, chart_ids):
+    trigger = ctx.triggered_id
+    if not isinstance(trigger, dict) or not ctx.triggered or not ctx.triggered[0].get("value"):
+        return dash.no_update, dash.no_update
+    selected = trigger.get("key")
+    button_classes = [
+        "pvc-advanced-pvpro-param is-active" if item.get("key") == selected
+        else "pvc-advanced-pvpro-param"
+        for item in (button_ids or [])
+    ]
+    chart_styles = [
+        {} if item.get("key") == selected else {"display": "none"}
+        for item in (chart_ids or [])
+    ]
+    return button_classes, chart_styles
+
+
+def _render_simple_pvpro_layout(rd, figs, rates, start_str, end_str,
+                                duration_years):
+    """Render the compact Simple-mode-only PVPRO result dashboard."""
+    figs = figs or {}
+    rates = rates or {}
+    rate_pct = rd / 100 if (rd is not None and np.isfinite(rd)) else 0.0
+    quantities = [
+        ("p_mp_ref", "Pmp", "Power at MPP"),
+        ("v_mp_ref", "Vmp", "Voltage at MPP"),
+        ("i_mp_ref", "Imp", "Current at MPP"),
+        ("v_oc_ref", "Voc", "Open-circuit voltage"),
+        ("i_sc_ref", "Isc", "Short-circuit current"),
+    ]
+
+    summary = html.Div(className="pvc-simple-pvpro-summary", children=[
+        html.Div("Power degradation rate", className="pvc-simple-pvpro-kicker"),
+        html.Div(className="pvc-simple-pvpro-rate", children=[
+            html.Span(f"{rate_pct * 100:.2f}%", className="pvc-simple-pvpro-rate-value"),
+            html.Span("/year", className="pvc-simple-pvpro-rate-unit"),
+        ]),
+        html.Div(className="pvc-simple-pvpro-details", children=[
+            html.Div([html.Span("Method: "), html.Strong("PVPRO")]),
+            html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
+            html.Div([
+                html.Span("Window: "),
+                html.Strong(f"{start_str} → {end_str}", className="pvc-simple-pvpro-window"),
+            ]),
+        ]),
+    ])
+
+    selectors = []
+    charts = []
+    for index, (key, short, description) in enumerate(quantities):
+        active = index == 0
+        selectors.append(html.Button(
+            [
+                html.Span(short, className="pvc-simple-pvpro-param-name"),
+                html.Span(f"({description})", className="pvc-simple-pvpro-param-description"),
+            ],
+            id={"type": "simple-pvpro-result-param", "key": key},
+            n_clicks=0,
+            className="pvc-simple-pvpro-param is-active" if active else "pvc-simple-pvpro-param",
+        ))
+
+        raw_fig = figs.get(key)
+        if raw_fig is None:
+            chart = html.Div("Trend unavailable for this parameter.", className="pvc-simple-pvpro-chart-empty")
+        else:
+            figure = go.Figure(raw_fig)
+            parameter_rate = rates.get(key, float("nan"))
+            rate_is_finite = parameter_rate is not None and np.isfinite(parameter_rate)
+            rate_label = "n/a" if not rate_is_finite else f"{parameter_rate:+.2f} %/yr"
+            figure.update_layout(
+                title=dict(
+                    text=f"<b>{short}</b> (ref) &nbsp; ({rate_label})",
+                    x=0.5, xanchor="center", font=dict(size=16, color=INK),
+                ),
+                height=350,
+                autosize=True,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="Archivo, Arial, sans-serif", color=INK_SOFT, size=13),
+                margin=dict(l=66, r=24, t=58, b=50),
+                showlegend=False,
+                hovermode="x unified",
+            )
+            figure.update_xaxes(
+                showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+                zeroline=False, linecolor="rgba(105,135,180,0.16)",
+            )
+            figure.update_yaxes(
+                showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+                zeroline=False, linecolor="rgba(105,135,180,0.16)",
+            )
+            chart = dcc.Graph(
+                figure=figure,
+                config={"displayModeBar": False, "displaylogo": False, "responsive": True},
+                className="pvc-simple-pvpro-graph",
+            )
+
+        charts.append(html.Div(
+            chart,
+            id={"type": "simple-pvpro-result-chart", "key": key},
+            className="pvc-simple-pvpro-chart",
+            style={} if active else {"display": "none"},
+        ))
+
+    trends = html.Div(className="pvc-simple-pvpro-trends", children=[
+        html.Div(selectors, className="pvc-simple-pvpro-params"),
+        html.Div(charts, className="pvc-simple-pvpro-chart-stage"),
+    ])
+
+    return html.Div(
+        [summary, trends],
+        className="pvc-simple-pvpro-result slide-in-up",
+    )
+
+
+@app.callback(
+    Output({"type": "simple-pvpro-result-param", "key": ALL}, "className"),
+    Output({"type": "simple-pvpro-result-chart", "key": ALL}, "style"),
+    Input({"type": "simple-pvpro-result-param", "key": ALL}, "n_clicks"),
+    State({"type": "simple-pvpro-result-param", "key": ALL}, "id"),
+    State({"type": "simple-pvpro-result-chart", "key": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def switch_simple_pvpro_result(_clicks, button_ids, chart_ids):
+    trigger = ctx.triggered_id
+    if not isinstance(trigger, dict) or not ctx.triggered or not ctx.triggered[0].get("value"):
+        return dash.no_update, dash.no_update
+    selected = trigger.get("key")
+    button_classes = [
+        "pvc-simple-pvpro-param is-active" if item.get("key") == selected
+        else "pvc-simple-pvpro-param"
+        for item in (button_ids or [])
+    ]
+    chart_styles = [
+        {} if item.get("key") == selected else {"display": "none"}
+        for item in (chart_ids or [])
+    ]
+    return button_classes, chart_styles
+
+
 # =============================================================================
 # SIMPLE-MODE METHOD CHOOSER + PVPRO HELPERS
 #
@@ -5814,11 +6153,66 @@ def _simple_has_dc_vi(mapped):
 )
 def simple_toggle_pvpro_params(method):
     if method == "PVPRO":
-        # Reveal the PVPRO panels AND auto-expand the parameters disclosure so
-        # the fields are visible immediately (mirrors Advanced mode).
+        # Keep the optional controls available but collapsed. Simple mode
+        # estimates the array geometry automatically when Run is clicked.
         return ({"display": "block", "marginTop": "8px"},
-                {"display": "block"}, True)
-    return ({"display": "none"}, {"display": "none"}, dash.no_update)
+                {"display": "block"}, False)
+    return ({"display": "none"}, {"display": "none"}, False)
+
+
+@app.callback(
+    Output("simple-result", "children", allow_duplicate=True),
+    Output("simple-status", "children", allow_duplicate=True),
+    Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
+    Output("simple-stash", "data", allow_duplicate=True),
+    Output("step-progress", "data", allow_duplicate=True),
+    Input("simple-method-radio", "value"),
+    prevent_initial_call=True,
+)
+def clear_simple_result_for_method_switch(_method):
+    """Never leave a result from the previously selected method on screen."""
+    return "", "", "", {}, {
+        "started": False, "data": False, "filter": False,
+        "calc": False, "code": False,
+    }
+
+
+@app.callback(
+    Output("simple-start-view", "style"),
+    Output("simple-result-view", "style"),
+    Input("simple-stash", "data"),
+)
+def toggle_simple_start_and_result(stash):
+    result_ready = (stash or {}).get("method") in ("YOY", "PVPRO")
+    if result_ready:
+        return {"display": "none"}, {"display": "block"}
+    return {}, {"display": "none"}
+
+
+@app.callback(
+    Output("ui-mode", "data", allow_duplicate=True),
+    Output("simple-stash", "data", allow_duplicate=True),
+    Output("simple-result", "children", allow_duplicate=True),
+    Output("simple-status", "children", allow_duplicate=True),
+    Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
+    Output("step-progress", "data", allow_duplicate=True),
+    Input("simple-result-return", "n_clicks"),
+    Input("simple-result-advanced", "n_clicks"),
+    prevent_initial_call=True,
+)
+def simple_result_actions(return_clicks, advanced_clicks):
+    trigger = ctx.triggered_id
+    if trigger not in ("simple-result-return", "simple-result-advanced"):
+        return (dash.no_update,) * 6
+    if not ctx.triggered or not ctx.triggered[0].get("value"):
+        return (dash.no_update,) * 6
+
+    next_mode = "advanced" if trigger == "simple-result-advanced" else dash.no_update
+    empty_progress = {
+        "started": False, "data": False, "filter": False,
+        "calc": False, "code": False,
+    }
+    return next_mode, {}, "", "", "", empty_progress
 
 
 # =============================================================================
@@ -5837,9 +6231,10 @@ def simple_toggle_pvpro_params(method):
     Input("simple-pvpro-poll-interval", "n_intervals"),
     State("simple-pvpro-job", "data"),
     State("simple-pipe-filtered", "data"),
+    State("simple-method-radio", "value"),
     prevent_initial_call=True,
 )
-def simple_pvpro_poll(_n, job_store, pfiltered):
+def simple_pvpro_poll(_n, job_store, pfiltered, selected_method):
     from dash import no_update
 
     job_id = (job_store or {}).get("job_id")
@@ -5852,6 +6247,16 @@ def simple_pvpro_poll(_n, job_store, pfiltered):
 
     phase = job.get("phase", "")
     elapsed = max(0.0, time.time() - job.get("started_at", time.time()))
+
+    # The user may switch back to YOY while a PVPRO worker is still running.
+    # Let it finish in the background, but never paint its progress/result into
+    # a result area that currently belongs to YOY.
+    if selected_method != "PVPRO":
+        if phase in ("done", "error", "rendered"):
+            if phase != "rendered":
+                _pvpro_update_job(job_id, phase="rendered")
+            return ["", no_update, no_update, {}, True, no_update, no_update]
+        return ["", no_update, no_update, job_store, False, no_update, no_update]
 
     # Still working.
     if phase not in ("done", "error", "rendered"):
@@ -5897,8 +6302,8 @@ def simple_pvpro_poll(_n, job_store, pfiltered):
             start_str = end_str = "\u2014"
             duration_years = 0.0
 
-        layout_div = _render_pvpro_layout(
-            rd, figs, rates, start_str, end_str, duration_years, elapsed)
+        layout_div = _render_simple_pvpro_layout(
+            rd, figs, rates, start_str, end_str, duration_years)
 
         # Build a diagnostic-friendly stash so the AI assistant works for the
         # PVPRO result too (mirrors the Advanced-mode PVPRO summary).
@@ -6193,7 +6598,13 @@ def _build_overview_figures_div(df, mapped_variables_dict):
     try:
         if df is not None and mapped_variables_dict:
             figs, _err = make_overview_figures(df, mapped_variables_dict)
-            return html.Div(figs)
+            # Step 1 presents raw signals as a roomy two-column gallery. The
+            # underlying figure data is unchanged; only display sizing differs.
+            for graph in figs:
+                figure = getattr(graph, "figure", None)
+                if hasattr(figure, "update_layout"):
+                    figure.update_layout(height=225, margin=dict(l=50, r=18, t=38, b=32))
+            return html.Div(figs, className="pvc-step1-fig-grid")
     except Exception:
         return html.Div("Figure generation failed.", style={"color": ACCENT})
     return html.Div(
@@ -6372,7 +6783,7 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
             "flex": "1", "fontWeight": "700", "color": INK,
             "fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "14px",
         }),
-    ], style={
+    ], className="pvc-var-map-header", style={
         "display": "flex", "alignItems": "center", "gap": "14px",
         "padding": "8px 4px 12px 4px",
         "borderBottom": f"2px solid {BORDER_STRONG}",
@@ -6443,7 +6854,7 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                     "color": INK, "fontFamily": "Archivo, system-ui, sans-serif",
                     "fontSize": "14px",
                 }),
-            ], style={"flex": "0 0 30%", "display": "flex",
+            ], className="pvc-var-map-label", style={"display": "flex",
                       "alignItems": "center"}),
             html.Div([
                 dmc.Select(
@@ -6485,18 +6896,15 @@ def build_variable_mapping_table(mapped_variables_dict, columns,
                 # "Also detected" alternatives — static, relevant once selected.
                 _alt_hint(alternatives.get(metric), exclude=current,
                           tags=quality_tags) if detected else "",
-            ], style={"flex": "1"}),
-        ], style={
-            "display": "flex", "alignItems": "flex-start", "gap": "14px",
+            ], className="pvc-var-map-control"),
+        ], className="pvc-var-map-card", style={
             "padding": "8px 4px",
-            "background": "#ffffff" if i % 2 else "#f1f5f9",
-            "borderRadius": "6px",
         })
         rows.append(row)
 
     return html.Div([
         header,
-        html.Div(rows, style={"marginTop": "4px"}),
+        html.Div(rows, className="pvc-var-map-grid", style={"marginTop": "4px"}),
         html.Div([
             html.Button(
                 "Apply mapping",
@@ -6723,7 +7131,7 @@ app.clientside_callback(
         }
         return [
             {"display": "flex", "alignItems": "center",
-             "justifyContent": "center", "gap": "7px", "marginTop": "8px",
+             "justifyContent": "flex-start", "gap": "7px", "marginTop": "8px",
              "fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "13px"},
             {"display": "none"},
             false
@@ -6744,8 +7152,7 @@ app.clientside_callback(
     function(_children) {
         return [
             {"display": "none"},
-            {"fontSize": "13px", "color": "#475569", "marginTop": "6px",
-             "textAlign": "center", "fontFamily": "Archivo, system-ui, sans-serif"},
+            {"display": "none"},
             true,
             "Starting analysis…",
             ""
@@ -6938,7 +7345,7 @@ def analyze_uploaded_data_callback(
                 # mapping table (refreshing the detected/undetected dots).
                 html.Div(editable_mapping, id="var-map-panel",
                          style={"fontSize": "14px"}),
-            ], style={
+            ], className="pvc-step1-mapping-surface", style={
                 "padding": "18px 20px",
                 "background": "#f8fafc",
                 "border": f"1px solid {BORDER}",
@@ -7355,7 +7762,7 @@ def generate_code(n, filename, mapped_variables_dict, selected_filters, selected
             style={
                 "whiteSpace": "pre-wrap",
                 "fontSize": "13px",
-                "background": "linear-gradient(135deg, #4b8bff, #2f6bff)",
+                "background": "linear-gradient(135deg, #303640, #20242b)",
                 "color": "#e8e4dc",
                 "padding": "16px",
                 "borderRadius": "16px",
@@ -7409,9 +7816,156 @@ except Exception:
 
 # Try to import the same LLM client used by Step 1. Fall back gracefully if unavailable.
 try:
-    from page_supporting_files.analysis_utils import client as _llm_client
+    from page_supporting_files.analysis_utils import (
+        client as _llm_client,
+        LLM_MODEL as _diagnostic_model,
+    )
 except Exception:
     _llm_client = None
+    _diagnostic_model = None
+
+try:
+    from page_supporting_files.diagnostic_prompts import (
+        DIAGNOSTIC_SYSTEM_PROMPT as _diagnostic_system_prompt,
+        DIAGNOSTIC_SYSTEM_PROMPT_PVPRO as _diagnostic_system_prompt_pvpro,
+    )
+except Exception:
+    _diagnostic_system_prompt = (
+        "You are PV Copilot, an expert in photovoltaic degradation analysis. "
+        "Give a concise, practical interpretation of the supplied result, its "
+        "data-quality caveats, and the most useful next validation step."
+    )
+    _diagnostic_system_prompt_pvpro = _diagnostic_system_prompt
+
+
+@app.callback(
+    Output("simple-ai-diagnostic-card", "style"),
+    Output("advanced-ai-diagnostic-card", "style"),
+    Input("simple-stash", "data"),
+    Input("degradation-result-store", "data"),
+)
+def show_ai_diagnostic_cards(simple_result, advanced_result):
+    simple_visible = bool(simple_result and simple_result.get("method"))
+    advanced_visible = bool(advanced_result and advanced_result.get("method"))
+    return (
+        {} if simple_visible else {"display": "none"},
+        {} if advanced_visible else {"display": "none"},
+    )
+
+
+def _format_diagnostic_result_context(result, session_context):
+    result = result or {}
+    rate_fraction = result.get("rate_pct")
+    try:
+        headline_rate = f"{float(rate_fraction) * 100:+.2f}%/year"
+    except (TypeError, ValueError):
+        headline_rate = "unavailable"
+    lines = [
+        f"Method: {result.get('method') or 'unknown'}",
+        f"Headline degradation rate: {headline_rate}",
+        f"Analysis window: {result.get('start')} to {result.get('end')} "
+        f"({result.get('duration_years')} years)",
+        f"Points retained: {result.get('n_kept')} of {result.get('n_raw')} "
+        f"({result.get('pct_kept')}%)",
+    ]
+    methods_rates = result.get("methods_rates") or {}
+    if methods_rates:
+        lines.append("Per-method rates (%/year): " + ", ".join(
+            f"{key}={value:+.2f}" if value is not None else f"{key}=n/a"
+            for key, value in methods_rates.items()
+        ))
+    quantity_rates = result.get("rates_per_quantity") or {}
+    if quantity_rates:
+        lines.append("PVPRO reference-parameter rates (%/year): " + ", ".join(
+            f"{key}={float(value):+.2f}" for key, value in quantity_rates.items()
+            if value is not None
+        ))
+    if result.get("trend_summary"):
+        lines.append("Trend evidence: " + str(result["trend_summary"]))
+    if result.get("raw_summary"):
+        lines.append("Raw-data quality evidence: " + str(result["raw_summary"]))
+    if session_context:
+        lines.append("Completed workflow context: " + str(session_context))
+    return "\n".join(lines)
+
+
+@app.callback(
+    Output("simple-ai-diagnostic-output", "children"),
+    Output("advanced-ai-diagnostic-output", "children"),
+    Output("simple-ai-diagnostic-btn", "hidden"),
+    Output("simple-ai-diagnostic-restart", "style"),
+    Output("advanced-ai-diagnostic-btn", "hidden"),
+    Output("advanced-ai-diagnostic-restart", "style"),
+    Input("simple-ai-diagnostic-btn", "n_clicks"),
+    Input("advanced-ai-diagnostic-btn", "n_clicks"),
+    Input("simple-ai-diagnostic-restart", "n_clicks"),
+    Input("advanced-ai-diagnostic-restart", "n_clicks"),
+    Input("simple-stash", "data"),
+    Input("degradation-result-store", "data"),
+    State("chat-data-context", "data"),
+    prevent_initial_call=True,
+)
+def run_result_ai_diagnostic(_simple_clicks, _advanced_clicks,
+                             _simple_restarts, _advanced_restarts,
+                             simple_result, advanced_result, session_context):
+    trigger = ctx.triggered_id
+    if trigger == "simple-stash":
+        return "", dash.no_update, False, {"display": "none"}, dash.no_update, dash.no_update
+    if trigger == "degradation-result-store":
+        return dash.no_update, "", dash.no_update, dash.no_update, False, {"display": "none"}
+    if trigger == "simple-ai-diagnostic-restart":
+        return ("", dash.no_update, False, {"display": "none"},
+                dash.no_update, dash.no_update)
+    if trigger == "advanced-ai-diagnostic-restart":
+        return (dash.no_update, "", dash.no_update, dash.no_update,
+                False, {"display": "none"})
+    if trigger not in ("simple-ai-diagnostic-btn", "advanced-ai-diagnostic-btn"):
+        return (dash.no_update,) * 6
+    result = (simple_result if trigger == "simple-ai-diagnostic-btn"
+              else advanced_result)
+    if not result or not result.get("method"):
+        node = html.Div("Run an analysis first.", className="pvc-ai-diagnostic-error")
+    else:
+        # Simple and Advanced are independent analyses. The shared chat context
+        # describes the Advanced workflow, so it must never be mixed into a
+        # Simple-mode diagnosis.
+        diagnostic_session = (None if trigger == "simple-ai-diagnostic-btn"
+                              else session_context)
+        context_text = _format_diagnostic_result_context(result, diagnostic_session)
+        uses_pvpro = str(result.get("method", "")).upper() == "PVPRO"
+        if _llm_client is None:
+            node = dcc.Markdown(
+                "**Diagnosis unavailable:** the AI client is not configured in this environment.",
+                className="pvc-ai-diagnostic-markdown",
+            )
+        else:
+            try:
+                system_prompt = (_diagnostic_system_prompt_pvpro if uses_pvpro
+                                 else _diagnostic_system_prompt)
+                response = _llm_client.chat.completions.create(
+                    model=_diagnostic_model or "gpt-5.4-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": (
+                            "Analysis context:\n" + context_text
+                            + "\n\nGive a concise diagnosis with a headline, key evidence, "
+                              "important caveats, and one recommended next step."
+                        )},
+                    ],
+                    timeout=60,
+                )
+                text = (response.choices[0].message.content or "").strip()
+                node = dcc.Markdown(text, className="pvc-ai-diagnostic-markdown")
+            except Exception as exc:
+                node = html.Div(
+                    f"AI diagnosis unavailable: {exc}",
+                    className="pvc-ai-diagnostic-error",
+                )
+    if trigger == "simple-ai-diagnostic-btn":
+        return (node, dash.no_update, True, {},
+                dash.no_update, dash.no_update)
+    return (dash.no_update, node, dash.no_update, dash.no_update,
+            True, {})
 
 _EXAMPLE_QUESTIONS = [
     "What's my degradation rate?",
@@ -8078,6 +8632,146 @@ def gate_agents(progress):
     )
 
 
+# Advanced navigation is presentation-only. Pipeline completion unlocks the
+# next tab, but never changes the panel the user is currently reviewing.
+@app.callback(
+    Output("advanced-active-step", "data"),
+    Input({"type": "advanced-step-tab", "step": ALL}, "n_clicks"),
+    Input("advanced-next-step-1", "n_clicks"),
+    Input("advanced-next-step-2", "n_clicks"),
+    Input("advanced-next-step-3", "n_clicks"),
+    State("step-progress", "data"),
+    State("advanced-active-step", "data"),
+    prevent_initial_call=True,
+)
+def select_advanced_step(_clicks, _next_1, _next_2, _next_3,
+                         progress, current_step):
+    trigger = ctx.triggered_id
+    if not ctx.triggered or not ctx.triggered[0].get("value"):
+        return current_step or 1
+
+    progress = progress or {}
+    enabled = {
+        1: True,
+        2: bool(progress.get("data")),
+        3: bool(progress.get("filter")),
+        4: bool(progress.get("calc")),
+    }
+    next_steps = {
+        "advanced-next-step-1": 2,
+        "advanced-next-step-2": 3,
+        "advanced-next-step-3": 4,
+    }
+    if isinstance(trigger, dict):
+        requested_step = int(trigger.get("step", 1))
+    else:
+        requested_step = next_steps.get(trigger, current_step or 1)
+    return requested_step if enabled.get(requested_step, False) else (current_step or 1)
+
+
+@app.callback(
+    Output("advanced-filter-expanded", "data"),
+    Output("advanced-metric-expanded", "data"),
+    Input("toggle-filter-settings", "n_clicks"),
+    Input("toggle-metric-settings", "n_clicks"),
+    Input("filter-btn", "n_clicks"),
+    Input("run-btn", "n_clicks"),
+    Input("step-progress", "data"),
+    State("advanced-filter-expanded", "data"),
+    State("advanced-metric-expanded", "data"),
+    prevent_initial_call=True,
+)
+def toggle_completed_step_settings(_filter_clicks, _metric_clicks,
+                                   _filter_runs, _metric_runs, progress,
+                                   filter_expanded, metric_expanded):
+    """Remember only the user's UI expansion choices; no pipeline state changes."""
+    trigger = ctx.triggered_id
+    if trigger == "toggle-filter-settings":
+        return not bool(filter_expanded), bool(metric_expanded)
+    if trigger == "toggle-metric-settings":
+        return bool(filter_expanded), not bool(metric_expanded)
+    if trigger == "filter-btn":
+        return False, bool(metric_expanded)
+    if trigger == "run-btn":
+        return bool(filter_expanded), False
+    if trigger == "step-progress":
+        progress = progress or {}
+        # Reset a fold preference only when its underlying result is reset.
+        return (
+            bool(filter_expanded) if progress.get("filter") else False,
+            bool(metric_expanded) if progress.get("calc") else False,
+        )
+    return bool(filter_expanded), bool(metric_expanded)
+
+
+@app.callback(
+    Output({"type": "advanced-step-tab", "step": ALL}, "className"),
+    Output({"type": "advanced-step-tab", "step": ALL}, "disabled"),
+    Output("agent-data-wrap", "style"),
+    Output("agent-filter-wrap", "style"),
+    Output("agent-calc-wrap", "style"),
+    Output("agent-code-wrap", "style"),
+    Output("advanced-data-body", "className"),
+    Output("advanced-filter-body", "className"),
+    Output("advanced-calc-body", "className"),
+    Input("advanced-active-step", "data"),
+    Input("step-progress", "data"),
+    Input("advanced-filter-expanded", "data"),
+    Input("advanced-metric-expanded", "data"),
+)
+def render_advanced_navigation(active_step, progress, filter_expanded, metric_expanded):
+    progress = progress or {}
+    completed = {
+        1: bool(progress.get("data")),
+        2: bool(progress.get("filter")),
+        3: bool(progress.get("calc")),
+        4: bool(progress.get("code")),
+    }
+    enabled = {
+        1: True,
+        2: completed[1],
+        3: completed[2],
+        4: completed[3],
+    }
+
+    active_step = int(active_step or 1)
+    # A workflow reset can invalidate a previously selected later step.
+    # Display Step 1 in that case without coupling completion to navigation.
+    visible_step = active_step if enabled.get(active_step, False) else 1
+
+    classes = []
+    disabled = []
+    for step in range(1, 5):
+        states = []
+        if step == visible_step:
+            states.append("is-active")
+        if completed[step]:
+            states.append("is-done")
+        elif enabled[step]:
+            states.append("is-enabled")
+        else:
+            states.append("is-locked")
+        classes.append(f"pvc-advanced-rail-card pvc-advanced-step-{step} {' '.join(states)}")
+        disabled.append(not enabled[step])
+
+    panel_styles = [
+        {"display": "block"} if visible_step == step else {"display": "none"}
+        for step in range(1, 5)
+    ]
+    data_body_class = "pvc-advanced-step-body" + (" is-complete" if completed[1] else "")
+    filter_body_class = "pvc-advanced-step-body"
+    metric_body_class = "pvc-advanced-step-body"
+    if completed[2]:
+        filter_body_class += " is-complete " + ("is-expanded" if filter_expanded else "is-collapsed")
+    if completed[3]:
+        metric_body_class += " is-complete " + ("is-expanded" if metric_expanded else "is-collapsed")
+
+    return (
+        classes, disabled, *panel_styles,
+        data_body_class, filter_body_class, metric_body_class,
+    )
+
+
 # =============================================================================
 # CALLBACK — MODE SWITCH (Simple <-> Advanced)
 #
@@ -8467,12 +9161,13 @@ def _summarize_raw_data(df, mapping):
 
 
 # -----------------------------------------------------------------------------
-# Enable the Simple-mode Analyze button only once data has been loaded in the
-# shared upload area (an upload or an example).
+# Reveal the Analyze card only once data has been selected in the shared
+# upload area. Its Run button remains enabled whenever the card is visible.
 # -----------------------------------------------------------------------------
 @app.callback(
     Output("simple-analyze-btn", "disabled"),
     Output("simple-analyze-btn", "style"),
+    Output("analyze-section-card", "className"),
     Input("data-source-store", "data"),
     Input("dataframe-store",   "data"),
     Input("upload-data",       "contents"),
@@ -8490,7 +9185,10 @@ def toggle_simple_analyze(data_source, df_store, upload_contents, mapped_vars, m
         bool(df_store) or
         bool(mapped_vars)
     )
-    return (not ready), _simple_analyze_style(disabled=not ready)
+    card_class = "glass rise pvc-analyze-card" + ("" if ready else " is-hidden")
+    # The card itself is the readiness gate, so its Run button never needs a
+    # disabled visual state once the card becomes visible.
+    return False, _simple_analyze_style(disabled=False), card_class
 
 
 # -----------------------------------------------------------------------------
@@ -8696,7 +9394,7 @@ def simple_stage_filter(pdata):
     method = pdata.get("method", "YOY")
     progress = {"started": True, "data": True, "filter": True,
                 "calc": False, "code": False}
-    step3_label = ("Fitting PVPRO (single-diode model)…" if method == "PVPRO"
+    step3_label = ("Estimating PVPRO parameters and fitting the model…" if method == "PVPRO"
                    else _SIMPLE_STEP_LABELS.get(3, "Estimating degradation…"))
     status = _working_banner(step3_label)
     return payload, status, progress
@@ -8710,6 +9408,8 @@ def simple_stage_filter(pdata):
     Output("simple-pvpro-job",           "data",     allow_duplicate=True),
     Output("simple-pvpro-poll-interval", "disabled", allow_duplicate=True),
     Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
+    Output("simple-param-pvpro-mps", "value", allow_duplicate=True),
+    Output("simple-param-pvpro-ps",  "value", allow_duplicate=True),
     Input("simple-pipe-filtered", "data"),
     State("simple-param-pvpro-cells",    "value"),
     State("simple-param-pvpro-mps",      "value"),
@@ -8722,7 +9422,7 @@ def simple_stage_filter(pdata):
 )
 def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     if not pfiltered or "df_good" not in pfiltered:
-        return (dash.no_update,) * 7
+        return (dash.no_update,) * 9
 
     method = pfiltered.get("method", "YOY")
 
@@ -8738,19 +9438,42 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
             return ({}, _no_data_alert(
                 "PVPRO needs DC Voltage and DC Current columns, which weren't "
                 "identified in this dataset. Try Advanced mode to map them, or "
-                "use the YoY method."), "", none, {}, True, "")
+                "use the YoY method."), "", none, {}, True, "",
+                    dash.no_update, dash.no_update)
         try:
             df_filtered = _df_from_store(pfiltered["df_good"])
         except Exception as e:
             none = {"started": True, "data": True, "filter": True,
                     "calc": False, "code": False}
             return ({}, _no_data_alert(f"Could not load data for PVPRO: {e}"),
-                    "", none, {}, True, "")
+                    "", none, {}, True, "", dash.no_update, dash.no_update)
 
+        # Simple mode is intentionally one-click: infer array geometry from
+        # the filtered DC voltage/current/power signals before fitting. A
+        # quantity that cannot be estimated safely falls back to the current
+        # (normally default) value rather than aborting the run.
+        estimated = {}
+        cells_value = _pvnum(cells, 60, int)
+        try:
+            estimated = _run_with_timeout(
+                estimate_pvpro_params,
+                df_filtered,
+                mapped,
+                cells_in_series=cells_value,
+                timeout=ANALYZE_TIMEOUT_S,
+            ) or {}
+        except Exception:
+            estimated = {}
+
+        estimated_mps = estimated.get("modules_per_string") or {}
+        estimated_ps = estimated.get("parallel_strings") or {}
+
+        modules_per_string = _pvnum(estimated_mps.get("value", mps), 1, int)
+        parallel_strings = _pvnum(estimated_ps.get("value", ps), 1, int)
         pvpro_kwargs = dict(
-            cells_in_series     = _pvnum(cells, 60, int),
-            modules_per_string  = _pvnum(mps, 1, int),
-            parallel_strings    = _pvnum(ps, 1, int),
+            cells_in_series     = cells_value,
+            modules_per_string  = modules_per_string,
+            parallel_strings    = parallel_strings,
             alpha_isc           = _pvnum(alphaisc, 0.0046, float),
             technology          = tech      if tech      else "mono-c-Si",
             days_per_run        = _pvnum(days, 14, int),
@@ -8788,7 +9511,8 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
                     "calc": False, "code": False}
         running_status = _working_banner("Fitting PVPRO (single-diode model)…")
         return ({}, running_status, "", progress,
-                {"job_id": job_id}, False, initial_ui)
+                {"job_id": job_id}, False, initial_ui,
+                modules_per_string, parallel_strings)
 
     # -------------------------------------------------------------------
     # YoY branch (default): fast synchronous estimate.
@@ -8802,6 +9526,7 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
         return (
             {}, alert, "", none,
             dash.no_update, dash.no_update, dash.no_update,
+            dash.no_update, dash.no_update,
         )
 
     try:
@@ -8857,7 +9582,8 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
                 "calc": True, "code": False}
     done_status = ""   # no success banner on completion (per request)
     return (stash, done_status, _simple_result_layout(stash), progress,
-            dash.no_update, dash.no_update, dash.no_update)
+            dash.no_update, dash.no_update, dash.no_update,
+            dash.no_update, dash.no_update)
 
 
 # -----------------------------------------------------------------------------
@@ -8868,69 +9594,83 @@ def _simple_result_layout(stash):
     fig = pio.from_json(stash["fig"]) if stash.get("fig") else None
     rate_pct = stash["rate_pct"]
     duration_years = stash["duration_years"]
-    start = stash["start"]
-    end = stash["end"]
-    n_raw = stash.get("n_raw", 0)
     n_kept = stash.get("n_kept", 0)
     pct_kept = stash.get("pct_kept", 0.0)
 
-    def _detail_row(label, value_node):
-        return html.Div(
-            [html.Span(f"{label}: ", style={"color": INK_SOFT}), value_node],
-            style={"fontSize": "16px", "marginBottom": "5px",
-                   "fontFamily": "Archivo, system-ui, sans-serif"},
+    if fig is not None:
+        if len(fig.data) > 0:
+            fig.data[0].name = "Daily-aggregated Power"
+            fig.data[0].marker.update(size=8, opacity=0.62, color="#9fcaf1")
+        if len(fig.data) > 1:
+            fig.data[1].name = "Trend (30-day rolling)"
+            fig.data[1].line.update(color="#0878c9", width=3)
+        fig.update_layout(
+            title=None,
+            height=390,
+            autosize=False,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Archivo, Arial, sans-serif", color=INK_SOFT, size=13),
+            margin=dict(l=66, r=30, t=22, b=92),
+            legend=dict(
+                orientation="h", x=0.5, xanchor="center", y=-0.24, yanchor="top",
+                bgcolor="rgba(0,0,0,0)", font=dict(size=12, color=INK_SOFT),
+            ),
+            hovermode="x unified",
+        )
+        fig.update_xaxes(
+            title="Time", showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+            zeroline=False, linecolor="rgba(105,135,180,0.16)",
+        )
+        fig.update_yaxes(
+            title="Power (W)", showgrid=True, gridcolor="rgba(105,135,180,0.18)",
+            zeroline=False, linecolor="rgba(105,135,180,0.16)",
         )
 
-    summary_block = html.Div([
-        html.Div("annual degradation rate", style={
-            "fontSize": "15px", "color": INK_SOFT, "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-            "fontFamily": "Archivo, system-ui, sans-serif",
-        }),
-        html.Div([
-            html.Span(f"{rate_pct:.2%}", style={
-                "fontSize": "62px", "fontFamily": "Archivo, system-ui, sans-serif",
-                "fontWeight": "700", "color": INK, "lineHeight": "1",
-            }),
-            html.Span("/year", style={
-                "fontSize": "22px", "color": INK_SOFT, "marginLeft": "8px",
-                "fontFamily": "Archivo, system-ui, sans-serif", "fontStyle": "italic",
-            }),
-        ], style={"marginBottom": "18px"}),
-        html.Div([
-            _detail_row("Method", html.B("YoY", style={"color": VALUE_DETAIL})),
-            _detail_row("Duration", html.B(f"{duration_years:.1f} years", style={"color": VALUE_DETAIL})),
-            _detail_row("Window", html.B(f"{start}  →  {end}",
-                        style={"fontFamily": "Archivo, system-ui, sans-serif", "color": VALUE_DETAIL})),
-            _detail_row("Data used", html.Span([
-                html.B(f"{n_kept:,}", style={"color": VALUE_DETAIL}),
-                html.Span(f" of {n_raw:,} points kept after filtering "
-                          f"({pct_kept:.0f}%)", style={"color": INK}),
-            ])),
-        ], style={"fontFamily": "Archivo, system-ui, sans-serif"}),
+    def status_row(label, value):
+        return html.Div(className="pvc-yoy-status-row", children=[
+            html.Span("✓", className="pvc-yoy-status-check"),
+            html.Span(label, className="pvc-yoy-status-label"),
+            html.Span("·", className="pvc-yoy-status-separator"),
+            html.Strong(value, className="pvc-yoy-status-value"),
+        ])
+
+    summary_card = html.Div(className="pvc-yoy-summary-card", children=[
+        html.Div("Performance loss rate", className="pvc-yoy-kicker"),
+        html.Div(className="pvc-yoy-rate", children=[
+            html.Span(f"{rate_pct * 100:.2f}", className="pvc-yoy-rate-value"),
+            html.Span("%/yr", className="pvc-yoy-rate-unit"),
+        ]),
         html.Div(
-            [
-                html.B("Note: "),
-                "Default pipeline (YoY). Switch to ",
-                html.B("Advanced mode"),
-                " to tune any step.",
-            ],
-            style={"fontSize": "13px", "color": INK_SOFT, "marginTop": "16px",
-                   "fontStyle": "italic", "fontFamily": "Archivo, system-ui, sans-serif"},
+            ["Year-on-year", html.Span("·"), f"{duration_years:.1f}-year record"],
+            className="pvc-yoy-meta",
         ),
+        html.Div(className="pvc-yoy-status-list", children=[
+            status_row("Pre-screening", "complete"),
+            status_row("Filtering", f"{pct_kept:.0f}% points retained"),
+            status_row("Model", f"{n_kept:,} points fitted"),
+        ]),
     ])
 
-    return html.Div([
-        html.Div(summary_block, style={"marginBottom": "20px"}),
-        html.Div(dcc.Graph(figure=fig, config={"displayModeBar": False})
-                 if fig is not None else html.Div()),
-    ], className="slide-in-up", style={
-        "padding": "26px",
-        "background": "#f8fafc",
-        "border": f"1px solid {BORDER}",
-        "borderRadius": "12px",
-        "marginTop": "8px",
-    })
+    chart_card = html.Div(className="pvc-yoy-chart-card", children=[
+        html.H3("Normalized power trend", className="pvc-yoy-chart-title"),
+        dcc.Graph(
+            figure=fig,
+            className="pvc-yoy-graph",
+            style={"width": "100%", "height": "390px", "maxHeight": "390px"},
+            config={
+                "displayModeBar": True,
+                "displaylogo": False,
+                "responsive": True,
+                "modeBarButtonsToRemove": ["select2d", "lasso2d"],
+            },
+        ) if fig is not None else html.Div("Trend chart unavailable.", className="pvc-yoy-chart-empty"),
+    ])
+
+    return html.Div(
+        [summary_card, chart_card],
+        className="pvc-simple-yoy-result slide-in-up",
+    )
 
 
 # -----------------------------------------------------------------------------
