@@ -1,4 +1,8 @@
 import os
+import threading
+import time
+import uuid
+from collections import defaultdict, deque
 from dash import Dash, html, dcc
 import dash_bootstrap_components as dbc
 from flask import request, abort
@@ -9,6 +13,10 @@ from flask import request, abort
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
+    # Compress JSON/HTML callback responses.  Several PVTOOLS pages contain
+    # Plotly figures and large option sets; gzip keeps an accidental reload
+    # loop from multiplying bandwidth and serialization pressure.
+    compress=True,
     # PV Copilot polls background jobs frequently.  Keep the browser tab title
     # stable instead of flashing Dash's default "Updating..." on every poll.
     update_title=None,
@@ -48,6 +56,24 @@ BAD_AGENTS = [
     "scanner"
 ]
 
+# A normal visit initializes a page once. A browser/proxy reload loop can
+# repeatedly request the same large dynamic layout and monopolize every
+# Gunicorn thread. Keep a short, per-browser circuit breaker for the string
+# length calculator router callback. This is intentionally not a general
+# request-rate limit: normal Dash interactions and calculations are untouched.
+RELOAD_WINDOW_SECONDS = 30
+RELOAD_LIMIT = 8
+_reload_events = defaultdict(deque)
+_reload_events_lock = threading.Lock()
+
+
+def _dash_input_value(payload, component_id, component_property):
+    for item in payload.get("inputs", []):
+        if (item.get("id") == component_id
+                and item.get("property") == component_property):
+            return item.get("value")
+    return None
+
 @server.before_request
 def block_bots():
     path = request.path.lower()
@@ -58,6 +84,66 @@ def block_bots():
 
     if any(b in ua for b in BAD_AGENTS):
         abort(403)
+
+    if request.method != "POST" or path != "/_dash-update-component":
+        return None
+
+    payload = request.get_json(silent=True) or {}
+
+    # Browsers that had the pre-optimization page open still hold the old
+    # callback dependency graph and may request this removed output after a
+    # deploy. Treat it as a no-op until those tabs refresh instead of filling
+    # the logs with Callback function not found (500) errors.
+    if payload.get("output") == "weather_data_download.children":
+        return "", 204
+
+    if payload.get("output") != "page-content.children":
+        return None
+
+    pathname = _dash_input_value(payload, "url", "pathname")
+    if pathname != "/string-length-calculator":
+        return None
+
+    # The cookie is set on the initial HTML response. Keep an IP + UA fallback
+    # for clients that reject cookies.
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    original_ip = forwarded_for.split(",", 1)[0].strip() or request.remote_addr
+    client_key = request.cookies.get("pvtools_client_id") or (
+        f"fallback:{original_ip}:{ua}"
+    )
+    now = time.monotonic()
+
+    with _reload_events_lock:
+        events = _reload_events[client_key]
+        while events and now - events[0] > RELOAD_WINDOW_SECONDS:
+            events.popleft()
+        if len(events) >= RELOAD_LIMIT:
+            print(
+                "WARNING: blocked repeated String Length Calculator reloads "
+                f"client={client_key[:24]} count={len(events)}"
+            )
+            return (
+                "Too many repeated page reloads. Please retry in 30 seconds.",
+                429,
+                {"Retry-After": str(RELOAD_WINDOW_SECONDS)},
+            )
+        events.append(now)
+
+    return None
+
+
+@server.after_request
+def identify_browser(response):
+    if not request.cookies.get("pvtools_client_id"):
+        response.set_cookie(
+            "pvtools_client_id",
+            uuid.uuid4().hex,
+            max_age=365 * 24 * 60 * 60,
+            secure=True,
+            httponly=True,
+            samesite="Lax",
+        )
+    return response
 
 
 # ----------------------------

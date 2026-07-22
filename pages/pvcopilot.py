@@ -163,12 +163,11 @@ _PVPRO_JOBS_LOCK = threading.Lock()
 # either clobbers the good UI or gets dropped depending on the property's
 # allow_duplicate semantics.  Symptom: progress bar stuck at 99%.
 #
-# Solution: a single Lock per job_id.  The first thread into the done-branch
-# acquires the lock, builds the final layout, marks phase="rendered", and
-# returns.  All subsequent threads that try to acquire the lock either:
-#   - Block briefly, find phase="rendered", and return no_update (cheap).
-#   - Or skip with non-blocking acquire when we're sure the UI is already
-#     written (even cheaper).
+# Solution: a single Lock per job_id.  One poll builds the final layout at a
+# time; concurrent polls return all-no_update.  The backend job deliberately
+# remains terminal ("done"/"error") until its TTL expires.  The browser-side
+# job store and Interval are cleared only by a successfully applied terminal
+# response, so a lost response can be retried idempotently on the next tick.
 # -----------------------------------------------------------------------------
 _PVPRO_RENDER_LOCKS = {}            # job_id -> threading.Lock
 _PVPRO_RENDER_LOCKS_LOCK = threading.Lock()
@@ -2976,8 +2975,7 @@ common_header = html.Div(
                 [
                     html.B("Note: "),
                     "This tool is currently under active development. ",
-                    html.B("We don't store your data"),
-                    ", and online usage doesn't require "
+                    "Online usage doesn't require "
                     "a user API key. If you encounter issues, please ",
                     html.A(
                         "contact us",
@@ -4249,7 +4247,8 @@ _page_body = html.Div([
     # NEW: holds the computed degradation rate & method so the chat can reference it
     dcc.Store(id="degradation-result-store", data={}),
 
-    # NEW: track which steps are complete
+    # Advanced-mode completion state. Simple mode must never write this store;
+    # otherwise a one-click Simple run lights up the Advanced workflow rail.
     dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
     # Advanced navigation is intentionally separate from completion: finishing
     # a step unlocks the next tab without moving the user away from the result.
@@ -4267,6 +4266,10 @@ _page_body = html.Div([
     # progress.  `simple-stash` holds the finished result + status until the
     # final reveal shows it.
     dcc.Store(id="simple-stash", data={}),
+    dcc.Store(id="simple-step-progress", data={
+        "started": False, "data": False, "filter": False,
+        "calc": False, "code": False,
+    }),
     # Chained Simple-mode pipeline stages.  Each stage writes the next store,
     # which triggers the next stage — so the sidebar advances exactly as each
     # real stage finishes.  These carry the intermediate dataframes (JSON).
@@ -5566,22 +5569,22 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
 
     # --- Failed ---
     if phase == "error":
-        # Mark rendered instead of hard-dropping so a late poll doesn't
-        # clobber the error UI we're about to render.
-        _pvpro_update_job(job_id, phase="rendered")
+        # Keep the terminal error in the backend until the browser confirms
+        # receipt by clearing its job store in this same response.  If this
+        # response is lost, the next poll can deliver the error again instead
+        # of seeing "rendered" and returning no_update forever.
         return [
             _no_data_alert(f"PVPRO failed: {job.get('error', 'unknown error')}"),
             False, "Calculate Degradation", {}, {}, True,
         ]
 
-    # --- Done OR already-rendered: render the final layout under a per-job
-    # lock to prevent concurrent polls from racing into the same render
-    # path.  The first thread in builds the UI and marks phase="rendered";
-    # all subsequent threads either find phase="rendered" inside the lock
-    # (and return no_update — the UI is already on screen) or skip with a
-    # non-blocking try-acquire that fails (also returns no_update).
-    # Either way only ONE thread does the expensive final_layout build,
-    # which eliminates the "stuck at 99%" timing race.
+    # --- Done OR legacy-rendered: render the final layout under a per-job
+    # lock.  Crucially, do NOT mark the backend job as rendered before the
+    # browser has received the response.  HTTP gives us no acknowledgement
+    # that Dash applied the payload; on a slow/mobile connection that one
+    # final response may be lost or overtaken.  Leaving the job in "done"
+    # makes delivery idempotent: while the browser still has job_id and its
+    # Interval enabled, a later poll can return the same final UI again.
     render_lock = _pvpro_get_render_lock(job_id)
     acquired = render_lock.acquire(blocking=False)
     if not acquired:
@@ -5604,15 +5607,13 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
                 no_update, no_update, no_update]
 
     try:
-        # Re-read inside the lock.  If a different thread already marked
-        # this job "rendered", the UI is already on screen -- this is a
-        # late poll, return all-no_update (same reasoning as above).
+        # Re-read inside the lock. A missing job cannot be rendered, but both
+        # "done" and the legacy "rendered" state remain deliverable.
         job = _pvpro_read_job(job_id)
-        if job is None or job.get("phase") == "rendered":
+        if job is None:
             _pvpro_debug("done_branch_skip",
                          job_id=job_id[:8],
-                         reason=("job-gone" if job is None
-                                 else "already-rendered"))
+                         reason="job-gone")
             return [no_update, no_update, no_update,
                     no_update, no_update, no_update]
 
@@ -5705,11 +5706,9 @@ def _pvpro_poll_callback(_n, job_store, df_filtered_json, mapped_variables_dict)
             "trend_summary": trend_summary,
             "raw_summary": raw_summary,
         }
-        # Mark 'rendered' AS LATE AS POSSIBLE -- only once the full final_layout
-        # has been built.  If we marked earlier, a concurrent poll could see
-        # phase="rendered" mid-construction and take an early code path that
-        # competes with this branch (the race that caused the 96%-stuck bug).
-        _pvpro_update_job(job_id, phase="rendered")
+        # The same response paints the result, clears the browser-side job_id,
+        # and disables polling.  Keep the backend job terminal/result intact
+        # for its TTL so a lost response can be retried by the next poll.
         return [final_layout,
                 False, "Calculate Degradation",
                 result_dict, {}, True]
@@ -6165,7 +6164,7 @@ def simple_toggle_pvpro_params(method):
     Output("simple-status", "children", allow_duplicate=True),
     Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
     Output("simple-stash", "data", allow_duplicate=True),
-    Output("step-progress", "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Input("simple-method-radio", "value"),
     prevent_initial_call=True,
 )
@@ -6195,7 +6194,7 @@ def toggle_simple_start_and_result(stash):
     Output("simple-result", "children", allow_duplicate=True),
     Output("simple-status", "children", allow_duplicate=True),
     Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
-    Output("step-progress", "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Input("simple-result-return", "n_clicks"),
     Input("simple-result-advanced", "n_clicks"),
     prevent_initial_call=True,
@@ -6226,7 +6225,7 @@ def simple_result_actions(return_clicks, advanced_clicks):
     Output("simple-status",                "children", allow_duplicate=True),
     Output("simple-pvpro-job",             "data",     allow_duplicate=True),
     Output("simple-pvpro-poll-interval",   "disabled", allow_duplicate=True),
-    Output("step-progress",                "data",     allow_duplicate=True),
+    Output("simple-step-progress",         "data",     allow_duplicate=True),
     Output("simple-stash",                 "data",     allow_duplicate=True),
     Input("simple-pvpro-poll-interval", "n_intervals"),
     State("simple-pvpro-job", "data"),
@@ -6269,7 +6268,6 @@ def simple_pvpro_poll(_n, job_store, pfiltered, selected_method):
 
     # Failed.
     if phase == "error":
-        _pvpro_update_job(job_id, phase="rendered")
         none = {"started": True, "data": True, "filter": True,
                 "calc": False, "code": False}
         return ["", _no_data_alert(
@@ -6282,7 +6280,7 @@ def simple_pvpro_poll(_n, job_store, pfiltered, selected_method):
         return [no_update] * 7
     try:
         job = _pvpro_read_job(job_id)
-        if job is None or job.get("phase") == "rendered":
+        if job is None:
             return [no_update] * 7
 
         result = job.get("result") or {}
@@ -6353,7 +6351,10 @@ def simple_pvpro_poll(_n, job_store, pfiltered, selected_method):
         done_status = ""   # no success banner on completion (per request)
         progress = {"started": True, "data": True, "filter": True,
                     "calc": True, "code": False}
-        _pvpro_update_job(job_id, phase="rendered")
+        # Do not acknowledge delivery in backend state.  Clearing job_id and
+        # disabling the Interval in this response is the browser-side ack. If
+        # the response is lost, the unchanged terminal job is safely rendered
+        # again by the next poll instead of leaving Simple mode at 98%.
         return ["", layout_div, done_status, {}, True, progress, stash]
     finally:
         render_lock.release()
@@ -9200,7 +9201,7 @@ def toggle_simple_analyze(data_source, df_store, upload_contents, mapped_vars, m
     Output("simple-status",       "children", allow_duplicate=True),
     Output("simple-result",       "children", allow_duplicate=True),
     Output("simple-run-trigger",  "data"),
-    Output("step-progress",       "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Input("simple-analyze-btn",   "n_clicks"),
     State("simple-run-trigger",   "data"),
     State("simple-method-radio",  "value"),
@@ -9238,7 +9239,8 @@ def _simple_fail(alert):
     """Common failure return for the data stage (6 outputs)."""
     _none = {"started": True, "data": False, "filter": False,
              "calc": False, "code": False}
-    # simple-pipe-data, simple-status, simple-result, simple-stash, step-progress
+    # simple-pipe-data, simple-status, simple-result, simple-stash,
+    # simple-step-progress
     return {}, alert, "", {}, _none
 
 
@@ -9248,7 +9250,7 @@ def _simple_fail(alert):
     Output("simple-status",    "children", allow_duplicate=True),
     Output("simple-result",    "children", allow_duplicate=True),
     Output("simple-stash",     "data", allow_duplicate=True),
-    Output("step-progress",    "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Input("simple-run-trigger",   "data"),
     State("upload-data",          "contents"),
     State("upload-data",          "filename"),
@@ -9319,7 +9321,7 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
 @app.callback(
     Output("simple-pipe-filtered", "data"),
     Output("simple-status",        "children", allow_duplicate=True),
-    Output("step-progress",        "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Input("simple-pipe-data", "data"),
     prevent_initial_call=True,
 )
@@ -9404,7 +9406,7 @@ def simple_stage_filter(pdata):
     Output("simple-stash",   "data", allow_duplicate=True),
     Output("simple-status",  "children", allow_duplicate=True),
     Output("simple-result",  "children", allow_duplicate=True),
-    Output("step-progress",  "data", allow_duplicate=True),
+    Output("simple-step-progress", "data", allow_duplicate=True),
     Output("simple-pvpro-job",           "data",     allow_duplicate=True),
     Output("simple-pvpro-poll-interval", "disabled", allow_duplicate=True),
     Output("simple-pvpro-progress-output", "children", allow_duplicate=True),
