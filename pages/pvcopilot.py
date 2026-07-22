@@ -1232,17 +1232,7 @@ def _example_chip_style():
 
 
 def _chat_bubble(role, text, fresh=False):
-    """Render one chat message bubble.
-
-    For assistants: ALWAYS uses the typing-bubble DOM structure (3 spans).
-    Keeping the structure identical across renders prevents React from tearing
-    down old typing-bubbles when a new message is appended (which would cause
-    a `removeChild` reconciliation error).
-
-    - fresh=True  → empty visible span, visible caret. JS animates the typing.
-    - fresh=False → pre-filled visible span, hidden caret, className includes
-                    `chat-bubble-done` so the JS leaves it alone.
-    """
+    """Render one chat message bubble; assistant Markdown appears at once."""
     is_user = role == "user"
 
     bubble_style = {
@@ -1259,26 +1249,15 @@ def _chat_bubble(role, text, fresh=False):
         "fontWeight": "600" if is_user else "400",
         "lineHeight": "1.6",
         "fontFamily": "Archivo, system-ui, sans-serif",
-        "whiteSpace": "pre-wrap",
+        "whiteSpace": "pre-wrap" if is_user else "normal",
     }
 
     if is_user:
         inner = html.Div(text, style=bubble_style)
     else:
-        # Always render the typing-bubble structure for assistant messages
-        # For non-fresh (already-typed-out) bubbles, pre-fill the visible span
-        # with the text minus markdown bold markers. The clientside JS will
-        # then convert it to proper HTML <strong> tags on its next pass.
-        visible_initial = "" if fresh else text.replace("**", "")
-        caret_style = {} if fresh else {"opacity": "0"}
-        wrapper_class = "chat-bubble-typing" if fresh else "chat-bubble-typing chat-bubble-done"
-        inner = html.Div(
-            [
-                html.Span(visible_initial, className="chat-typed"),
-                html.Span(text, className="chat-typed-source", style={"display": "none"}),
-                html.Span("▍", className="chat-typing-caret", style=caret_style),
-            ],
-            className=wrapper_class,
+        inner = dcc.Markdown(
+            text,
+            className="pvc-chat-answer-markdown",
             style=bubble_style,
         )
 
@@ -2057,6 +2036,11 @@ _PVPRO_DOT_ON = {"display": "inline-block", "width": "7px", "height": "7px",
 _PVPRO_DOT_OFF = {"display": "none"}
 
 
+def _beta_badge():
+    """Small shared marker for features that are still in beta."""
+    return html.Span("BETA", className="pvc-beta-badge", title="Beta feature")
+
+
 def _pvnum(x, default, cast=float):
     """Coerce a stepper field's value to a number. The stepper inputs are
     type='text' (so no browser draws a native spinner beside our own - / +
@@ -2372,6 +2356,7 @@ metric_options = [
                 html.Div([
                     html.B("PVPRO", style={"fontFamily": "Archivo, system-ui, sans-serif",
                                            "fontSize": "16px"}),
+                    _beta_badge(),
                     # No data-requirement here -- it moves down to the note
                     # below, where it can be underlined for emphasis.
                     html.Span(
@@ -2597,7 +2582,10 @@ def _ai_diagnostic_panel(prefix):
         [
             html.Div(
                 [
-                    html.Div("AI diagnosis", className="pvc-ai-diagnostic-title"),
+                    html.Div(
+                        [html.Span("AI diagnosis"), _beta_badge()],
+                        className="pvc-ai-diagnostic-title",
+                    ),
                     html.Button(
                         "Restart",
                         id=f"{prefix}-ai-diagnostic-restart",
@@ -3299,6 +3287,10 @@ chat_qa_block = html.Div(
                                 "background": "#e2e8f0",  # slate-200 composer area
                             }
                         ),
+                        html.Div(
+                            "PVCopilot is AI and can make mistakes.",
+                            className="pvc-chat-disclaimer",
+                        ),
                     ],
                     style={
                         "background": "#f8fafc",          # slate-50, light gray
@@ -3402,7 +3394,15 @@ floating_chat_widget = html.Div(
                         html.Span("✦", className="pvc-chat-head-icon"),
                         html.Div(
                             [
-                                html.Div("PVCopilot", className="pvc-chat-title"),
+                                html.Div(
+                                    [html.Span("PVCopilot"), _beta_badge()],
+                                    className="pvc-chat-title",
+                                    style={
+                                        "display": "flex",
+                                        "alignItems": "center",
+                                        "gap": "7px",
+                                    },
+                                ),
                                 html.Div(
                                     [html.Span(className="pvc-chat-ready-dot"), "Ready to help"],
                                     className="pvc-chat-ready",
@@ -3699,12 +3699,20 @@ def _simple_method_radio():
     """Method chooser for Simple mode: YoY vs PVPRO.  Both are always
     selectable; if PVPRO is chosen but the data has no DC voltage/current,
     Stage 1 surfaces an error and points the user back to YoY."""
-    def method_card(icon, title, description, show_logo=False):
+    def method_card(icon, title, description, show_logo=False, beta=False):
+        title_children = [
+            html.Span(title, className="pvc-simple-method-title"),
+        ]
+        if beta:
+            title_children.append(_beta_badge())
         children = [
             html.Span(icon, className="pvc-simple-method-icon"),
             html.Span(
                 [
-                    html.Span(title, className="pvc-simple-method-title"),
+                    html.Span(
+                        title_children,
+                        className="pvc-simple-method-title-row",
+                    ),
                     html.Span(description, className="pvc-simple-method-description"),
                 ],
                 className="pvc-simple-method-copy",
@@ -3731,7 +3739,8 @@ def _simple_method_radio():
             },
             {
                 "label": method_card(
-                    "✦", "PVPRO", "Physics single-diode model", show_logo=True,
+                    "✦", "PVPRO", "Physics single-diode model",
+                    show_logo=True, beta=True,
                 ),
                 "value": "PVPRO",
             },
@@ -4774,7 +4783,7 @@ def run_filter(filter_clicks, upload_clicks,
 
     # Brief pause so Step 2 (Filter) reads as actively working.
     if trigger == "filter-btn":
-        time.sleep(2)
+        time.sleep(1)
 
     gamma          = gamma if gamma is not None else -0.004
     irr_thresh     = irr_thresh if irr_thresh is not None else 300
@@ -5239,10 +5248,9 @@ def analyze_uploaded_data_callback(
     if irra_key is None or irra_key not in df_filtered.columns:
         return ["❌ Irradiance column not found.", "", False, "Calculate Degradation", {}, {}, True]
 
-    # Brief pause so Step 3 (Degradation) reads as actively working.  PVPRO is
-    # long-running with its own progress, so only delay the fast methods.
+    # Brief pause so Step 3 reads as actively working. PVPRO has live progress.
     if trigger == "run-btn" and selected_metric != "PVPRO":
-        time.sleep(2)
+        time.sleep(1)
 
     # ---------- PVPRO: long-running, so launch in a thread and let a polling
     # ---------- callback render the result when it's ready.
@@ -5902,7 +5910,7 @@ def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
             html.Span("/year", className="pvc-advanced-pvpro-rate-unit"),
         ]),
         html.Div(className="pvc-advanced-result-details", children=[
-            html.Div([html.Span("Method: "), html.Strong("PVPRO")]),
+            html.Div([html.Span("Method: "), html.Strong("PVPRO"), _beta_badge()]),
             html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
             html.Div([html.Span("Window: "), html.Strong(f"{start_str} → {end_str}")]),
         ]),
@@ -6022,7 +6030,7 @@ def _render_simple_pvpro_layout(rd, figs, rates, start_str, end_str,
             html.Span("/year", className="pvc-simple-pvpro-rate-unit"),
         ]),
         html.Div(className="pvc-simple-pvpro-details", children=[
-            html.Div([html.Span("Method: "), html.Strong("PVPRO")]),
+            html.Div([html.Span("Method: "), html.Strong("PVPRO"), _beta_badge()]),
             html.Div([html.Span("Duration: "), html.Strong(f"{duration_years:.1f} years")]),
             html.Div([
                 html.Span("Window: "),
@@ -7748,7 +7756,7 @@ def _pvpro_step(_clicks, *vals):
 )
 def generate_code(n, filename, mapped_variables_dict, selected_filters, selected_metric):
     clean_code = get_full_code(filename, mapped_variables_dict, selected_filters, selected_metric)
-    time.sleep(2)
+    time.sleep(1)
 
     preview_lines = "\n".join(clean_code.splitlines()[:24]) + "\n…"
 
@@ -8038,6 +8046,16 @@ _OFF_TOPIC_REPLY = (
     "or general PV degradation concepts."
 )
 
+_CHAT_RESPONSE_FORMAT = """
+RESPONSE FORMAT:
+- Use Markdown and begin with one short, descriptive level-3 heading (`### Title`).
+- Never use level-1 or level-2 headings (`#` or `##`).
+- Organize the answer into 2–4 short paragraphs when explanation is needed.
+- Use a compact bullet list for rates, comparisons, evidence, or next steps.
+- Bold only the most important values or conclusions.
+- Keep the answer concise and grounded in CURRENT SESSION STATE.
+"""
+
 
 def _is_on_topic(question: str) -> bool:
     """Quick gate: classifier call returns True if the question is in-scope."""
@@ -8104,6 +8122,8 @@ def post_user_question(send_clicks, n_submit, composer_text, history, trigger):
     Input("degradation-result-store", "data"),
     Input("metric-selected-visible",  "value"),
     Input("download-link",            "style"),  # visible when code generated
+    Input("simple-stash",             "data"),
+    Input("ui-mode",                  "data"),
     State("stored-data-file-name",    "data"),
     State("cb-timezone",              "value"),
     State("cb-low-irra-power",        "value"),
@@ -8112,10 +8132,12 @@ def post_user_question(send_clicks, n_submit, composer_text, history, trigger):
     prevent_initial_call=False,
 )
 def build_chat_context(mapped_vars, df_data, df_filtered, deg_result,
-                       selected_metric, dl_style, filename,
+                       selected_metric, dl_style, simple_result, ui_mode, filename,
                        cb_tz, cb_irra, cb_out, cb_cs):
     """Returns a structured dict the LLM uses to ground its answers."""
+    active_mode = "simple" if ui_mode == "simple" else "advanced"
     ctx = {
+        "analysis_mode": active_mode,
         "data_loaded": False,
         "filter_applied": False,
         "degradation_computed": False,
@@ -8147,6 +8169,37 @@ def build_chat_context(mapped_vars, df_data, df_filtered, deg_result,
             }
         except Exception as e:
             ctx["data"] = {"error": f"Could not summarize raw data: {e}"}
+
+    # Simple and Advanced are independent analyses. In Simple mode, ground the
+    # assistant only in simple-stash; never leak an Advanced result into chat.
+    if active_mode == "simple":
+        simple_result = simple_result or {}
+        if simple_result.get("method"):
+            n_raw = simple_result.get("n_raw")
+            n_kept = simple_result.get("n_kept")
+            ctx["filter_applied"] = True
+            ctx["filter"] = {
+                "filters_applied": ["Simple-mode best-practice defaults"],
+                "n_rows_after_filter": int(n_kept) if n_kept else None,
+                "n_rows_before_filter": int(n_raw) if n_raw else None,
+                "fraction_kept_pct": simple_result.get("pct_kept"),
+            }
+            try:
+                rate_percent = float(simple_result.get("rate_pct")) * 100.0
+            except (TypeError, ValueError):
+                rate_percent = None
+            ctx["degradation_computed"] = rate_percent is not None
+            ctx["degradation"] = {
+                "rate_percent_per_year": rate_percent,
+                "method": simple_result.get("method"),
+                "duration_years": simple_result.get("duration_years"),
+                "window_start": simple_result.get("start"),
+                "window_end": simple_result.get("end"),
+                "rates_per_quantity": simple_result.get("rates_per_quantity"),
+                "trend_summary": simple_result.get("trend_summary"),
+                "raw_summary": simple_result.get("raw_summary"),
+            }
+        return ctx
 
     # ----- Step 2: Filtering -----
     if df_filtered:
@@ -8182,6 +8235,8 @@ def build_chat_context(mapped_vars, df_data, df_filtered, deg_result,
             # Voc / Isc) if they exist, so the LLM can answer questions like
             # "did my current degrade more than my voltage?".
             "rates_per_quantity": deg_result.get("rates_per_quantity"),
+            "trend_summary": deg_result.get("trend_summary"),
+            "raw_summary": deg_result.get("raw_summary"),
         }
 
     # ----- Step 4: Code generation -----
@@ -8205,7 +8260,13 @@ def _format_context_for_prompt(ctx: dict) -> str:
             "to upload a file and run the relevant step first."
         )
 
-    lines = ["CURRENT SESSION STATE — what the user has done so far:"]
+    mode = "simple" if ctx.get("analysis_mode") == "simple" else "advanced"
+    lines = [
+        f"CURRENT SESSION STATE — active analysis mode: {mode.upper()}.",
+        "Simple and Advanced are independent analyses. Use ONLY the result for "
+        "the active mode shown below. Never reuse a result mentioned earlier in "
+        "the conversation if it came from the other mode.",
+    ]
 
     # Step 1
     if ctx.get("data_loaded") and ctx.get("data"):
@@ -8238,9 +8299,12 @@ def _format_context_for_prompt(ctx: dict) -> str:
             lines.append(f"  • Rows kept: {f.get('n_rows_after_filter')}")
     else:
         lines.append("")
-        lines.append("✗ STEP 2 (Filter) — NOT YET RUN")
-        lines.append("  If the user asks about filter results (how much data was removed, "
-                     "what filters did, etc.), tell them to click 'Apply Filters' first.")
+        lines.append("✗ FILTERING — NOT YET RUN")
+        if mode == "simple":
+            lines.append("  Tell the user to click 'Run analysis' in Simple mode first.")
+        else:
+            lines.append("  If the user asks about filter results (how much data was removed, "
+                         "what filters did, etc.), tell them to click 'Apply Filters' first.")
 
     # Step 3
     if ctx.get("degradation_computed") and ctx.get("degradation"):
@@ -8268,21 +8332,30 @@ def _format_context_for_prompt(ctx: dict) -> str:
                     lines.append(f"      - {key}: {float(val):.2f}%/year")
                 except Exception:
                     pass
+        if g.get("trend_summary"):
+            lines.append(f"  • Calculated trend evidence: {g.get('trend_summary')}")
+        if g.get("raw_summary"):
+            lines.append(f"  • Data-quality evidence: {g.get('raw_summary')}")
     else:
         lines.append("")
-        lines.append("✗ STEP 3 (Degradation) — NOT YET RUN")
-        lines.append("  If the user asks 'what is my degradation rate' or about method results, "
-                     "tell them to click 'Calculate Degradation' first.")
+        lines.append("✗ DEGRADATION — NOT YET RUN")
+        if mode == "simple":
+            lines.append("  If the user asks for their rate or result, tell them to click "
+                         "'Run analysis' in Simple mode first.")
+        else:
+            lines.append("  If the user asks 'what is my degradation rate' or about method results, "
+                         "tell them to click 'Calculate Degradation' first.")
 
     # Step 4
-    if ctx.get("code_generated"):
-        lines.append("")
-        lines.append("✓ STEP 4 (Code) — COMPLETED — downloadable Python script is ready.")
-    else:
-        lines.append("")
-        lines.append("✗ STEP 4 (Code) — NOT YET RUN")
-        lines.append("  If the user asks about the generated code, tell them to click "
-                     "'Generate Full Python Code' first.")
+    if mode == "advanced":
+        if ctx.get("code_generated"):
+            lines.append("")
+            lines.append("✓ STEP 4 (Code) — COMPLETED — downloadable Python script is ready.")
+        else:
+            lines.append("")
+            lines.append("✗ STEP 4 (Code) — NOT YET RUN")
+            lines.append("  If the user asks about the generated code, tell them to click "
+                         "'Generate Full Python Code' first.")
 
     lines.append("")
     lines.append("RULE: If a user asks about a specific value or result that comes from a step "
@@ -8329,6 +8402,8 @@ def fetch_assistant_reply(trigger, history, data_ctx):
                 CHAT_SYSTEM_PROMPT
                 + "\n\n---\n\n"
                 + _format_context_for_prompt(data_ctx)
+                + "\n\n---\n\n"
+                + _CHAT_RESPONSE_FORMAT
             )
             messages = [{"role": "system", "content": full_system_prompt}]
             for m in (history or []):
@@ -8396,13 +8471,10 @@ def render_chat(history, pending):
             }
         )
 
-    # Render bubbles. Mark only the LAST assistant message as "fresh" so the
-    # clientside JS types it out. Older messages render fully.
+    # Render completed replies at once; no typewriter/line-by-line animation.
     bubbles = []
-    last_idx = len(history) - 1
-    for i, m in enumerate(history):
-        is_last_assistant = (i == last_idx and m["role"] == "assistant")
-        bubbles.append(_chat_bubble(m["role"], m["content"], fresh=is_last_assistant))
+    for m in history:
+        bubbles.append(_chat_bubble(m["role"], m["content"]))
 
     thinking = pending.get("thinking", False)
 
@@ -8411,7 +8483,15 @@ def render_chat(history, pending):
         bubbles.append(
             html.Div(
                 html.Div(
-                    html.Span("● ● ●", className="chat-thinking-dots"),
+                    html.Div(
+                        [
+                            html.Span(className="chat-thinking-dot"),
+                            html.Span(className="chat-thinking-dot"),
+                            html.Span(className="chat-thinking-dot"),
+                        ],
+                        className="chat-thinking-dots",
+                        **{"aria-label": "PVCopilot is thinking"},
+                    ),
                     style={
                         "padding": "12px 16px",
                         "background": "white",
@@ -8455,6 +8535,51 @@ app.clientside_callback(
                 .replace(/\\*\\*([^*]+?)\\*\\*/g, '<strong>$1</strong>');
         }
 
+        // Render completed answers as compact, safe Markdown-like HTML.
+        // Every Markdown heading level uses the same modest visual treatment.
+        function renderRichMarkdown(text) {
+            const lines = (text || '').replace(/\\r\\n/g, '\\n').split('\\n');
+            const blocks = [];
+            let paragraph = [];
+            let bullets = [];
+
+            function flushParagraph() {
+                if (!paragraph.length) return;
+                blocks.push('<p>' + renderBold(paragraph.join(' ')) + '</p>');
+                paragraph = [];
+            }
+            function flushBullets() {
+                if (!bullets.length) return;
+                blocks.push('<ul>' + bullets.map(function(item) {
+                    return '<li>' + renderBold(item) + '</li>';
+                }).join('') + '</ul>');
+                bullets = [];
+            }
+
+            lines.forEach(function(rawLine) {
+                const line = rawLine.trim();
+                const heading = line.match(/^#{1,6}\\s+(.+)$/);
+                const bullet = line.match(/^[-*]\\s+(.+)$/);
+                if (!line) {
+                    flushParagraph();
+                    flushBullets();
+                } else if (heading) {
+                    flushParagraph();
+                    flushBullets();
+                    blocks.push('<h4 class="chat-md-heading">' + renderBold(heading[1]) + '</h4>');
+                } else if (bullet) {
+                    flushParagraph();
+                    bullets.push(bullet[1]);
+                } else {
+                    flushBullets();
+                    paragraph.push(line);
+                }
+            });
+            flushParagraph();
+            flushBullets();
+            return blocks.join('');
+        }
+
         // Convert PARTIAL text (mid-typing) into safe HTML. If there's a half-
         // opened `**` without a matching close yet, show its content as plain
         // text until the closing `**` arrives. This avoids broken markup and
@@ -8484,9 +8609,10 @@ app.clientside_callback(
         done.forEach(function(bubble) {
             const visible = bubble.querySelector('.chat-typed');
             const source  = bubble.querySelector('.chat-typed-source');
-            if (visible && source && !visible.querySelector('strong')) {
+            if (visible && source && bubble.getAttribute('data-rich-rendered') !== '1') {
                 const raw = source.textContent || '';
-                visible.innerHTML = renderBold(raw);
+                visible.innerHTML = renderRichMarkdown(raw);
+                bubble.setAttribute('data-rich-rendered', '1');
             }
         });
 
@@ -8531,8 +8657,9 @@ app.clientside_callback(
                     clearInterval(interval);
                     bubble.classList.add('chat-bubble-done');
                     if (caret) caret.style.opacity = '0';
-                    // Final render — ensure full bolded HTML is in place
-                    visible.innerHTML = renderBold(rawText);
+                    // Final render — compact heading, paragraphs, bullets + bold.
+                    visible.innerHTML = renderRichMarkdown(rawText);
+                    bubble.setAttribute('data-rich-rendered', '1');
                 }
             }, STEP_MS);
         });
@@ -9329,8 +9456,8 @@ def simple_stage_filter(pdata):
     if not pdata or "df" not in pdata:
         return dash.no_update, dash.no_update, dash.no_update
 
-    # Brief pause so the "Applying default filters…" step is visible.
-    time.sleep(2)
+    # Brief pause so the filtering progress state remains visible.
+    time.sleep(1)
 
     def _fail(alert):
         none = {"started": True, "data": True, "filter": False,
@@ -9519,8 +9646,8 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     # -------------------------------------------------------------------
     # YoY branch (default): fast synchronous estimate.
     # -------------------------------------------------------------------
-    # Brief pause so the "Estimating degradation…" step is visible.
-    time.sleep(2)
+    # Brief pause so the degradation progress state remains visible.
+    time.sleep(1)
 
     def _fail(alert):
         none = {"started": True, "data": True, "filter": True,
