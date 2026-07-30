@@ -2129,3 +2129,34 @@ html, body { background: #ffffff !important; }
   .pvcopilot-root .pvc-simple-pvpro-params { grid-template-columns:minmax(0,1fr); }
   .pvcopilot-root .pvc-simple-result-actions { width:100%; }
 }
+
+/* DOWNSIZE panel: the custom-factor input. dcc.Input's style prop doesn't
+   reach the inner <input> in this Dash version, and the component CSS gives
+   it height:100% of a collapsed wrapper — which vertically clips the typed
+   number. Size it explicitly here instead. */
+.pvcopilot-root #downsize-custom-factor {
+  /* The visible box (border/background) is drawn inline on the Dash wrapper
+     element; the inner input just fills it and carries the text. */
+  height: 100% !important;
+  width: 100% !important;
+  padding: 8px 12px !important;
+  font-size: 14px !important;
+  line-height: normal !important;
+  box-sizing: border-box !important;
+  border: none !important;
+  background: transparent !important;
+  font-family: Archivo, system-ui, sans-serif;
+  color: #0f172a;
+  border-radius: 10px;
+}
+.pvcopilot-root #downsize-custom-factor::placeholder {
+  color: #94a3b8;
+}
+
+/* The Dash input wrapper around the custom-factor box is 34px tall with
+   overflow:hidden, which clips the bottom of the 42px input inside it. */
+.pvcopilot-root #downsize-panel .dash-input-container {
+  height: 42px !important;
+  overflow: visible !important;
+  display: inline-block;
+}

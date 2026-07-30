@@ -17,7 +17,11 @@ import traceback
 from page_supporting_files.analysis_utils_2606 import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
 from page_supporting_files.analysis_utils_2606 import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
 from page_supporting_files.analysis_utils_2606 import estimate_pvpro_params
-from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
+from page_supporting_files.analysis_utils_2606 import rate_is_plausible, degradation_reliability  # NEW-WARNINGS
+from page_supporting_files.analysis_utils_2606 import low_power_filter  # ROBUSTNESS: no-irradiance fallback
+from page_supporting_files.analysis_utils_2606 import compute_yoy_energy  # RATE-QUALITY: energy-ratio YoY
+from page_supporting_files.analysis_utils_2606 import downsize_block_mean  # DOWNSIZE: >10k-row panel
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter, stale_data_filter  # NEW-FILTERS
 import base64
 import os
 import time
@@ -937,6 +941,108 @@ def soft_blue_callout(children, icon=None, margin_bottom="14px", margin_top="0")
     )
 
 
+# =============================================================================
+# NEW-WARNINGS (ported from bugFixes, restyled to this UI's language): soft
+# tinted callouts in the same family as soft_blue_callout — amber adds reading
+# context to a result, red asks the user to review the input data. Wording is
+# deliberately neutral (no "unreliable") — it guides, it doesn't disparage.
+# =============================================================================
+_WARN_TONES = {
+    "amber": {"bg": "#fffbeb", "border": "1px solid #fde68a", "title": "#92400e",
+              "body": "#78350f", "dot": "linear-gradient(135deg,#fbbf24,#f59e0b)",
+              "glow": "0 0 0 4px rgba(245,158,11,0.14)"},
+    "red": {"bg": "#fef2f2", "border": "1px solid #fecaca", "title": "#991b1b",
+            "body": "#7f1d1d", "dot": "linear-gradient(135deg,#f87171,#ef4444)",
+            "glow": "0 0 0 4px rgba(239,68,68,0.12)"},
+}
+
+
+def _warn_dot(tone):
+    t = _WARN_TONES[tone]
+    return html.Span(style={"display": "inline-block", "width": "10px", "height": "10px",
+                            "borderRadius": "50%", "background": t["dot"], "boxShadow": t["glow"],
+                            "marginRight": "10px", "flexShrink": "0"})
+
+
+def _warn_card(tone, children, margin="0 0 14px"):
+    t = _WARN_TONES[tone]
+    return html.Div(children, className="slide-in-up", style={
+        "background": t["bg"], "border": t["border"], "borderRadius": "16px",
+        "padding": "12px 16px", "margin": margin, "lineHeight": "1.55",
+        "fontFamily": "Archivo, system-ui, sans-serif"})
+
+
+def _warn_title_row(tone, title):
+    return html.Div([_warn_dot(tone),
+                     html.Span(title, style={"fontWeight": "700", "fontSize": "14px",
+                                             "color": _WARN_TONES[tone]["title"]})],
+                    style={"display": "flex", "alignItems": "center"})
+
+
+_WARN_BODY = {"fontSize": "13.5px", "marginTop": "6px", "marginLeft": "20px", "marginBottom": "0"}
+
+
+def unreliable_rate_banner(rd, reasons, method=None):
+    """Amber banner shown ABOVE a degradation result that warrants context,
+    listing the specific consideration(s). Returns None when there are none,
+    so callers can skip it. Deliberately neutral wording — it frames the
+    points as reading guidance, not as a verdict on the result."""
+    if not reasons:
+        return None
+    label = f" ({method})" if method else ""
+    try:
+        title = f"About this {rd:+.2f}%/year rate{label}"
+    except (TypeError, ValueError):
+        title = f"About this rate{label}"
+    tone = "amber"
+    return _warn_card(tone, [
+        _warn_title_row(tone, title),
+        html.Div("Keep the following in mind when interpreting this result:",
+                 style={**_WARN_BODY, "color": _WARN_TONES[tone]["body"]}),
+        html.Ul([html.Li(r, style={"marginBottom": "4px"}) for r in reasons],
+                style={**_WARN_BODY, "color": _WARN_TONES[tone]["body"], "paddingLeft": "18px"})])
+
+
+def implausible_rate_banner(rd, method=None):
+    """Red banner shown above a degradation result whose rate is outside the
+    plausible band (positive or very large). Returns None when the rate is fine.
+    Real degradation is a small negative number; an implausible value almost
+    always means un-normalizable (no irradiance) or too-sparse data."""
+    try:
+        if rd is None or not np.isfinite(rd) or rate_is_plausible(rd):
+            return None
+    except (TypeError, ValueError):
+        return None
+    label = f" ({method})" if method else ""
+    tone = "red"
+    return _warn_card(tone, [
+        _warn_title_row(tone, f"Review the input data{label}: {rd:+.2f}%/year"),
+        html.Div("This value falls outside the range typically seen for panel degradation "
+                 "(a small negative number, roughly 0 to −3%/year). That usually points to "
+                 "a data limitation — for example no irradiance to normalize against, or "
+                 "sparse coverage — so it is worth reviewing the inputs (columns, filters, "
+                 "time span) before drawing conclusions from this number.",
+                 style={**_WARN_BODY, "color": _WARN_TONES[tone]["body"]})])
+
+
+def rate_warning_banners(rd, n_points=None, duration_years=None, method=None,
+                         has_irradiance=True, ci_width=None):
+    """One banner (or None) for a computed rate: red if implausible, else amber
+    with the specific reliability reasons."""
+    red = implausible_rate_banner(rd, method=method)
+    if red is not None:
+        return red
+    try:
+        rd_f = float(rd)
+    except (TypeError, ValueError):
+        return None
+    _, reasons = degradation_reliability(rd_f, n_points=n_points,
+                                         has_irradiance=has_irradiance,
+                                         duration_years=duration_years,
+                                         ci_width=ci_width)
+    return unreliable_rate_banner(rd_f, reasons, method=method)
+
+
 def _ref_style():
     return {"fontSize": "11px", "color": "#4a6fa5", "marginTop": "6px", "lineHeight": "1.5"}
 
@@ -1041,6 +1147,23 @@ def filter_explanations_block():
                     "smoothness cannot be reliably estimated from sparse samples, so the filter falls "
                     "back to energy-only mode — retaining days whose seasonally-normalized irradiance "
                     "exceeds the energy threshold."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            # NEW-FILTERS: explanation entry for the stale-data filter
+            html.Details([
+                html.Summary(html.B("Stale / frozen data filter"), style=_exp_summary_style()),
+                html.Div([
+                    "Flags stretches where a sensor or logger froze — runs of consecutive "
+                    "near-identical readings in irradiance or power (",
+                    html.A("pvanalytics.quality.gaps.stale_values_diff",
+                           href="https://pvanalytics.readthedocs.io/en/stable/generated/pvanalytics.quality.gaps.stale_values_diff.html",
+                           target="_blank", style=_exp_link_style()),
+                    "). Frozen values pass range and IQR checks (they are in-range and not "
+                    "statistical outliers) but corrupt normalization and flatten degradation "
+                    "trends. Runs of exact zeros are never flagged, since nighttime "
+                    "irradiance and power are legitimately constant at 0. The first readings "
+                    "of each run (up to the window length) are kept."
                 ], style=_exp_inner_style()),
             ], style={"marginBottom": "6px"}),
 
@@ -2138,6 +2261,15 @@ clearsky_params = html.Div([
     ]),
 ])
 
+# NEW-FILTERS: parameter panel for the stale-data filter
+stale_params = html.Div([
+    html.Label("Window (consecutive points)", style=_label_style),
+    html.Div("Runs of ≥ window near-identical nonzero readings are flagged as a frozen "
+             "sensor/logger (e.g. 6 points = 1.5 h of 15-min data). Nighttime zeros are never flagged.",
+             style=_help_style),
+    dcc.Input(id="param-stale-window", type="number", value=6, step=1, min=2, style=_param_input_style),
+])
+
 
 filter_agent_body = html.Div([
     # Hidden checklist preserving the value contract for callbacks
@@ -2148,8 +2280,9 @@ filter_agent_body = html.Div([
             {"label": "", "value": "low-irra-power"},
             {"label": "", "value": "outlier"},
             {"label": "", "value": "clearsky"},
+            {"label": "", "value": "stale"},     # NEW-FILTERS
         ],
-        value=["timezone", "low-irra-power", "outlier", "clearsky"],
+        value=["timezone", "low-irra-power", "outlier", "clearsky", "stale"],
         inline=False,
         style={"display": "none"}
     ),
@@ -2197,6 +2330,15 @@ filter_agent_body = html.Div([
                     "cb-outlier", "Outlier removal (IQR)",
                     "Removes statistical outliers in the normalized series using an IQR rule.",
                     outlier_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            # NEW-FILTERS: stale / frozen data detection (on by default)
+            html.Div(
+                filter_row(
+                    "cb-stale", "Stale / frozen data filter",
+                    "Drops runs of near-identical nonzero readings where a sensor or logger froze; nighttime zeros are never flagged.",
+                    stale_params,
                 ),
                 className="pvc-advanced-filter-card",
             ),
@@ -4243,6 +4385,18 @@ _page_body = html.Div([
     # populate the editable variable-mapping dropdowns in Advanced Step 1.
     dcc.Store(id="data-columns-store",    data=[]),
     dcc.Store(id="dataframe-store",       data={}),
+    # DOWNSIZE: set when the user block-mean downsizes a large dataset at
+    # Step 1; shown as a reminder banner in the filter step. Cleared on new data.
+    dcc.Store(id="downsample-note",       data=None),
+    # Sink for the auto-scroll clientside callback (no data flows through it).
+    dcc.Store(id="scroll-sync-dummy"),
+    # DOWNSIZE: snapshot of the ORIGINAL parsed dataset, captured on the first
+    # downsize click. Every downsize recomputes from this, so repeated clicks
+    # are never cumulative (2x then 5x = 5x of the original, not 10x).
+    dcc.Store(id="dataframe-original",    data=None),
+    # DOWNSIZE: the preset factor the user has clicked (highlighted blue);
+    # applied only when they press Apply. None = no preset selected.
+    dcc.Store(id="downsize-selected-factor", data=None),
     dcc.Store(id="dataframe-filtered",    data={}),
     dcc.Store(id="code-read-store",       data={}),
     dcc.Store(id="data-source-store",     data=None),
@@ -4507,12 +4661,13 @@ app.clientside_callback(
 # =============================================================================
 app.clientside_callback(
     """
-    function(tz, lip, out, cs) {
+    function(tz, lip, out, cs, st) {
         var vals = [];
         if (tz)  vals.push("timezone");
         if (lip) vals.push("low-irra-power");
         if (out) vals.push("outlier");
         if (cs)  vals.push("clearsky");
+        if (st)  vals.push("stale");     // NEW-FILTERS
         return vals;
     }
     """,
@@ -4521,6 +4676,7 @@ app.clientside_callback(
     Input("cb-low-irra-power", "value"),
     Input("cb-outlier", "value"),
     Input("cb-clearsky", "value"),
+    Input("cb-stale", "value"),     # NEW-FILTERS
 )
 
 
@@ -4758,13 +4914,15 @@ def show_analyze_filename(filename):
     State("param-iqr-multiplier","value"),
     State("param-cs-smooth",     "value"),
     State("param-cs-energy",     "value"),
+    State("param-stale-window",  "value"),   # NEW-FILTERS
+    State("downsample-note",     "data"),    # DOWNSIZE: reminder banner
 
     prevent_initial_call=True
 )
 def run_filter(filter_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
         gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_smooth, cs_energy):
+        cs_smooth, cs_energy, stale_window, downsample_note):
 
     trigger = ctx.triggered_id
 
@@ -4777,9 +4935,11 @@ def run_filter(filter_clicks, upload_clicks,
         return ["", None]
 
     df = _df_from_store(df_json)
-    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
-    if irra_key is None or irra_key not in df.columns:
-        return ["❌ Irradiance column not found.", None]
+    # ROBUSTNESS (ported from bugFixes): a missing irradiance column no longer
+    # hard-fails the step. Irradiance-based filters are skipped (with a note)
+    # and a power-only cleanup keeps the pipeline usable end to end.
+    irra_key = (mapped_variables_dict or {}).get("Irradiance")
+    has_irr = bool(irra_key) and irra_key in df.columns
 
     # Brief pause so Step 2 (Filter) reads as actively working.
     if trigger == "filter-btn":
@@ -4791,53 +4951,107 @@ def run_filter(filter_clicks, upload_clicks,
     norm_lower     = norm_lower if norm_lower is not None else 0.01
     norm_upper_pct = norm_upper_pct if norm_upper_pct is not None else 99
 
-    # Basic value filter
-    bv_normal, bv_outlier = basic_value_filter(df, mapped_variables_dict)
-    df = df.loc[bv_normal].copy()
+    # ROBUSTNESS: the whole computation runs under the step timeout so a
+    # malformed dataset can never leave "Apply filters" spinning forever.
+    def _do_filter():
+        _df = df
+        bv_normal, _bv_outlier = basic_value_filter(_df, mapped_variables_dict)
+        _df = _df.loc[bv_normal].copy()
 
-    clearsky_mask = pd.Series(True, index=df.index)
-    if "clearsky" in selected_filters:
-        cs_smooth = cs_smooth if cs_smooth is not None else 0.3
-        cs_energy = cs_energy if cs_energy is not None else 0.5
-        normal_idx, outlier_idx = clear_sky_filter(df, irra_key,
-                                                    smoothness_threshold=cs_smooth,
-                                                    energy_threshold=cs_energy)
-        clearsky_mask = df.index.isin(normal_idx)
+        clearsky_mask = np.ones(len(_df), dtype=bool)
+        if "clearsky" in selected_filters and has_irr:
+            _cs_smooth = cs_smooth if cs_smooth is not None else 0.3
+            _cs_energy = cs_energy if cs_energy is not None else 0.5
+            normal_idx, _ = clear_sky_filter(_df, irra_key,
+                                             smoothness_threshold=_cs_smooth,
+                                             energy_threshold=_cs_energy)
+            clearsky_mask = _df.index.isin(normal_idx)
 
-    df_filtered = normalize(df, mapped_variables_dict, gamma=gamma)
-    current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
-    filter_stats = []
+        # NEW-FILTERS: stale mask is computed on the raw signals here, before
+        # normalization and before the timezone correction re-labels the index.
+        stale_mask = np.ones(len(_df), dtype=bool)
+        stale_error = None
+        if "stale" in selected_filters:
+            _sw = int(stale_window) if stale_window else 6
+            try:
+                normal_idx, _ = stale_data_filter(_df, mapped_variables_dict, window=_sw)
+                stale_mask = _df.index.isin(normal_idx)
+            except Exception as e:
+                stale_error = str(e)
 
-    if "timezone" in selected_filters:
-        try:
-            df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
-            filter_stats.append("Timezone corrected (UTC → US/Pacific)")
-        except Exception:
-            filter_stats.append("⚠️ Timezone correction failed")
+        _df_filtered = normalize(_df, mapped_variables_dict, gamma=gamma)
+        _current_mask = pd.Series(clearsky_mask & stale_mask, index=_df_filtered.index)
+        _filter_stats = []
 
-    if "clearsky" in selected_filters:
-        removed = (~clearsky_mask).sum()
-        filter_stats.append(f"Clear-sky filter removed {removed} points")
+        if "timezone" in selected_filters:
+            try:
+                _df_filtered.index = pd.to_datetime(_df_filtered.index)
+                _df_filtered.index = _df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
+                _current_mask.index = _df_filtered.index
+                _filter_stats.append("Timezone corrected (UTC → US/Pacific)")
+            except Exception:
+                _filter_stats.append("⚠️ Timezone correction failed")
 
-    if "low-irra-power" in selected_filters:
-        normal_idx, outlier_idx = low_irra_power_filter(
-            df_filtered, mapped_variables_dict,
-            irr_thresh=irr_thresh, power_ratio=power_ratio,
-            norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
-        )
-        mask = df_filtered.index.isin(normal_idx)
-        removed = (~mask & current_mask).sum()
-        current_mask &= mask
-        filter_stats.append(f"Low irra-power filter removed {removed} points")
+        if "clearsky" in selected_filters:
+            if has_irr:
+                removed = int((~clearsky_mask).sum())
+                _filter_stats.append(f"Clear-sky filter removed {removed} points")
+            else:
+                _filter_stats.append("⚠️ Clear-sky filter skipped — requires irradiance.")
 
-    if "outlier" in selected_filters:
-        iqr_multiplier = iqr_multiplier if iqr_multiplier is not None else 1.5
-        normal_idx, outlier_idx = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=iqr_multiplier)
-        mask = df_filtered.index.isin(normal_idx)
-        removed = (~mask & current_mask).sum()
-        current_mask &= mask
-        filter_stats.append(f"IQR outlier filter removed {removed} points")
+        # NEW-FILTERS: stale filter stats
+        if "stale" in selected_filters:
+            if stale_error:
+                _filter_stats.append(f"⚠️ Stale-data filter failed: {stale_error}")
+            else:
+                removed = int((~stale_mask).sum())
+                _filter_stats.append(f"Stale-data filter removed {removed} frozen points")
+
+        if "low-irra-power" in selected_filters and has_irr:
+            normal_idx, _ = low_irra_power_filter(
+                _df_filtered, mapped_variables_dict,
+                irr_thresh=irr_thresh, power_ratio=power_ratio,
+                norm_lower=norm_lower, norm_upper_pct=norm_upper_pct
+            )
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = int((~mask & _current_mask).sum())
+            _current_mask &= mask
+            _filter_stats.append(f"Low irra-power filter removed {removed} points")
+        elif "low-irra-power" in selected_filters and not has_irr:
+            # No irradiance: drop night / low-output points by power alone so
+            # the trend isn't contaminated by uncleaned low-light readings.
+            normal_idx, _ = low_power_filter(_df_filtered, mapped_variables_dict)
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = int((~mask & _current_mask).sum())
+            _current_mask &= mask
+            _filter_stats.append(f"Low-power filter (no irradiance) removed {removed} points")
+
+        if "outlier" in selected_filters:
+            _iqr = iqr_multiplier if iqr_multiplier is not None else 1.5
+            # Compute IQR fences on the points that survived prior filters (not
+            # the full frame) so night/low-output values don't dominate the
+            # distribution and flag real daytime production as outliers.
+            _kept = _df_filtered.loc[_df_filtered.index[_current_mask]]
+            normal_idx, _ = identify_outliers_iqr(_kept, "norm", iqr_multiplier=_iqr)
+            mask = _df_filtered.index.isin(normal_idx)
+            removed = int((~mask & _current_mask).sum())
+            _current_mask &= mask
+            _filter_stats.append(f"IQR outlier filter removed {removed} points")
+
+        return _df_filtered, _current_mask, _filter_stats
+
+    try:
+        df_filtered, current_mask, filter_stats = _run_with_timeout(_do_filter)
+    except FutureTimeout:
+        return [_no_data_alert("Filtering is taking longer than expected — something may be wrong "
+                               "with your data. Check the file's formatting and columns, then try again."),
+                None]
+    except Exception as e:
+        # Anything else (odd data, bad parameter combination) gets a readable
+        # message instead of Dash's generic error box.
+        return [_no_data_alert(f"Filtering failed ({type(e).__name__}: {e}). "
+                               "Check the selected filters and parameter values, then try again."),
+                None]
 
     normal_indices  = df_filtered.index[current_mask]
     outlier_indices = df_filtered.index[~current_mask]
@@ -4972,6 +5186,22 @@ def run_filter(filter_clicks, upload_clicks,
         "marginTop": "16px",
     })
 
+    # DOWNSIZE: remind the user that filtering ran on the downsized data.
+    if downsample_note:
+        filter_layout = html.Div([
+            html.Div([
+                _warn_dot("amber"),
+                html.Span([html.B("Downsized data. "), downsample_note,
+                           " Filtering and degradation below run on this downsized data."],
+                          style={"fontSize": "13.5px", "color": "#78350f", "lineHeight": "1.55",
+                                 "fontFamily": "Archivo, system-ui, sans-serif"}),
+            ], style={"display": "flex", "alignItems": "flex-start",
+                      "padding": "12px 16px", "background": "#fffbeb",
+                      "border": "1px solid #fde68a", "borderRadius": "16px",
+                      "marginTop": "16px"}),
+            filter_layout,
+        ])
+
     df_filtered_store = df_filtered.loc[normal_indices]
     return [filter_layout, df_filtered_store.to_json(date_format="iso", orient="split")]
 
@@ -5023,7 +5253,7 @@ def _dispatch_stat_method(method, daily_data, params):
 
 
 def _build_multi_method_layout(results, daily_data, start_date, end_date,
-                               duration_years):
+                               duration_years, has_irr=True):
     """Build the Step-3 result block for a MULTI-method run.
 
     `results` is a list of (method_code, rate_pct_per_year, figure) tuples in
@@ -5160,7 +5390,15 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
         ]),
     ])
 
+    # NEW-WARNINGS: one banner per flagged method (red if implausible, amber
+    # with reasons) above the comparison. Reliable methods add nothing.
+    _warns = [b for b in (rate_warning_banners(rd, n_points=len(daily_data),
+                                               duration_years=duration_years, method=m,
+                                               has_irradiance=has_irr)
+                          for (m, rd, _f) in results) if b is not None]
+
     return html.Div(className="pvc-advanced-multi-result slide-in-up", children=[
+        *_warns,
         html.Div(className="pvc-advanced-multi-top", children=[
             summary_block,
             html.Div(className="pvc-advanced-result-chart-card", children=[
@@ -5244,9 +5482,11 @@ def analyze_uploaded_data_callback(
         return ["", "", False, "Calculate Degradation", {}, {}, True]
 
     df_filtered = _df_from_store(df_filtered_json)
-    irra_key = mapped_variables_dict["Irradiance"] if mapped_variables_dict else None
-    if irra_key is None or irra_key not in df_filtered.columns:
-        return ["❌ Irradiance column not found.", "", False, "Calculate Degradation", {}, {}, True]
+    # ROBUSTNESS (ported from bugFixes): no irradiance is no longer fatal —
+    # aggregate_daily falls back to daily peak power on clear days.
+    irra_key = (mapped_variables_dict or {}).get("Irradiance")
+    if irra_key is not None and irra_key not in df_filtered.columns:
+        irra_key = None
 
     # Brief pause so Step 3 reads as actively working. PVPRO has live progress.
     if trigger == "run-btn" and selected_metric != "PVPRO":
@@ -5312,7 +5552,22 @@ def analyze_uploaded_data_callback(
                 {}, {"job_id": job_id}, False]
 
     else:
-        daily_data = aggregate_daily(df_filtered, irra_key)
+        # ROBUSTNESS: aggregation under the step timeout with a readable error.
+        try:
+            daily_data = _run_with_timeout(aggregate_daily, df_filtered, irra_key)
+        except FutureTimeout:
+            return [_no_data_alert("Aggregating the filtered data is taking longer than expected — "
+                                   "something may be wrong with your data. Check the file's "
+                                   "formatting and columns, then try again."),
+                    "", False, "Calculate Degradation", {}, {}, True]
+        except Exception as e:
+            return [_no_data_alert(f"Could not aggregate the filtered data ({type(e).__name__}: {e}). "
+                                   "Check the variable mapping and try re-applying the filters."),
+                    "", False, "Calculate Degradation", {}, {}, True]
+        if daily_data is None or len(daily_data) == 0:
+            return [_no_data_alert("No usable daily data remained after filtering — every point was "
+                                   "removed or unusable. Loosen the filters and try again."),
+                    "", False, "Calculate Degradation", {}, {}, True]
 
         # The statistical / trend chooser is a multi-select checklist. Read the
         # full checked list; fall back to the master value / YoY if somehow
@@ -5333,19 +5588,41 @@ def analyze_uploaded_data_callback(
         if len(methods) > 1:
             results = []            # list of (method, rd, fig)
             for m in methods:
-                try:
-                    rd_m, fig_m = _dispatch_stat_method(m, daily_data, stat_params)
-                except Exception as exc:
-                    rd_m, fig_m = np.nan, None
-                    print(f"[degradation] {m} failed: {exc}")
+                # ROBUSTNESS: each method runs under the step timeout; a method
+                # that fails or hangs shows "n/a" instead of sinking the run.
+                rd_m, fig_m = np.nan, None
+                # RATE-QUALITY: YoY prefers the energy-ratio method (see the
+                # single-method path); classic dispatch is the fallback.
+                if m == "YOY" and irra_key is not None:
+                    try:
+                        _rd_e, _fig_e, _ciw_m, _nd_m = _run_with_timeout(
+                            compute_yoy_energy, df_filtered, mapped_variables_dict)
+                        if _rd_e is not None and np.isfinite(_rd_e):
+                            rd_m, fig_m = float(_rd_e), _fig_e
+                    except (Exception, FutureTimeout) as exc:
+                        print(f"[degradation] energy-ratio YoY failed: {exc}")
+                if rd_m is None or not np.isfinite(rd_m):
+                    try:
+                        rd_m, fig_m = _run_with_timeout(_dispatch_stat_method, m, daily_data, stat_params)
+                    except (Exception, FutureTimeout) as exc:
+                        rd_m, fig_m = np.nan, None
+                        print(f"[degradation] {m} failed: {exc}")
                 results.append((m, rd_m, fig_m))
+            # Every method failed / returned NaN: explain instead of an all-"n/a" chart.
+            if not any(rd is not None and np.isfinite(rd) for (_m, rd, _f) in results):
+                return [_no_data_alert(
+                    "None of the selected methods could compute a rate on this data. "
+                    "After filtering, too few clean daily points remain to fit a trend. "
+                    "Loosen the filters, or check the file's formatting and columns."),
+                    "", False, "Calculate Degradation", {}, {}, True]
 
             start_date = df_filtered.index.min()
             end_date   = df_filtered.index.max()
             duration_years = (end_date - start_date).days / 365.25
 
             multi_layout = _build_multi_method_layout(
-                results, daily_data, start_date, end_date, duration_years)
+                results, daily_data, start_date, end_date, duration_years,
+                has_irr=irra_key is not None)
 
             methods_rates = {
                 m: (round(float(rd), 4) if rd is not None and np.isfinite(rd) else None)
@@ -5385,7 +5662,68 @@ def analyze_uploaded_data_callback(
 
         # ---- SINGLE METHOD: keep the featured hero-number display -----------
         selected_metric = methods[0]
-        rd, fig = _dispatch_stat_method(selected_metric, daily_data, stat_params)
+
+        # ROBUSTNESS (ported from bugFixes): run under the step timeout. If the
+        # chosen method can't produce a rate — returns NaN (YoY on sparse data)
+        # OR raises (statsmodels on too-short/irregular series) — fall back to
+        # Linear Regression rather than failing the step. If even LR can't fit,
+        # explain clearly instead of rendering a meaningless "nan%/year".
+        def _compute_fast():
+            # RATE-QUALITY (ported from bugFixes): YoY prefers the energy-ratio
+            # method — daily measured-vs-expected energy sums trended
+            # year-over-year. Steadier than point ratios and validated against
+            # synthetic truth (~0.03 %/yr). Falls back to the classic path when
+            # it can't run (no irradiance / too few paired days).
+            if selected_metric == "YOY" and irra_key is not None:
+                try:
+                    _rd_e, _fig_e, _ciw, _nd = compute_yoy_energy(
+                        df_filtered, mapped_variables_dict)
+                    if _rd_e is not None and np.isfinite(_rd_e):
+                        return float(_rd_e), _fig_e, "YOY", _ciw, _nd
+                except Exception as exc:
+                    print(f"[degradation] energy-ratio YoY errored, using classic path: {exc}")
+            try:
+                _rd, _fig = _dispatch_stat_method(selected_metric, daily_data, stat_params)
+            except Exception:
+                if selected_metric == "LR":
+                    raise
+                _rd, _fig = np.nan, None
+            _used = selected_metric
+            if (_rd is None or not np.isfinite(_rd)) and selected_metric != "LR":
+                _rd_lr, _fig_lr = _dispatch_stat_method("LR", daily_data, stat_params)
+                if _rd_lr is not None and np.isfinite(_rd_lr):
+                    _rd, _fig, _used = _rd_lr, _fig_lr, "LR"
+            return _rd, _fig, _used, None, len(daily_data)
+
+        try:
+            rd, fig, _used_metric, _ci_width, _n_points = _run_with_timeout(_compute_fast)
+        except FutureTimeout:
+            return [_no_data_alert("Calculating degradation is taking longer than expected — "
+                                   "something may be wrong with your data. Check the file's "
+                                   "formatting and columns, then try again."),
+                    "", False, "Calculate Degradation", {}, {}, True]
+        except Exception as e:
+            # E.g. statsmodels raising on too-short data or an incompatible
+            # period parameter (HW/ARIMA/CSD). Readable message, not a crash.
+            return [_no_data_alert(
+                f"{selected_metric} failed on this data ({type(e).__name__}: {e}). "
+                "Try Linear Regression, or adjust the method's parameters."),
+                "", False, "Calculate Degradation", {}, {}, True]
+
+        # Reflect the method actually used (in case of fallback) in the result.
+        if _used_metric != selected_metric:
+            selected_metric = _used_metric
+
+        # Too sparse to fit a trend: both the chosen method AND the LR fallback
+        # refused (returned NaN). Show a clear explanation instead of "nan%/year".
+        if rd is None or not np.isfinite(rd):
+            return [_no_data_alert(
+                "Not enough clean data to compute a reliable degradation rate. "
+                "After filtering, too few daily points remain to fit a trend — a "
+                "rate from so few points would be meaningless, so the tool won't "
+                "guess. This usually means most data was filtered out (e.g. no "
+                "irradiance, or sparse/low-quality readings)."),
+                "", False, "Calculate Degradation", {}, {}, True]
 
     # Restyle the figure
     if fig is not None:
@@ -5437,14 +5775,24 @@ def analyze_uploaded_data_callback(
         ]),
     ])
 
-    degradation_layout = html.Div(className="pvc-advanced-single-result slide-in-up", children=[
-        summary_block,
-        html.Div(className="pvc-advanced-result-chart-card", children=[
-            html.Div("Power trend", className="pvc-advanced-result-kicker"),
-            dcc.Graph(
-                figure=fig,
-                config={"displayModeBar": False, "displaylogo": False, "responsive": True},
-            ),
+    # NEW-WARNINGS: reliability banner (red if implausible, amber with reasons)
+    # sits above the result; the rate itself is still shown.
+    _warn = rate_warning_banners(rd, n_points=_n_points,
+                                 duration_years=duration_years,
+                                 method=_metric_label(selected_metric),
+                                 has_irradiance=irra_key is not None,
+                                 ci_width=_ci_width)
+    degradation_layout = html.Div([
+        *( [_warn] if _warn is not None else [] ),
+        html.Div(className="pvc-advanced-single-result slide-in-up", children=[
+            summary_block,
+            html.Div(className="pvc-advanced-result-chart-card", children=[
+                html.Div("Power trend", className="pvc-advanced-result-kicker"),
+                dcc.Graph(
+                    figure=fig,
+                    config={"displayModeBar": False, "displaylogo": False, "responsive": True},
+                ),
+            ]),
         ]),
     ])
 
@@ -5978,8 +6326,11 @@ def _render_pvpro_layout(rd, figs, rates, start_str, end_str,
         html.Div(selectors, className="pvc-advanced-pvpro-params"),
         html.Div(charts, className="pvc-advanced-pvpro-chart-stage"),
     ])
+    # NEW-WARNINGS: reliability banner above the PVPRO result (no daily-point
+    # count here — the duration and plausibility checks still apply).
+    _warn = rate_warning_banners(rd, duration_years=duration_years, method="PVPRO")
     return html.Div(
-        [summary, trends],
+        ([_warn] if _warn is not None else []) + [summary, trends],
         className="pvc-advanced-pvpro-result slide-in-up",
     )
 
@@ -6101,8 +6452,10 @@ def _render_simple_pvpro_layout(rd, figs, rates, start_str, end_str,
         html.Div(charts, className="pvc-simple-pvpro-chart-stage"),
     ])
 
+    # NEW-WARNINGS: same reliability banner in the compact Simple-mode result.
+    _warn = rate_warning_banners(rd, duration_years=duration_years, method="PVPRO")
     return html.Div(
-        [summary, trends],
+        ([_warn] if _warn is not None else []) + [summary, trends],
         className="pvc-simple-pvpro-result slide-in-up",
     )
 
@@ -7106,6 +7459,118 @@ app.clientside_callback(
 
 
 # =============================================================================
+# DOWNSIZE PANEL (large datasets)
+#
+# Shown between "identified variables" and the raw-data preview when the
+# parsed dataset exceeds DOWNSIZE_ROW_TARGET rows. Offers one-click preset
+# factors (including one that lands near 10,000 rows) plus a custom factor
+# input. The actual reduction is block-mean averaging: every `factor`
+# sequential readings are replaced by their mean (see downsize_block_mean).
+# USER-DRIVEN by design — the tool never downsizes automatically.
+# =============================================================================
+DOWNSIZE_ROW_TARGET = 10000
+
+_downsize_pill_base = {
+    "padding": "10px 18px", "borderRadius": "999px", "cursor": "pointer",
+    "fontSize": "14px", "fontFamily": "Archivo, system-ui, sans-serif",
+    "border": f"1px solid {BORDER_STRONG}", "background": "#ffffff",
+    "color": INK, "whiteSpace": "nowrap",
+}
+
+
+# Selected-pill style: applied by the selection callback when the user clicks
+# a preset. Nothing is pre-selected — the user picks, then presses Apply.
+_downsize_pill_selected = {
+    **_downsize_pill_base,
+    "border": "2px solid #2f6bff",
+    "background": "rgba(59,130,246,0.10)",
+    "fontWeight": "600",
+}
+
+
+def _downsize_btn(factor, n_rows, recommended=False):
+    rows_after = int(np.ceil(n_rows / factor))
+    label = [html.B(f"{factor:g}×"),
+             html.Span(f"  →  {rows_after:,} rows", style={"fontWeight": "400", "color": INK_SOFT})]
+    if recommended:
+        label.append(html.Span("  recommended", style={
+            "fontSize": "11px", "color": NAVY, "fontWeight": "700",
+            "textTransform": "uppercase", "letterSpacing": "0.06em", "marginLeft": "6px"}))
+    return html.Button(label, id={"type": "downsize-preset", "factor": f"{factor:g}"},
+                       n_clicks=0, style=dict(_downsize_pill_base))
+
+
+def _build_downsize_panel(n_rows):
+    """The 'your dataset is large' card with preset + custom downsizing."""
+    # Preset pills are WHOLE numbers only (decimals stay available via the
+    # custom box). ceil puts the recommended factor at or below the row target.
+    f10k = max(int(np.ceil(n_rows / DOWNSIZE_ROW_TARGET)), 2)
+    factors = [(2.0, False), (5.0, False), (10.0, False)]
+    # Drop the round preset that coincides with the recommended factor, then
+    # insert the recommended one in ascending order.
+    factors = [(f, r) for f, r in factors if int(f) != f10k]
+    factors.append((float(f10k), True))
+    factors.sort(key=lambda t: t[0])
+    buttons = [_downsize_btn(f, n_rows, recommended=r) for f, r in factors]
+
+    return html.Div([
+        html.Div([
+            _warn_dot("amber"),
+            html.Span("large dataset", style={
+                "fontSize": "13px", "color": "#92400e", "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "700",
+                "fontFamily": "Archivo, system-ui, sans-serif",
+            }),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "8px"}),
+        html.Div(f"{n_rows:,} rows", style={
+            "fontSize": "34px", "fontWeight": "700", "color": INK, "lineHeight": "1",
+            "marginBottom": "6px", "fontFamily": "Archivo, system-ui, sans-serif",
+        }),
+        html.Div([
+            f"This is above the recommended {DOWNSIZE_ROW_TARGET:,} data points — analysis will be "
+            "slower and plots heavier. You can downsize it here: every group of consecutive "
+            "readings is replaced by its average, for every column, so the full time span "
+            "is kept and long-term trends are preserved (short spikes get smoothed).",
+        ], style={"fontSize": "14px", "color": INK_SOFT, "lineHeight": "1.6",
+                  "marginBottom": "14px", "maxWidth": "640px",
+                  "fontFamily": "Archivo, system-ui, sans-serif"}),
+        html.Div(buttons, style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
+                                 "marginBottom": "14px"}),
+        html.Div([
+            html.Span("or a custom factor:", style={
+                "fontSize": "13px", "color": INK_SOFT, "marginRight": "10px",
+                "fontFamily": "Archivo, system-ui, sans-serif"}),
+            # type="text", like the PVPRO stepper fields: this Dash version's
+            # number inputs render a built-in spinner box that clips/blanks the
+            # value. The callback parses the text to a float anyway.
+            # The style prop lands on the component's WRAPPER element, so the
+            # visible box (border/background) is drawn here inline — always
+            # present, independent of stylesheet loading. The inner <input> is
+            # made borderless/transparent in assets/pvcopilot_styles.css.
+            dcc.Input(id="downsize-custom-factor", type="text",
+                      placeholder="e.g. 7.5", inputMode="numeric",
+                      style={"display": "inline-block", "width": "130px",
+                             "height": "42px", "boxSizing": "border-box",
+                             "border": "1.5px solid #94a3b8", "borderRadius": "10px",
+                             "background": "#ffffff", "padding": "0",
+                             "boxShadow": "0 1px 2px rgba(15, 23, 42, 0.06)"}),
+            html.Button("Apply", id="downsize-apply-btn", n_clicks=0, style={
+                **_downsize_pill_base, "marginLeft": "10px",
+                "background": "linear-gradient(135deg, #4b8bff, #2f6bff)",
+                "color": "white", "border": "none", "fontWeight": "600",
+            }),
+        ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap"}),
+        html.Div(id="downsize-status", style={"marginTop": "10px"}),
+    ], id="downsize-panel", style={
+        "padding": "20px 22px",
+        "background": "#fffbeb",
+        "border": "1px solid #fcd34d",
+        "borderRadius": "16px",
+        "marginBottom": "16px",
+    })
+
+
+# =============================================================================
 # LIVE ANALYZE STATUS LINE
 #
 # (1) mint a per-tab token on load; (2) on Analyze click, clientside swaps the
@@ -7361,6 +7826,11 @@ def analyze_uploaded_data_callback(
                 "borderRadius": "16px",
                 "marginBottom": "16px",
             }),
+            # DOWNSIZE: for large datasets, ask the user what to do (never
+            # downsize automatically). Sits between the mapping table and the
+            # raw-data preview, like on the developments branch.
+            (_build_downsize_panel(len(df))
+             if df is not None and len(df) > DOWNSIZE_ROW_TARGET else ""),
             html.Div([
                 html.Div("raw data preview", style={
                     "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
@@ -7387,6 +7857,122 @@ def analyze_uploaded_data_callback(
                  "detected": mapped_variables_dict, "quality_tags": quality_tags})
 
     return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+
+
+# =============================================================================
+# CALLBACK — SELECT A DOWNSIZE PRESET (highlight only; Apply executes it)
+# =============================================================================
+@app.callback(
+    Output("downsize-selected-factor", "data"),
+    Output({"type": "downsize-preset", "factor": ALL}, "style"),
+    Input({"type": "downsize-preset", "factor": ALL}, "n_clicks"),
+    State({"type": "downsize-preset", "factor": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def select_downsize_preset(clicks, ids):
+    # The style output is a wildcard (pattern-matching) multi-output, so even
+    # "no change" must be a LIST with one no_update per matched pill.
+    hold = [dash.no_update] * len(ids or [])
+    # Dynamically created buttons can fire once on creation with zero clicks.
+    if not any(c for c in (clicks or []) if c):
+        return dash.no_update, hold
+    trigger = ctx.triggered_id
+    sel = trigger.get("factor") if isinstance(trigger, dict) else None
+    styles = [dict(_downsize_pill_selected) if i.get("factor") == sel
+              else dict(_downsize_pill_base) for i in (ids or [])]
+    try:
+        return float(sel), styles
+    except (TypeError, ValueError):
+        return dash.no_update, hold
+
+
+# =============================================================================
+# CALLBACK — DOWNSIZE (block-mean) A LARGE DATASET AT THE USER'S REQUEST
+#
+# Fires from the preset pills or the custom-factor Apply button in the
+# downsize panel. Rewrites dataframe-store with the downsized frame, records
+# a note (shown again at the filter step), and redraws the raw-data preview.
+# =============================================================================
+@app.callback(
+    Output("dataframe-store",   "data",     allow_duplicate=True),
+    Output("downsample-note",   "data",     allow_duplicate=True),
+    Output("downsize-status",   "children"),
+    Output("var-map-figures",   "children", allow_duplicate=True),
+    Output("dataframe-original","data",     allow_duplicate=True),
+    Input("downsize-apply-btn", "n_clicks"),
+    State("downsize-custom-factor", "value"),
+    State("downsize-selected-factor", "data"),
+    State("dataframe-store",    "data"),
+    State("dataframe-original", "data"),
+    State("mapped-vars-store",  "data"),
+    prevent_initial_call=True,
+)
+def apply_downsize(apply_clicks, custom_factor, selected_factor, df_json, original_json, mapped_variables_dict):
+    no_change = (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+    # Always downsize from the ORIGINAL dataset: on the first click the store
+    # still holds it; afterwards the snapshot does. Repeated clicks (or a new
+    # factor) therefore replace the previous downsize instead of compounding.
+    source_json = original_json or df_json
+    if not source_json:
+        return no_change
+
+    if not apply_clicks:
+        return no_change
+    # Custom factor (typed) wins; otherwise the clicked (blue) preset pill.
+    custom = (str(custom_factor).strip() if custom_factor is not None else "")
+    factor = custom if custom else selected_factor
+    if factor is None or factor == "":
+        return (dash.no_update, dash.no_update,
+                html.Div("Pick a preset above (it turns blue), or type a custom factor — then press Apply.",
+                         style={"fontSize": "13px", "color": "#b91c1c",
+                                "fontFamily": "Archivo, system-ui, sans-serif"}),
+                dash.no_update, dash.no_update)
+
+    try:
+        factor = float(factor)
+        if not np.isfinite(factor) or factor <= 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return (dash.no_update, dash.no_update,
+                html.Div("Enter a factor greater than 1 (e.g. 5 or 7.5).", style={
+                    "fontSize": "13px", "color": "#b91c1c",
+                    "fontFamily": "Archivo, system-ui, sans-serif"}),
+                dash.no_update, dash.no_update)
+
+    df = _df_from_store(source_json)
+    before = len(df)
+    if before < 2:
+        return no_change
+    df_small = downsize_block_mean(df, factor)
+
+    note = (f"Dataset downsized {factor:g}× by block averaging at your request: "
+            f"{before:,} → {len(df_small):,} rows. Each row is the mean of ~{factor:g} "
+            f"consecutive readings (every column averaged; full time span preserved).")
+    status = html.Div(
+        f"✓ Downsized {factor:g}×: {before:,} → {len(df_small):,} rows. "
+        f"The preview below and all later steps now use the downsized data.",
+        style={"fontSize": "13px", "color": "#15803d", "fontWeight": "600",
+               "fontFamily": "Archivo, system-ui, sans-serif"})
+    figures = _build_overview_figures_div(df_small, mapped_variables_dict)
+    return (df_small.to_json(date_format="iso", orient="split"),
+            note, status, figures, source_json)
+
+
+# Clear the downsize note whenever new data arrives (upload or example) so a
+# stale "you downsized" banner never outlives the dataset it described.
+@app.callback(
+    Output("downsample-note",    "data", allow_duplicate=True),
+    Output("dataframe-original", "data", allow_duplicate=True),
+    Output("downsize-selected-factor", "data", allow_duplicate=True),
+    Input("upload-data",        "filename"),
+    Input("analyze-btn",        "n_clicks"),
+    Input("load-example-btn-1", "n_clicks"),
+    Input("load-example-btn-2", "n_clicks"),
+    Input("load-example-btn-3", "n_clicks"),
+    prevent_initial_call=True,
+)
+def clear_downsample_note(*_):
+    return None, None, None
 
 
 # =============================================================================
@@ -9320,6 +9906,32 @@ def toggle_simple_analyze(data_source, df_store, upload_contents, mapped_vars, m
 
 
 # -----------------------------------------------------------------------------
+# Auto-scroll to the Analyze card the moment it is revealed (dataset uploaded
+# or example loaded). Fires only on the hidden -> visible transition, so
+# re-evaluations of the reveal callback never yank the user's scroll position.
+# -----------------------------------------------------------------------------
+app.clientside_callback(
+    """
+    function(cls) {
+        var visible = cls && cls.indexOf("is-hidden") === -1;
+        if (visible && !window._pvcAnalyzeScrolled) {
+            window._pvcAnalyzeScrolled = true;
+            setTimeout(function() {
+                var el = document.getElementById("analyze-section-card");
+                if (el) { el.scrollIntoView({behavior: "smooth", block: "start"}); }
+            }, 300);
+        }
+        if (!visible) { window._pvcAnalyzeScrolled = false; }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("scroll-sync-dummy", "data"),
+    Input("analyze-section-card", "className"),
+    prevent_initial_call=True,
+)
+
+
+# -----------------------------------------------------------------------------
 # Simple mode, STAGE A (instant): on Analyze click, immediately show a status
 # banner and write the run trigger.  Returns right away so the banner paints
 # with no perceptible delay; the heavy compute happens in Stage B below.
@@ -9412,11 +10024,11 @@ def simple_stage_data(run_trigger, contents, filename, stored_df_json,
             "Try Advanced mode to map variables manually."
         ))
 
+    # ROBUSTNESS (ported from bugFixes): no irradiance is no longer fatal —
+    # downstream filtering and aggregation fall back to power-only handling.
     irra_key = mapped.get("Irradiance")
-    if irra_key is None or irra_key not in df.columns:
-        return _simple_fail(_no_data_alert(
-            "Irradiance column not found. Try Advanced mode to map it manually."
-        ))
+    if irra_key is not None and irra_key not in df.columns:
+        irra_key = None
 
     # If PVPRO was chosen, it needs DC Voltage + DC Current.  Check right after
     # identification (Step 1) and fail fast with a clear pointer back to YoY.
@@ -9464,43 +10076,74 @@ def simple_stage_filter(pdata):
                 "calc": False, "code": False}
         return {}, alert, none
 
-    try:
-        df = _df_from_store(pdata["df"])
-        mapped = pdata["mapped"]
-        irra_key = pdata["irra_key"]
+    # ROBUSTNESS (ported from bugFixes): runs under the step timeout so the
+    # automatic pipeline can never hang on a malformed dataset; irradiance-based
+    # filters degrade gracefully when there is no irradiance column.
+    def _do_simple_filter():
+        _df = _df_from_store(pdata["df"])
+        _mapped = pdata["mapped"]
+        _irra_key = pdata.get("irra_key")
+        _has_irr = bool(_irra_key) and _irra_key in _df.columns
 
-        bv_normal, _bv_outlier = basic_value_filter(df, mapped)
-        df = df.loc[bv_normal].copy()
+        bv_normal, _bv_outlier = basic_value_filter(_df, _mapped)
+        _df = _df.loc[bv_normal].copy()
 
-        clearsky_mask = pd.Series(True, index=df.index)
+        _clearsky_mask = np.ones(len(_df), dtype=bool)
+        if _has_irr:
+            try:
+                cs_normal_idx, _ = clear_sky_filter(
+                    _df, _irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
+                _clearsky_mask = _df.index.isin(cs_normal_idx)
+            except Exception:
+                _clearsky_mask = np.ones(len(_df), dtype=bool)
+
+        # NEW-FILTERS: stale detection is part of the automatic pipeline too.
+        _stale_mask = np.ones(len(_df), dtype=bool)
         try:
-            cs_normal_idx, _ = clear_sky_filter(
-                df, irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
-            clearsky_mask = df.index.isin(cs_normal_idx)
-        except Exception:
-            clearsky_mask = pd.Series(True, index=df.index)
-
-        df_filtered = normalize(df, mapped, gamma=-0.004)
-        current_mask = pd.Series(clearsky_mask, index=df_filtered.index)
-
-        try:
-            df_filtered.index = pd.to_datetime(df_filtered.index)
-            df_filtered.index = (df_filtered.index
-                                 .tz_localize("UTC").tz_convert("US/Pacific"))
+            st_normal_idx, _ = stale_data_filter(_df, _mapped, window=6)
+            _stale_mask = _df.index.isin(st_normal_idx)
         except Exception:
             pass
 
-        normal_idx, _ = low_irra_power_filter(
-            df_filtered, mapped,
-            irr_thresh=300, power_ratio=0.02,
-            norm_lower=0.01, norm_upper_pct=99,
-        )
-        current_mask &= df_filtered.index.isin(normal_idx)
+        _df_filtered = normalize(_df, _mapped, gamma=-0.004)
+        _current_mask = pd.Series(_clearsky_mask & _stale_mask, index=_df_filtered.index)
 
-        normal_idx, _ = identify_outliers_iqr(df_filtered, "norm", iqr_multiplier=1.5)
-        current_mask &= df_filtered.index.isin(normal_idx)
+        try:
+            _df_filtered.index = pd.to_datetime(_df_filtered.index)
+            _df_filtered.index = (_df_filtered.index
+                                  .tz_localize("UTC").tz_convert("US/Pacific"))
+            _current_mask.index = _df_filtered.index
+        except Exception:
+            pass
 
-        df_good = df_filtered.loc[df_filtered.index[current_mask]]
+        if _has_irr:
+            normal_idx, _ = low_irra_power_filter(
+                _df_filtered, _mapped,
+                irr_thresh=300, power_ratio=0.02,
+                norm_lower=0.01, norm_upper_pct=99,
+            )
+        else:
+            # No irradiance: drop night / low-output points by power alone.
+            normal_idx, _ = low_power_filter(_df_filtered, _mapped)
+        _current_mask &= _df_filtered.index.isin(normal_idx)
+
+        # IQR fences on the survivors so night/low-output values don't
+        # dominate the distribution (see the Advanced-mode filter callback).
+        _kept = _df_filtered.loc[_df_filtered.index[_current_mask]]
+        normal_idx, _ = identify_outliers_iqr(_kept, "norm", iqr_multiplier=1.5)
+        _current_mask &= _df_filtered.index.isin(normal_idx)
+
+        return _df_filtered.loc[_df_filtered.index[_current_mask]]
+
+    mapped = pdata["mapped"]
+    irra_key = pdata.get("irra_key")
+
+    try:
+        df_good = _run_with_timeout(_do_simple_filter)
+    except FutureTimeout:
+        return _fail(_no_data_alert(
+            "Filtering is taking longer than expected — something may be wrong "
+            "with your data. Check the file's formatting and columns, then try again."))
     except Exception as e:
         return _fail(_no_data_alert(f"Filtering step failed: {e}"))
 
@@ -9658,13 +10301,46 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
             dash.no_update, dash.no_update,
         )
 
+    # ROBUSTNESS (ported from bugFixes): timeout-guarded; if YoY can't produce
+    # a rate (NaN on sparse data), fall back to Linear Regression; if even LR
+    # can't fit, explain clearly instead of rendering "nan%/yr".
+    def _compute_simple():
+        _df_good = _df_from_store(pfiltered["df_good"])
+        _irra_key = pfiltered.get("irra_key")
+        _daily = aggregate_daily(_df_good, _irra_key)
+        # RATE-QUALITY: energy-ratio YoY preferred; classic YoY, then LR.
+        if _irra_key is not None:
+            try:
+                _rd_e, _fig_e, _ciw, _nd = compute_yoy_energy(
+                    _df_good, pfiltered.get("mapped") or {})
+                if _rd_e is not None and np.isfinite(_rd_e):
+                    return _df_good, _daily, float(_rd_e), _fig_e, "YOY"
+            except Exception as exc:
+                print(f"[simple] energy-ratio YoY errored, using classic path: {exc}")
+        _rd, _fig = compute_yoy(_daily, rolling_window=30, iqr_multiplier=1.5)
+        _used = "YOY"
+        if _rd is None or not np.isfinite(_rd):
+            _rd_lr, _fig_lr = compute_lr(_daily)
+            if _rd_lr is not None and np.isfinite(_rd_lr):
+                _rd, _fig, _used = _rd_lr, _fig_lr, "LR"
+        return _df_good, _daily, _rd, _fig, _used
+
     try:
-        df_good = _df_from_store(pfiltered["df_good"])
-        irra_key = pfiltered["irra_key"]
-        daily_data = aggregate_daily(df_good, irra_key)
-        rd, fig = compute_yoy(daily_data, rolling_window=30, iqr_multiplier=1.5)
+        df_good, daily_data, rd, fig, _used_method = _run_with_timeout(_compute_simple)
+    except FutureTimeout:
+        return _fail(_no_data_alert(
+            "Calculating degradation is taking longer than expected — something "
+            "may be wrong with your data. Check the file's formatting and columns, "
+            "then try again."))
     except Exception as e:
         return _fail(_no_data_alert(f"Degradation calculation failed: {e}"))
+
+    if rd is None or not np.isfinite(rd):
+        return _fail(_no_data_alert(
+            "Not enough clean data to compute a reliable degradation rate. "
+            "After filtering, too few daily points remain to fit a trend — a rate "
+            "from so few points would be meaningless, so the tool won't guess. "
+            "Try Advanced mode to loosen the filters."))
 
     if fig is not None:
         fig.update_layout(
@@ -9688,12 +10364,13 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     n_kept = pfiltered["n_kept"]
     n_removed = max(n_raw - n_kept, 0)
     pct_kept = (n_kept / n_raw * 100) if n_raw else 0.0
-    trend_summary = _summarize_daily_series(daily_data, _metric_label("YOY"))
+    trend_summary = _summarize_daily_series(daily_data, _metric_label(_used_method))
     source_name = pfiltered["source_name"]
 
     stash = {
         "rate_pct": float(rate_pct),
-        "method": "YOY",
+        "method": _used_method,
+        "has_irr": bool(pfiltered.get("irra_key")),
         "duration_years": float(duration_years),
         "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
         "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
@@ -9771,7 +10448,8 @@ def _simple_result_layout(stash):
             html.Span("%/yr", className="pvc-yoy-rate-unit"),
         ]),
         html.Div(
-            ["Year-on-year", html.Span("·"), f"{duration_years:.1f}-year record"],
+            # Reflect the method actually used (LR when YoY couldn't fit).
+            [_metric_label(stash.get("method", "YOY")), html.Span("·"), f"{duration_years:.1f}-year record"],
             className="pvc-yoy-meta",
         ),
         html.Div(className="pvc-yoy-status-list", children=[
@@ -9796,8 +10474,12 @@ def _simple_result_layout(stash):
         ) if fig is not None else html.Div("Trend chart unavailable.", className="pvc-yoy-chart-empty"),
     ])
 
+    # NEW-WARNINGS: reliability banner above the Simple-mode result.
+    _warn = rate_warning_banners(rate_pct * 100, duration_years=duration_years,
+                                 method=_metric_label(stash.get("method", "YOY")),
+                                 has_irradiance=stash.get("has_irr", True))
     return html.Div(
-        [summary_card, chart_card],
+        ([_warn] if _warn is not None else []) + [summary_card, chart_card],
         className="pvc-simple-yoy-result slide-in-up",
     )
 
