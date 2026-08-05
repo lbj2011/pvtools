@@ -1464,8 +1464,17 @@ def low_irra_power_filter(df, mapped_variables_dict,
     # irradiance filter
     mask &= df[irr_key] > irr_thresh
 
-    # power filter
-    mask &= df[power_key] > power_ratio * df[irr_key]
+    # Power filter — UNIT-INDEPENDENT (ported from developments). The old form
+    # (power > ratio * irradiance) compared the power column's native units
+    # against W/m², which only worked when power happened to be in watts; a
+    # kW-scaled file (e.g. DKASC) failed for every daytime row and 0% survived.
+    # Scale by the system's own spike-robust peak instead: at full sun
+    # (1000 W/m²) a point must produce at least `power_ratio` of peak power,
+    # proportionally less at lower sun.
+    p = pd.to_numeric(df[power_key], errors="coerce")
+    capacity = p.quantile(0.99)
+    if np.isfinite(capacity) and capacity > 0:
+        mask &= p > power_ratio * (df[irr_key] / 1000.0) * capacity
 
     # norm range filter
     upper = df['norm'].quantile(norm_upper_pct / 100)
@@ -1837,17 +1846,24 @@ def compute_yoy(series, eps=1e-6, rolling_window=30, iqr_multiplier=1.5,
 def compute_lr(series):
     series = series.dropna()
 
+    # Mathematical minimum for a slope. Too-few-points still produces a number;
+    # the caller flags it as unreliable (see degradation_reliability) rather than
+    # the tool refusing outright.
     if len(series) < 2:
         return np.nan, None
 
-    t = _time_to_years(series.index).values.reshape(-1, 1)
+    t = _time_to_years(series.index).values
     y = series.values
 
-    model = LinearRegression().fit(t, y)
-    trend = model.predict(t)
+    # Theil-Sen (median of pairwise slopes) instead of ordinary least squares:
+    # OLS is dragged by a few outlier days (e.g. a handful of high-output days at
+    # the end read as steep "improvement"), while the median slope is robust to
+    # them and recovers the true gentle trend.
+    from scipy import stats as _scipy_stats
+    slope, intercept, _lo, _hi = _scipy_stats.theilslopes(y, t)
+    trend = slope * t + intercept
 
-    slope = model.coef_[0]
-    rd = slope / np.mean(y)*100
+    rd = slope / np.mean(y) * 100
 
     fig = go.Figure()
 
@@ -1890,8 +1906,6 @@ def compute_lr(series):
     )
 
     return rd, fig
-
-
 # ================================
 # HW
 # ================================

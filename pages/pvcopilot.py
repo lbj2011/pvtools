@@ -21,7 +21,7 @@ from page_supporting_files.analysis_utils_2606 import rate_is_plausible, degrada
 from page_supporting_files.analysis_utils_2606 import low_power_filter  # ROBUSTNESS: no-irradiance fallback
 from page_supporting_files.analysis_utils_2606 import compute_yoy_energy  # RATE-QUALITY: energy-ratio YoY
 from page_supporting_files.analysis_utils_2606 import downsize_block_mean  # DOWNSIZE: >10k-row panel
-from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter, stale_data_filter  # NEW-FILTERS
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter, stale_data_filter, detect_and_fix_time_shifts  # NEW-FILTERS
 import base64
 import os
 import time
@@ -415,6 +415,37 @@ def _df_from_store(value):
     if isinstance(value, str):
         return pd.read_json(StringIO(value), orient="split")
     return pd.DataFrame(value)
+
+
+# =============================================================================
+# SESSION-RESTORE: server-side dataframe cache.
+# Browser session storage can't hold multi-MB dataframes, so the frame itself
+# is parked on disk and only the file path travels through the session store.
+# =============================================================================
+import tempfile
+_SESSION_CACHE_DIR = os.path.join(tempfile.gettempdir(), "pvc_session_cache")
+
+
+def _session_cache_save(df, tag="df"):
+    """Write df to the session cache; returns the file path (or None on failure)."""
+    try:
+        os.makedirs(_SESSION_CACHE_DIR, exist_ok=True)
+        path = os.path.join(_SESSION_CACHE_DIR, f"{uuid.uuid4().hex[:12]}_{tag}.pkl")
+        df.to_pickle(path)
+        return path
+    except Exception:
+        return None
+
+
+def _session_cache_load(path):
+    """Read a cached dataframe back; returns None when the file is gone
+    (e.g. the OS cleared its temp directory)."""
+    try:
+        if path and os.path.exists(path):
+            return pd.read_pickle(path)
+    except Exception:
+        pass
+    return None
 
 
 def _no_data_alert(message):
@@ -2305,7 +2336,7 @@ filter_agent_body = html.Div([
             html.Div(
                 filter_row(
                     "cb-timezone", "Time zone & DST correction",
-                    "Aligns timestamps to local solar time and corrects daylight-saving jumps.",
+                    "Detects timestamp breaks (DST jumps, clock resets) from the data itself and repairs them; consistent records are left untouched.",
                 ),
                 className="pvc-advanced-filter-card",
             ),
@@ -4380,16 +4411,21 @@ _page_body = html.Div([
         html.Div(className="bg-glow"),
     ]),
     # Hidden stores (unchanged)
-    dcc.Store(id="mapped-vars-store",     data={}),
+    dcc.Store(id="mapped-vars-store",     data={}, storage_type="session"),
     # Available column names of the currently-loaded dataset, used to
     # populate the editable variable-mapping dropdowns in Advanced Step 1.
-    dcc.Store(id="data-columns-store",    data=[]),
+    dcc.Store(id="data-columns-store",    data=[], storage_type="session"),
     dcc.Store(id="dataframe-store",       data={}),
     # DOWNSIZE: set when the user block-mean downsizes a large dataset at
     # Step 1; shown as a reminder banner in the filter step. Cleared on new data.
-    dcc.Store(id="downsample-note",       data=None),
+    dcc.Store(id="downsample-note",       data=None, storage_type="session"),
     # Sink for the auto-scroll clientside callback (no data flows through it).
     dcc.Store(id="scroll-sync-dummy"),
+    # SESSION-RESTORE: pointer to the server-side parquet cache of the current
+    # dataframe (+ pre-downsize original), so a page remount (navigating to
+    # another PVTOOLS page, or a refresh) can rebuild Step 1 instead of losing it.
+    dcc.Store(id="session-cache-meta", data=None, storage_type="session"),
+    dcc.Store(id="mapping-notes-store", data=[], storage_type="session"),
     # DOWNSIZE: snapshot of the ORIGINAL parsed dataset, captured on the first
     # downsize click. Every downsize recomputes from this, so repeated clicks
     # are never cumulative (2x then 5x = 5x of the original, not 10x).
@@ -4399,8 +4435,8 @@ _page_body = html.Div([
     dcc.Store(id="downsize-selected-factor", data=None),
     dcc.Store(id="dataframe-filtered",    data={}),
     dcc.Store(id="code-read-store",       data={}),
-    dcc.Store(id="data-source-store",     data=None),
-    dcc.Store(id="stored-data-file-name", data=None),
+    dcc.Store(id="data-source-store",     data=None, storage_type="session"),
+    dcc.Store(id="stored-data-file-name", data=None, storage_type="session"),
     # Tracks which example chip is currently "active" (the source of the
     # loaded dataset).  Values: "load-example-btn-1" | "load-example-btn-2"
     # | "load-example-btn-3" | None (cleared when the user uploads a file
@@ -4412,17 +4448,17 @@ _page_body = html.Div([
 
     # Advanced-mode completion state. Simple mode must never write this store;
     # otherwise a one-click Simple run lights up the Advanced workflow rail.
-    dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}),
+    dcc.Store(id="step-progress", data={"data": False, "filter": False, "calc": False, "code": False}, storage_type="session"),
     # Advanced navigation is intentionally separate from completion: finishing
     # a step unlocks the next tab without moving the user away from the result.
-    dcc.Store(id="advanced-active-step", data=1),
+    dcc.Store(id="advanced-active-step", data=1, storage_type="session"),
     # Completed Advanced steps default to a compact result-first view. These
     # stores remember when the user explicitly reopens their settings.
     dcc.Store(id="advanced-filter-expanded", data=False),
     dcc.Store(id="advanced-metric-expanded", data=False),
 
     # NEW: which analysis mode is active — "simple" (default) or "advanced".
-    dcc.Store(id="ui-mode", data="simple"),
+    dcc.Store(id="ui-mode", data="simple", storage_type="session"),
 
     # Simple-mode staged reveal: the pipeline computes everything at once, then
     # we animate the sidebar steps lighting up ~1.2s apart for a sense of
@@ -4984,13 +5020,19 @@ def run_filter(filter_clicks, upload_clicks,
         _filter_stats = []
 
         if "timezone" in selected_filters:
+            # TIME-SHIFT (ported from developments): timezone-agnostic. Detects
+            # mid-record timestamp breaks (DST jumps, logger clock resets) from
+            # the data's own solar-noon rhythm and shifts only the breaking
+            # segments back into line. A consistently-labeled record — whatever
+            # its timezone — is left untouched.
             try:
                 _df_filtered.index = pd.to_datetime(_df_filtered.index)
-                _df_filtered.index = _df_filtered.index.tz_localize("UTC").tz_convert("US/Pacific")
+                _df_filtered, _tz_msg = detect_and_fix_time_shifts(
+                    _df_filtered, mapped_variables_dict.get("DC Power"))
                 _current_mask.index = _df_filtered.index
-                _filter_stats.append("Timezone corrected (UTC → US/Pacific)")
+                _filter_stats.append(_tz_msg)
             except Exception:
-                _filter_stats.append("⚠️ Timezone correction failed")
+                _filter_stats.append("⚠️ Timestamp-shift check failed")
 
         if "clearsky" in selected_filters:
             if has_irr:
@@ -7560,6 +7602,13 @@ def _build_downsize_panel(n_rows):
                 "color": "white", "border": "none", "fontWeight": "600",
             }),
         ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap"}),
+        html.Div([
+            html.Button("↩  Restore original data", id="downsize-restore-btn", n_clicks=0, style={
+                **_downsize_pill_base, "fontSize": "13px", "padding": "8px 14px",
+                "color": INK_SOFT, "background": "transparent",
+                "border": f"1px dashed {BORDER_STRONG}",
+            }),
+        ], style={"marginTop": "12px"}),
         html.Div(id="downsize-status", style={"marginTop": "10px"}),
     ], id="downsize-panel", style={
         "padding": "20px 22px",
@@ -7660,6 +7709,112 @@ def poll_analyze_status(_n, token, n_clicks):
     return rec["message"], (f"{elapsed}s" if elapsed >= 1 else "")
 
 
+def _build_step1_output(df, mapped_variables_dict, mapping_notes,
+                        alternatives=None, quality_tags=None):
+    """Assemble the Step-1 'identified variables + downsize + preview' block.
+    Shared by the Analyze callback and the session-restore callback, so a page
+    remount can rebuild exactly what the user saw."""
+    # Available columns for the editable mapping dropdowns, and whether
+    # the Time variable lives in the index.
+    data_columns = [str(c) for c in df.columns.tolist()]
+    time_in_index = (
+        isinstance(df.index, pd.DatetimeIndex)
+        or mapped_variables_dict.get("Time") == "__index__"
+    )
+
+    # Only plot variables that are actually mapped to a real column.
+    figures_output = _build_overview_figures_div(df, mapped_variables_dict)
+
+    # Editable variable-mapping table (defaults to LLM detection; user can
+    # override any row, or fill in rows the LLM missed). When a role had
+    # several valid matches, the others are pinned in that row's dropdown
+    # and shown inline — parse_contents stashes them on df.attrs if it
+    # supports it; otherwise this is simply empty.
+    if alternatives is None:
+        alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
+    if quality_tags is None:
+        quality_tags = df.attrs.get("mapping_quality_tags", {}) if df is not None else {}
+    editable_mapping = build_variable_mapping_table(
+        mapped_variables_dict, data_columns, time_in_index=time_in_index,
+        alternatives=alternatives, detected_map=mapped_variables_dict,
+        quality_tags=quality_tags,
+    )
+
+    # Transformation caveats from parse_contents (AC fallback, DC Power
+    # computed as V×I, gappy columns, time-from-values). Shown once, above
+    # the mapping table; empty list -> nothing rendered.
+    notes_block = None
+    if mapping_notes:
+        notes_block = html.Div(
+            [html.Div("data notes", style={
+                "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "8px",
+                "fontFamily": "Archivo, system-ui, sans-serif",
+            })] + [
+                html.Div("• " + n, style={
+                    "fontSize": "13px", "color": INK, "lineHeight": "1.5",
+                    "fontFamily": "Archivo, system-ui, sans-serif", "marginBottom": "3px",
+                }) for n in mapping_notes
+            ],
+            style={
+                "padding": "12px 16px", "marginTop": "14px",
+                "background": "#fffbeb", "border": "1px solid #fcd34d",
+                "borderRadius": "16px",
+            },
+        )
+
+    combined_output = html.Div([
+        html.Div([
+            html.Div([
+                html.Span("identified variables", style={
+                    "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                    "letterSpacing": "0.1em", "fontWeight": "600",
+                    "fontFamily": "Archivo, system-ui, sans-serif",
+                }),
+                html.Span("(LLM-detected)", style={
+                    "fontSize": "12px", "color": INK_SOFT, "fontStyle": "italic",
+                    "marginLeft": "8px", "fontWeight": "400",
+                    "fontFamily": "Archivo, system-ui, sans-serif",
+                }),
+            ], style={"marginBottom": "10px"}),
+            # Stable container so the Apply callback can re-render the
+            # mapping table (refreshing the detected/undetected dots).
+            html.Div(editable_mapping, id="var-map-panel",
+                     style={"fontSize": "14px"}),
+        ], className="pvc-step1-mapping-surface", style={
+            "padding": "18px 20px",
+            "background": "#f8fafc",
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "16px",
+            "marginBottom": "16px",
+        }),
+        # DOWNSIZE: for large datasets, ask the user what to do (never
+        # downsize automatically). Sits between the mapping table and the
+        # raw-data preview, like on the developments branch.
+        (_build_downsize_panel(len(df))
+         if df is not None and len(df) > DOWNSIZE_ROW_TARGET else ""),
+        html.Div([
+            html.Div("raw data preview", style={
+                "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
+                "fontFamily": "Archivo, system-ui, sans-serif",
+            }),
+            # Stable container so the Apply callback can redraw figures,
+            # dropping any variable the user de-selected.
+            html.Div(figures_output, id="var-map-figures"),
+            # Data-transformation caveats sit under the figure, inside the
+            # preview block (empty list -> nothing rendered).
+            notes_block if notes_block is not None else "",
+        ], style={
+            "padding": "18px 20px",
+            "background": "#f8fafc",
+            "border": f"1px solid {BORDER}",
+            "borderRadius": "16px",
+        }),
+    ], className="slide-in-up")
+    return combined_output, data_columns, alternatives, quality_tags
+
+
 # =============================================================================
 # CALLBACK — DATA UPLOAD & PARSE  (UNCHANGED logic, restyled output)
 # =============================================================================
@@ -7674,6 +7829,8 @@ def poll_analyze_status(_n, token, n_clicks):
     Output("upload-status-output", "children",  allow_duplicate=True),
     Output("stored-data-file-name","data",      allow_duplicate=True),
     Output("data-columns-store",   "data",      allow_duplicate=True),
+    Output("session-cache-meta",   "data",      allow_duplicate=True),
+    Output("mapping-notes-store",  "data"),
     Input("analyze-btn",          "n_clicks"),
     Input("load-example-btn-1",   "n_clicks"),
     Input("load-example-btn-2",   "n_clicks"),
@@ -7707,9 +7864,15 @@ def analyze_uploaded_data_callback(
             output_msg = _success_banner(f"{example_filename} loaded")
         except Exception as e:
             return (html.Div(f"Error loading example: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", example_filename, [])
+                    {}, None, "", False, "Run prescreening", None, "", example_filename, [],
+                    dash.no_update, dash.no_update)
+        # SESSION-RESTORE: park the freshly-loaded example on disk so a page
+        # remount can rebuild the loaded state.
+        _cache_meta = {"path": _session_cache_save(df, "loaded"), "orig_path": None,
+                       "filename": example_filename}
         return (html.Div("", className="text-muted"),
-                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename, [])
+                {}, df_json, "", False, "Run prescreening", "example", output_msg, example_filename, [],
+                _cache_meta, [])
 
     # Analyze clicked
     if trigger == "analyze-btn":
@@ -7729,134 +7892,50 @@ def analyze_uploaded_data_callback(
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, contents, filename, progress=_status, timeout=ANALYZE_TIMEOUT_S)
                 if df is None:
-                    return summary_table, {}, None, "", False, "Run prescreening", None, "", stored_file_name, []
+                    return (summary_table, {}, None, "", False, "Run prescreening", None, "",
+                            stored_file_name, [], dash.no_update, dash.no_update)
             elif data_source == "example" and stored_df_json is not None:
                 df = _df_from_store(stored_df_json)
                 df, summary_table, mapped_variables_dict, code_read, mapping_notes = _run_with_timeout(
                     parse_contents, df=df, progress=_status, timeout=ANALYZE_TIMEOUT_S)
             else:
                 return (_no_data_alert("Please upload a file or click an example button, then click 'Analyze Data'."),
-                        {}, None, "", False, "Run prescreening", None, "", filename, [])
+                        {}, None, "", False, "Run prescreening", None, "", filename, [],
+                        dash.no_update, dash.no_update)
         except FutureTimeout:
             return (_no_data_alert("This is taking longer than expected — something may be wrong with your "
                                    "data. Check the file's formatting and columns, then try again."),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [],
+                    dash.no_update, dash.no_update)
         except Exception as e:
             return (html.Div(f"Error processing dataset: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [],
+                    dash.no_update, dash.no_update)
 
         _status("Packaging your dataset…")
         try:
             df_json = df.to_json(date_format="iso", orient="split")
         except Exception as e:
             return (html.Div(f"Error converting DataFrame: {e}", className="alert alert-danger"),
-                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+                    {}, None, "", False, "Run prescreening", None, "", stored_file_name, [],
+                    dash.no_update, dash.no_update)
 
-        # Available columns for the editable mapping dropdowns, and whether
-        # the Time variable lives in the index.
-        data_columns = [str(c) for c in df.columns.tolist()]
-        time_in_index = (
-            isinstance(df.index, pd.DatetimeIndex)
-            or mapped_variables_dict.get("Time") == "__index__"
-        )
-
-        # Only plot variables that are actually mapped to a real column.
         _status("Rendering data preview…")
-        figures_output = _build_overview_figures_div(df, mapped_variables_dict)
+        combined_output, data_columns, alternatives, quality_tags = _build_step1_output(
+            df, mapped_variables_dict, mapping_notes)
         _status("Finishing up…")
 
-        # Editable variable-mapping table (defaults to LLM detection; user can
-        # override any row, or fill in rows the LLM missed). When a role had
-        # several valid matches, the others are pinned in that row's dropdown
-        # and shown inline — parse_contents stashes them on df.attrs if it
-        # supports it; otherwise this is simply empty.
-        alternatives = df.attrs.get("mapping_alternatives", {}) if df is not None else {}
-        quality_tags = df.attrs.get("mapping_quality_tags", {}) if df is not None else {}
-        editable_mapping = build_variable_mapping_table(
-            mapped_variables_dict, data_columns, time_in_index=time_in_index,
-            alternatives=alternatives, detected_map=mapped_variables_dict,
-            quality_tags=quality_tags,
-        )
-
-        # Transformation caveats from parse_contents (AC fallback, DC Power
-        # computed as V×I, gappy columns, time-from-values). Shown once, above
-        # the mapping table; empty list -> nothing rendered.
-        notes_block = None
-        if mapping_notes:
-            notes_block = html.Div(
-                [html.Div("data notes", style={
-                    "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-                    "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "8px",
-                    "fontFamily": "Archivo, system-ui, sans-serif",
-                })] + [
-                    html.Div("• " + n, style={
-                        "fontSize": "13px", "color": INK, "lineHeight": "1.5",
-                        "fontFamily": "Archivo, system-ui, sans-serif", "marginBottom": "3px",
-                    }) for n in mapping_notes
-                ],
-                style={
-                    "padding": "12px 16px", "marginTop": "14px",
-                    "background": "#fffbeb", "border": "1px solid #fcd34d",
-                    "borderRadius": "16px",
-                },
-            )
-
-        combined_output = html.Div([
-            html.Div([
-                html.Div([
-                    html.Span("identified variables", style={
-                        "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-                        "letterSpacing": "0.1em", "fontWeight": "600",
-                        "fontFamily": "Archivo, system-ui, sans-serif",
-                    }),
-                    html.Span("(LLM-detected)", style={
-                        "fontSize": "12px", "color": INK_SOFT, "fontStyle": "italic",
-                        "marginLeft": "8px", "fontWeight": "400",
-                        "fontFamily": "Archivo, system-ui, sans-serif",
-                    }),
-                ], style={"marginBottom": "10px"}),
-                # Stable container so the Apply callback can re-render the
-                # mapping table (refreshing the detected/undetected dots).
-                html.Div(editable_mapping, id="var-map-panel",
-                         style={"fontSize": "14px"}),
-            ], className="pvc-step1-mapping-surface", style={
-                "padding": "18px 20px",
-                "background": "#f8fafc",
-                "border": f"1px solid {BORDER}",
-                "borderRadius": "16px",
-                "marginBottom": "16px",
-            }),
-            # DOWNSIZE: for large datasets, ask the user what to do (never
-            # downsize automatically). Sits between the mapping table and the
-            # raw-data preview, like on the developments branch.
-            (_build_downsize_panel(len(df))
-             if df is not None and len(df) > DOWNSIZE_ROW_TARGET else ""),
-            html.Div([
-                html.Div("raw data preview", style={
-                    "fontSize": "13px", "color": INK_SOFT, "textTransform": "uppercase",
-                    "letterSpacing": "0.1em", "fontWeight": "600", "marginBottom": "10px",
-                    "fontFamily": "Archivo, system-ui, sans-serif",
-                }),
-                # Stable container so the Apply callback can redraw figures,
-                # dropping any variable the user de-selected.
-                html.Div(figures_output, id="var-map-figures"),
-                # Data-transformation caveats sit under the figure, inside the
-                # preview block (empty list -> nothing rendered).
-                notes_block if notes_block is not None else "",
-            ], style={
-                "padding": "18px 20px",
-                "background": "#f8fafc",
-                "border": f"1px solid {BORDER}",
-                "borderRadius": "16px",
-            }),
-        ], className="slide-in-up")
-
+        # SESSION-RESTORE: park the parsed dataframe on disk for remounts.
+        _cache_meta = {"path": _session_cache_save(df, "parsed"), "orig_path": None,
+                       "filename": stored_file_name}
         return (combined_output, mapped_variables_dict, df_json, code_read, False,
                 "Run prescreening", None, "", stored_file_name,
                 {"columns": data_columns, "alternatives": alternatives,
-                 "detected": mapped_variables_dict, "quality_tags": quality_tags})
+                 "detected": mapped_variables_dict, "quality_tags": quality_tags},
+                _cache_meta, list(mapping_notes or []))
 
-    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [])
+    return ("", {}, None, "", False, "Run prescreening", None, "", stored_file_name, [],
+            dash.no_update, dash.no_update)
 
 
 # =============================================================================
@@ -7899,16 +7978,78 @@ def select_downsize_preset(clicks, ids):
     Output("downsize-status",   "children"),
     Output("var-map-figures",   "children", allow_duplicate=True),
     Output("dataframe-original","data",     allow_duplicate=True),
-    Input("downsize-apply-btn", "n_clicks"),
+    # Downstream invalidation: changing the dataset stales everything computed
+    # from it, so filtering/degradation revert to their "apply" state.
+    Output("step-progress",           "data",     allow_duplicate=True),
+    Output("dataframe-filtered",      "data",     allow_duplicate=True),
+    Output("data-filter-output",      "children", allow_duplicate=True),
+    Output("degradation-output",      "children", allow_duplicate=True),
+    Output("degradation-result-store","data",     allow_duplicate=True),
+    Output("session-cache-meta",      "data",     allow_duplicate=True),
+    Input("downsize-apply-btn",   "n_clicks"),
+    Input("downsize-restore-btn", "n_clicks"),
     State("downsize-custom-factor", "value"),
     State("downsize-selected-factor", "data"),
     State("dataframe-store",    "data"),
     State("dataframe-original", "data"),
     State("mapped-vars-store",  "data"),
+    State("step-progress",      "data"),
+    State("session-cache-meta", "data"),
     prevent_initial_call=True,
 )
-def apply_downsize(apply_clicks, custom_factor, selected_factor, df_json, original_json, mapped_variables_dict):
-    no_change = (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+def apply_downsize(apply_clicks, restore_clicks, custom_factor, selected_factor,
+                   df_json, original_json, mapped_variables_dict, progress, cache_meta):
+    HOLD = dash.no_update
+    no_change = (HOLD,) * 11
+
+    def _status_err(msg):
+        return (HOLD, HOLD,
+                html.Div(msg, style={"fontSize": "13px", "color": "#b91c1c",
+                                     "fontFamily": "Archivo, system-ui, sans-serif"}),
+                HOLD, HOLD, HOLD, HOLD, HOLD, HOLD, HOLD, HOLD)
+
+    def _downstream(progress):
+        """Outputs 6-10: reset later steps if any of them had results."""
+        progress = dict(progress or {})
+        if not (progress.get("filter") or progress.get("calc")):
+            return (HOLD, HOLD, HOLD, HOLD, HOLD)
+        progress.update({"filter": False, "calc": False, "code": False})
+        stale_note = html.Div([
+            _warn_dot("amber"),
+            html.Span("Dataset size changed — apply the filters again to update the results "
+                      "(then re-run the degradation step).",
+                      style={"fontSize": "13.5px", "color": "#78350f", "lineHeight": "1.55",
+                             "fontFamily": "Archivo, system-ui, sans-serif"}),
+        ], style={"display": "flex", "alignItems": "flex-start",
+                  "padding": "12px 16px", "background": "#fffbeb",
+                  "border": "1px solid #fde68a", "borderRadius": "16px",
+                  "marginTop": "16px"})
+        return (progress, None, stale_note, "", {})
+
+    trigger = ctx.triggered_id
+
+    # ---- Restore the original dataset ----
+    if trigger == "downsize-restore-btn":
+        if not restore_clicks:
+            return no_change
+        if not original_json:
+            return _status_err("The data is already at its original size — nothing to restore.")
+        df_orig = _df_from_store(original_json)
+        status = html.Div(
+            f"✓ Restored the original dataset: {len(df_orig):,} rows. "
+            f"The preview below and all later steps now use the full data.",
+            style={"fontSize": "13px", "color": "#15803d", "fontWeight": "600",
+                   "fontFamily": "Archivo, system-ui, sans-serif"})
+        figures = _build_overview_figures_div(df_orig, mapped_variables_dict)
+        # SESSION-RESTORE: the cache now points at the original again.
+        meta = dict(cache_meta or {})
+        meta["path"] = meta.pop("orig_path", None) or _session_cache_save(df_orig, "parsed")
+        meta["orig_path"] = None
+        return (original_json, None, status, figures, None) + _downstream(progress) + (meta,)
+
+    # ---- Apply a downsize ----
+    if not apply_clicks:
+        return no_change
     # Always downsize from the ORIGINAL dataset: on the first click the store
     # still holds it; afterwards the snapshot does. Repeated clicks (or a new
     # factor) therefore replace the previous downsize instead of compounding.
@@ -7916,28 +8057,18 @@ def apply_downsize(apply_clicks, custom_factor, selected_factor, df_json, origin
     if not source_json:
         return no_change
 
-    if not apply_clicks:
-        return no_change
     # Custom factor (typed) wins; otherwise the clicked (blue) preset pill.
     custom = (str(custom_factor).strip() if custom_factor is not None else "")
     factor = custom if custom else selected_factor
     if factor is None or factor == "":
-        return (dash.no_update, dash.no_update,
-                html.Div("Pick a preset above (it turns blue), or type a custom factor — then press Apply.",
-                         style={"fontSize": "13px", "color": "#b91c1c",
-                                "fontFamily": "Archivo, system-ui, sans-serif"}),
-                dash.no_update, dash.no_update)
+        return _status_err("Pick a preset above (it turns blue), or type a custom factor — then press Apply.")
 
     try:
         factor = float(factor)
         if not np.isfinite(factor) or factor <= 1:
             raise ValueError
     except (TypeError, ValueError):
-        return (dash.no_update, dash.no_update,
-                html.Div("Enter a factor greater than 1 (e.g. 5 or 7.5).", style={
-                    "fontSize": "13px", "color": "#b91c1c",
-                    "fontFamily": "Archivo, system-ui, sans-serif"}),
-                dash.no_update, dash.no_update)
+        return _status_err("Enter a factor greater than 1 (e.g. 5 or 7.5).")
 
     df = _df_from_store(source_json)
     before = len(df)
@@ -7954,8 +8085,13 @@ def apply_downsize(apply_clicks, custom_factor, selected_factor, df_json, origin
         style={"fontSize": "13px", "color": "#15803d", "fontWeight": "600",
                "fontFamily": "Archivo, system-ui, sans-serif"})
     figures = _build_overview_figures_div(df_small, mapped_variables_dict)
+    # SESSION-RESTORE: cache the downsized frame; remember where the original
+    # lives so "Restore original data" still works after a page remount.
+    meta = dict(cache_meta or {})
+    orig_path = meta.get("orig_path") or meta.get("path") or _session_cache_save(df, "parsed")
+    meta.update({"path": _session_cache_save(df_small, "downsized"), "orig_path": orig_path})
     return (df_small.to_json(date_format="iso", orient="split"),
-            note, status, figures, source_json)
+            note, status, figures, source_json) + _downstream(progress) + (meta,)
 
 
 # Clear the downsize note whenever new data arrives (upload or example) so a
@@ -7973,6 +8109,78 @@ def apply_downsize(apply_clicks, custom_factor, selected_factor, df_json, origin
 )
 def clear_downsample_note(*_):
     return None, None, None
+
+
+# =============================================================================
+# SESSION-RESTORE — rebuild Step 1 after a page remount.
+#
+# Navigating to another PVTOOLS page (or refreshing) remounts this layout and
+# resets every memory store. The small state (mapping, notes, progress, file
+# name) survives in session storage; the dataframe itself is reloaded from the
+# server-side cache and the Step-1 view is rebuilt exactly as it was. Later
+# steps' rendered results can't be resurrected without re-running them, so
+# their progress flags reset and the filter step shows a "re-apply" note.
+# =============================================================================
+@app.callback(
+    Output("data-summary-output", "children", allow_duplicate=True),
+    Output("dataframe-store",     "data",     allow_duplicate=True),
+    Output("dataframe-original",  "data",     allow_duplicate=True),
+    Output("data-filter-output",  "children", allow_duplicate=True),
+    Output("step-progress",       "data",     allow_duplicate=True),
+    Output("analyze-btn",         "disabled", allow_duplicate=True),
+    Input("session-cache-meta",   "modified_timestamp"),
+    State("session-cache-meta",   "data"),
+    State("dataframe-store",      "data"),
+    State("mapped-vars-store",    "data"),
+    State("data-columns-store",   "data"),
+    State("mapping-notes-store",  "data"),
+    State("step-progress",        "data"),
+    prevent_initial_call="initial_duplicate",
+)
+def restore_session(_ts, meta, df_json, mapped, columns_meta, notes, progress):
+    HOLD = dash.no_update
+    # Only act on a genuine remount: cache pointer present, memory store empty.
+    if not meta or not meta.get("path") or df_json:
+        return (HOLD,) * 6
+    df = _session_cache_load(meta["path"])
+    if df is None:
+        # The OS cleared its temp dir (e.g. reboot) — nothing to restore.
+        return (HOLD,) * 6
+    df_json_new = df.to_json(date_format="iso", orient="split")
+
+    orig_df = _session_cache_load(meta.get("orig_path"))
+    orig_json = (orig_df.to_json(date_format="iso", orient="split")
+                 if orig_df is not None else HOLD)
+
+    # Prescreening hadn't run yet: restore only the loaded dataframe.
+    if not mapped:
+        return (HOLD, df_json_new, orig_json, HOLD, HOLD, False)
+
+    cm = columns_meta if isinstance(columns_meta, dict) else {}
+    try:
+        combined_output, *_ = _build_step1_output(
+            df, mapped, list(notes or []),
+            alternatives=cm.get("alternatives") or {},
+            quality_tags=cm.get("quality_tags") or {})
+    except Exception:
+        return (HOLD, df_json_new, orig_json, HOLD, HOLD, False)
+
+    progress = dict(progress or {})
+    had_downstream = progress.get("filter") or progress.get("calc")
+    progress.update({"data": True, "filter": False, "calc": False, "code": False})
+    filter_note = HOLD
+    if had_downstream:
+        filter_note = html.Div([
+            _warn_dot("amber"),
+            html.Span("Session restored — apply the filters again to regenerate the "
+                      "filtering and degradation results.",
+                      style={"fontSize": "13.5px", "color": "#78350f", "lineHeight": "1.55",
+                             "fontFamily": "Archivo, system-ui, sans-serif"}),
+        ], style={"display": "flex", "alignItems": "flex-start",
+                  "padding": "12px 16px", "background": "#fffbeb",
+                  "border": "1px solid #fde68a", "borderRadius": "16px",
+                  "marginTop": "16px"})
+    return (combined_output, df_json_new, orig_json, filter_note, progress, False)
 
 
 # =============================================================================
@@ -10110,8 +10318,8 @@ def simple_stage_filter(pdata):
 
         try:
             _df_filtered.index = pd.to_datetime(_df_filtered.index)
-            _df_filtered.index = (_df_filtered.index
-                                  .tz_localize("UTC").tz_convert("US/Pacific"))
+            _df_filtered, _tz_msg = detect_and_fix_time_shifts(
+                _df_filtered, _mapped.get("DC Power"))
             _current_mask.index = _df_filtered.index
         except Exception:
             pass

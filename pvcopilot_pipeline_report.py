@@ -90,7 +90,7 @@ try:
     )
     from page_supporting_files.pvcopilot_filter_functions import (
         basic_value_filter, clear_sky_filter, identify_outliers_iqr,
-        stale_data_filter,
+        stale_data_filter, detect_and_fix_time_shifts,
     )
 except ModuleNotFoundError as e:
     sys.stderr.write(
@@ -242,14 +242,14 @@ def _run_filters(df, mapping):
         pd.Series(clearsky_mask).values & pd.Series(stale_mask).values,
         index=df_f.index)
 
-    # Timezone relabel, exactly as the app's run_filter does it.
+    # TIME-SHIFT: data-driven correction, exactly as the app's run_filter does it.
     if "timezone" in DEFAULT_FILTERS:
         try:
             df_f.index = pd.to_datetime(df_f.index)
-            df_f.index = df_f.index.tz_localize("UTC").tz_convert("US/Pacific")
+            df_f, _tz_msg = detect_and_fix_time_shifts(df_f, mapping.get("DC Power"))
             current_mask.index = df_f.index
         except Exception:
-            pass  # non-datetime or tz-aware index; app tolerates this too
+            pass  # non-datetime index; app tolerates this too
 
     if "low-irra-power" in DEFAULT_FILTERS and has_irr:
         normal_idx, _ = low_irra_power_filter(

@@ -128,6 +128,129 @@ def auto_fix_timezone(df, time_key, power_key, target_tz="local"):
 
 
 
+# NEW-FILTERS (#5 time-shift): data-driven timestamp-shift detection and
+# correction via changepoint detection. Replaces the previous hardcoded
+# UTC -> US/Pacific relabel as the "Time zone & DST correction" filter;
+# auto_fix_timezone remains as the heuristic fallback.
+def detect_and_fix_time_shifts(df: pd.DataFrame, power_key: str,
+                               period_min: int = 15, shift_min: int = 15):
+    """
+    Detects abrupt timestamp shifts (DST jumps, logger clock resets, timezone
+    changes mid-record) directly from the data and shifts the affected
+    timestamps back into line. No site location is needed.
+
+    How it works:
+      1. For each day, compute the power-weighted mean time of day ("midday",
+         a solar-noon proxy that is robust to partial clouds).
+      2. Run changepoint detection (Binary Segmentation, via the ruptures
+         library) on midday vs. the dataset's own median midday. Each segment
+         between changepoints gets one shift (segment median, quantized to
+         `shift_min` minutes). Same approach as
+         pvanalytics.quality.time.shifts_ruptures, but with the l2 cost model
+         instead of rbf: identical breakpoints on this signal, and O(n log n)
+         instead of O(n²) — pvanalytics' rbf takes >20 s on a 12-year record,
+         blowing the batch report's 10 s filter timeout.
+      3. Normalize to the DOMINANT regime: the most common shift across days is
+         treated as the baseline and subtracted, so a constant offset over the
+         whole record (harmless for trend analysis) is NOT "corrected" —
+         only segments that BREAK from the dominant regime are moved.
+      4. Timestamps in breaking segments are shifted by minus the residual
+         shift, aligning them with the rest of the record.
+
+    Requires sub-daily data (>=4 readings/day) and at least 2*period_min days;
+    otherwise returns the input unchanged with an explanatory message.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input with a DatetimeIndex.
+    power_key : str
+        Column used to locate the daily solar-noon proxy.
+    period_min : int, default 15
+        Minimum days between changepoints (shorter blips are ignored).
+    shift_min : int, default 15
+        Shift quantization in minutes (smallest correction applied).
+
+    Returns
+    -------
+    df_fixed : pd.DataFrame
+        Copy of df with corrected timestamps (data values untouched).
+    message : str
+        Human-readable summary of what was (or wasn't) corrected.
+    """
+    try:
+        import ruptures
+    except Exception as e:
+        return df, f"Time-shift detection unavailable ({type(e).__name__}) — timestamps left unchanged."
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        return df, "Time-shift detection skipped (index is not datetime)."
+    if power_key not in df.columns:
+        return df, "Time-shift detection skipped (no power column)."
+
+    power = pd.to_numeric(df[power_key], errors='coerce').clip(lower=0)
+    n_days_total = len(np.unique(df.index.date))
+    if n_days_total == 0 or len(df) / n_days_total < 4:
+        return df, "Time-shift detection skipped (needs sub-daily data, >=4 readings/day)."
+    if n_days_total < 2 * period_min:
+        return df, f"Time-shift detection skipped (needs at least {2 * period_min} days)."
+
+    # Power-weighted mean time of day, fully vectorized (a groupby-apply with
+    # per-day .loc lookups takes >20 s on 150k-row datasets and blows the batch
+    # report's 10 s filter timeout).
+    minutes = (df.index.hour * 60 + df.index.minute + df.index.second / 60).values
+    dates = df.index.normalize()
+    w = power.values
+    wsum = pd.Series(w, index=dates).groupby(level=0).sum()
+    msum = pd.Series(w * minutes, index=dates).groupby(level=0).sum()
+    npos = pd.Series((w > 0).astype(np.int64), index=dates).groupby(level=0).sum()
+    valid = (wsum > 0) & (npos >= 4)
+    event = (msum[valid] / wsum[valid]).dropna()
+    if len(event) < 2 * period_min:
+        return df, "Time-shift detection skipped (too few days with daytime power)."
+    event = event.round().astype(int)
+
+    try:
+        diff = (event - int(event.median())).astype(float)
+        values = diff.values.reshape(-1, 1)
+        variance = float(np.var(diff.values))
+        if variance == 0.0:
+            breakpoints = [len(diff)]
+        else:
+            algo = ruptures.Binseg(model='l2', min_size=period_min, jump=1).fit(values)
+            breakpoints = algo.predict(pen=2 * variance * np.log(len(diff)))
+        shift_amount = pd.Series(0.0, index=diff.index)
+        start = 0
+        for end in breakpoints:
+            seg_median = float(diff.iloc[start:end].median())
+            shift_amount.iloc[start:end] = shift_min * round(seg_median / shift_min)
+            start = end
+    except Exception as e:
+        return df, f"Time-shift detection failed ({type(e).__name__}: {e}) — timestamps left unchanged."
+
+    # A constant offset for the whole record is the dataset's own convention,
+    # not an error — only correct segments that break from the dominant regime.
+    baseline = shift_amount.mode().iloc[0] if len(shift_amount) else 0
+    residual = shift_amount - baseline
+    breaking_days = residual[residual != 0]
+    if breaking_days.empty:
+        return df, "Time-shift detection: no timestamp shifts found."
+
+    df_fixed = df.copy()
+    offsets = breaking_days.reindex(df_fixed.index.normalize()).fillna(0).values
+    df_fixed.index = df_fixed.index - pd.to_timedelta(offsets, unit='m')
+
+    segments = []
+    seg_id = (residual != residual.shift()).cumsum()
+    for _, seg in residual.groupby(seg_id):
+        if seg.iloc[0] != 0:
+            segments.append(f"{seg.index[0].date()}–{seg.index[-1].date()} by {-seg.iloc[0]:+.0f} min")
+    message = (f"Time-shift detection corrected {len(breaking_days)} days "
+               f"({'; '.join(segments)}).")
+    print(f"  {message}")
+    return df_fixed, message
+
+
 def detect_timezone_offset(df, power_key):
     daily_peak = df.groupby(df.index.date)[power_key].idxmax()
     hours = [t.hour for t in daily_peak]

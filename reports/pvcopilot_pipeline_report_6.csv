@@ -1,0 +1,154 @@
+file,status,stage,duration_years,method,rd_percent_per_year,rows_raw,rows_filtered,reason
+multiyear1.csv,WARNING,done,8.684,YOY (energy-ratio),-0.4964,3386,330,YOY degradation rate = -0.496 %/yr (with caveats)
+multiyear2.csv,GOOD,done,9.859,YOY (energy-ratio),-0.2829,3589,137,YOY degradation rate = -0.283 %/yr
+multiyear3.csv,WARNING,done,15.422,YOY (energy-ratio),-0.5613,3559,558,YOY degradation rate = -0.561 %/yr (with caveats)
+multiyear_compute_power_VxI_sys1429.csv,WARNING,done,1.673,LR,-0.8076,3499,786,LR degradation rate = -0.808 %/yr (with caveats)
+multiyear_full_dcnaming_sys3.csv,WARNING,done,7.009,YOY (energy-ratio),-1.7994,1981,243,YOY degradation rate = -1.799 %/yr (with caveats)
+multiyear_no_irradiance_sys1199.csv,WARNING,done,10.103,YOY,2.4735,1983,892,YOY degradation rate = 2.474 %/yr (with caveats)
+multiyear_power_only_sys1265.csv,BLOCKED,filter,3.537,YOY,,3596,0,Only 0 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_01_csv_10.csv,WARNING,done,22.582,LR,-0.1619,1393,292,LR degradation rate = -0.162 %/yr (with caveats)
+my_02_csv_1199.csv,WARNING,done,10.001,YOY,0.2011,782,347,YOY degradation rate = 0.201 %/yr (with caveats)
+my_03_csv_1201.csv,WARNING,done,9.347,LR,23.1772,1429,108,LR degradation rate = 23.177 %/yr (with caveats)
+my_04_csv_1203.csv,WARNING,done,9.32,LR,-1.0459,1431,336,LR degradation rate = -1.046 %/yr (with caveats)
+my_05_csv_1204.csv,WARNING,done,7.023,YOY,-2.024,784,53,YOY degradation rate = -2.024 %/yr (with caveats)
+my_06_csv_1208.csv,WARNING,done,9.714,YOY,-3.3631,1391,310,YOY degradation rate = -3.363 %/yr (with caveats)
+my_07_csv_1214.csv,WARNING,done,3.693,YOY,-0.1049,1423,1414,YOY degradation rate = -0.105 %/yr (with caveats)
+my_08_csv_1217.csv,WARNING,done,3.693,YOY,-0.0496,1421,1399,YOY degradation rate = -0.050 %/yr (with caveats)
+my_09_csv_1219.csv,WARNING,done,3.693,YOY,0.0119,1421,1395,YOY degradation rate = 0.012 %/yr (with caveats)
+my_100_csv_1334.csv,WARNING,done,3.359,YOY,-2.7394,3586,2023,YOY degradation rate = -2.739 %/yr (with caveats)
+my_101_csv_1403.csv,WARNING,done,5.476,YOY (energy-ratio),-2.7995,3572,436,YOY degradation rate = -2.799 %/yr (with caveats)
+my_102_csv_1420.csv,GOOD,done,4.901,YOY (energy-ratio),-2.2083,3600,500,YOY degradation rate = -2.208 %/yr
+my_103_csv_1422.csv,WARNING,done,3.179,YOY (energy-ratio),-14.2044,3516,173,YOY degradation rate = -14.204 %/yr (with caveats)
+my_104_csv_1423.csv,GOOD,done,7.247,YOY (energy-ratio),-0.8432,3494,899,YOY degradation rate = -0.843 %/yr
+my_105_csv_1429.csv,WARNING,done,1.673,LR,-0.8076,3499,786,LR degradation rate = -0.808 %/yr (with caveats)
+my_106_csv_2.csv,WARNING,done,9.947,YOY (energy-ratio),0.6575,3309,584,YOY degradation rate = 0.658 %/yr (with caveats)
+my_107_csv_3.csv,WARNING,done,7.009,YOY (energy-ratio),-1.7994,1981,243,YOY degradation rate = -1.799 %/yr (with caveats)
+my_108_csv_33.csv,GOOD,done,12.241,YOY (energy-ratio),-0.5192,3554,599,YOY degradation rate = -0.519 %/yr
+my_109_csv_36.csv,WARNING,done,7.51,YOY (energy-ratio),37.3842,3515,32,YOY degradation rate = 37.384 %/yr (with caveats)
+my_10_csv_1221.csv,WARNING,done,3.693,YOY,-0.1592,1421,1403,YOY degradation rate = -0.159 %/yr (with caveats)
+my_110_csv_4.csv,WARNING,done,15.422,YOY (energy-ratio),-0.5613,3559,558,YOY degradation rate = -0.561 %/yr (with caveats)
+my_111_csv_4901.csv,GOOD,done,3.603,YOY (energy-ratio),-0.7266,3593,367,YOY degradation rate = -0.727 %/yr
+my_112_csv_4902.csv,WARNING,done,3.603,YOY (energy-ratio),-0.5921,3593,501,YOY degradation rate = -0.592 %/yr (with caveats)
+my_113_csv_4903.csv,WARNING,done,3.603,YOY (energy-ratio),-1.0365,3592,450,YOY degradation rate = -1.036 %/yr (with caveats)
+my_114_csv_50.csv,WARNING,done,200.846,YOY (energy-ratio),-5.3888,3549,387,YOY degradation rate = -5.389 %/yr (with caveats)
+my_115_csv_51.csv,WARNING,done,28.657,YOY (energy-ratio),-1.8001,3537,613,YOY degradation rate = -1.800 %/yr (with caveats)
+my_116_csv_35.csv,WARNING,done,9.782,YOY (energy-ratio),-0.9686,3584,142,YOY degradation rate = -0.969 %/yr (with caveats)
+my_117_csv_34.csv,GOOD,done,9.859,YOY (energy-ratio),-0.2829,3589,137,YOY degradation rate = -0.283 %/yr
+my_118_csv_1416.csv,BLOCKED,duration,0.86,,,3472,,Only ~10 months (<1 year). Degradation correctly not attempted.
+my_119_csv_1369.csv,WARNING,done,7.14,YOY,-0.5416,3595,321,YOY degradation rate = -0.542 %/yr (with caveats)
+my_11_csv_1223.csv,WARNING,done,3.693,YOY,-0.1019,1421,1316,YOY degradation rate = -0.102 %/yr (with caveats)
+my_120_csv_2045.csv,BLOCKED,analyze,1.593,,,3545,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_121_csv_1433.csv,WARNING,done,6.992,YOY (energy-ratio),-1.0953,3600,568,YOY degradation rate = -1.095 %/yr (with caveats)
+my_122_csv_1431.csv,WARNING,done,8.041,YOY,-2.4866,3585,125,YOY degradation rate = -2.487 %/yr (with caveats)
+my_123_csv_1418.csv,WARNING,done,3.584,YOY (energy-ratio),3.7977,2421,225,YOY degradation rate = 3.798 %/yr (with caveats)
+my_12_csv_1225.csv,WARNING,done,3.693,YOY,-0.1098,1420,1401,YOY degradation rate = -0.110 %/yr (with caveats)
+my_13_csv_1229.csv,WARNING,done,6.533,YOY (energy-ratio),-7.71,1440,28,YOY degradation rate = -7.710 %/yr (with caveats)
+my_14_csv_1230.csv,WARNING,done,4.914,YOY,-3.0006,1340,469,YOY degradation rate = -3.001 %/yr (with caveats)
+my_15_csv_1244.csv,WARNING,done,3.326,YOY,-0.1918,1426,1405,YOY degradation rate = -0.192 %/yr (with caveats)
+my_16_csv_1246.csv,WARNING,done,3.499,YOY,-0.0579,1418,1369,YOY degradation rate = -0.058 %/yr (with caveats)
+my_17_csv_1248.csv,BLOCKED,analyze,3.493,,,1435,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_18_csv_1249.csv,WARNING,done,2.097,YOY,0.052,1424,1397,YOY degradation rate = 0.052 %/yr (with caveats)
+my_19_csv_1250.csv,WARNING,done,4.589,YOY,-0.0339,1431,1338,YOY degradation rate = -0.034 %/yr (with caveats)
+my_20_csv_1252.csv,WARNING,done,3.472,YOY,-0.0344,1425,1407,YOY degradation rate = -0.034 %/yr (with caveats)
+my_21_csv_1253.csv,WARNING,done,3.655,YOY,-0.0576,1418,1385,YOY degradation rate = -0.058 %/yr (with caveats)
+my_22_csv_1254.csv,WARNING,done,2.281,YOY,-0.8646,1421,1412,YOY degradation rate = -0.865 %/yr (with caveats)
+my_23_csv_1255.csv,WARNING,done,3.496,YOY,-0.0487,1430,1427,YOY degradation rate = -0.049 %/yr (with caveats)
+my_24_csv_1256.csv,WARNING,done,2.606,YOY,0.412,1435,1375,YOY degradation rate = 0.412 %/yr (with caveats)
+my_25_csv_1257.csv,WARNING,done,3.493,YOY,-0.797,1427,1369,YOY degradation rate = -0.797 %/yr (with caveats)
+my_26_csv_1258.csv,WARNING,done,3.524,YOY,-0.8369,1424,1355,YOY degradation rate = -0.837 %/yr (with caveats)
+my_27_csv_1261.csv,WARNING,done,2.355,YOY,0.1306,1427,1344,YOY degradation rate = 0.131 %/yr (with caveats)
+my_28_csv_1263.csv,WARNING,done,3.562,YOY,0.0421,1417,1404,YOY degradation rate = 0.042 %/yr (with caveats)
+my_29_csv_1264.csv,WARNING,done,3.721,YOY,0.1059,1417,1321,YOY degradation rate = 0.106 %/yr (with caveats)
+my_30_csv_1265.csv,WARNING,done,3.504,YOY,-0.0443,1436,1427,YOY degradation rate = -0.044 %/yr (with caveats)
+my_31_csv_1266.csv,WARNING,done,3.499,YOY,-0.0969,1417,1360,YOY degradation rate = -0.097 %/yr (with caveats)
+my_32_csv_1268.csv,WARNING,done,3.718,YOY,0.2038,1395,1349,YOY degradation rate = 0.204 %/yr (with caveats)
+my_33_csv_1269.csv,WARNING,done,3.502,YOY,0.1736,1430,1392,YOY degradation rate = 0.174 %/yr (with caveats)
+my_34_csv_1270.csv,WARNING,done,3.592,YOY,-0.1307,1417,1365,YOY degradation rate = -0.131 %/yr (with caveats)
+my_35_csv_1271.csv,WARNING,done,3.474,YOY,-0.0453,1427,1390,YOY degradation rate = -0.045 %/yr (with caveats)
+my_36_csv_1272.csv,WARNING,done,3.666,YOY,-0.0745,1417,1384,YOY degradation rate = -0.074 %/yr (with caveats)
+my_37_csv_1273.csv,WARNING,done,3.71,YOY,0.12,1411,1400,YOY degradation rate = 0.120 %/yr (with caveats)
+my_38_csv_1274.csv,WARNING,done,2.333,YOY,-1.5731,1420,1391,YOY degradation rate = -1.573 %/yr (with caveats)
+my_39_csv_1276.csv,WARNING,done,8.775,LR,-0.1592,1417,63,LR degradation rate = -0.159 %/yr (with caveats)
+my_40_csv_1277.csv,WARNING,done,2.648,YOY,-3.8588,1440,332,YOY degradation rate = -3.859 %/yr (with caveats)
+my_41_csv_1278.csv,WARNING,done,8.758,YOY,0.5679,1417,115,YOY degradation rate = 0.568 %/yr (with caveats)
+my_42_csv_1283.csv,WARNING,done,8.427,YOY (energy-ratio),1.81,1344,161,YOY degradation rate = 1.810 %/yr (with caveats)
+my_43_csv_1284.csv,WARNING,done,2.667,YOY (energy-ratio),0.7756,1430,184,YOY degradation rate = 0.776 %/yr (with caveats)
+my_44_csv_1289.csv,WARNING,done,7.529,YOY,-7.2028,1389,441,YOY degradation rate = -7.203 %/yr (with caveats)
+my_45_csv_1300.csv,WARNING,done,5.405,YOY,-0.477,1312,124,YOY degradation rate = -0.477 %/yr (with caveats)
+my_46_csv_1305.csv,WARNING,done,2.576,YOY,0.0285,1287,533,YOY degradation rate = 0.028 %/yr (with caveats)
+my_47_csv_1307.csv,WARNING,done,3.934,YOY,14.4328,1279,23,YOY degradation rate = 14.433 %/yr (with caveats)
+my_48_csv_1308.csv,WARNING,done,4.145,YOY (energy-ratio),35.0302,1188,67,YOY degradation rate = 35.030 %/yr (with caveats)
+my_49_csv_1310.csv,WARNING,done,5.251,LR,10.3547,1408,37,LR degradation rate = 10.355 %/yr (with caveats)
+my_50_csv_1332.csv,WARNING,done,8.652,YOY,-4.6631,1428,183,YOY degradation rate = -4.663 %/yr (with caveats)
+my_51_csv_1200.csv,WARNING,done,5.823,YOY,-4.3903,3600,754,YOY degradation rate = -4.390 %/yr (with caveats)
+my_52_csv_1202.csv,WARNING,done,9.415,LR,18.2845,3586,22,LR degradation rate = 18.285 %/yr (with caveats)
+my_53_csv_1207.csv,BLOCKED,duration,0.873,,,3562,,Only ~10 months (<1 year). Degradation correctly not attempted.
+my_54_csv_1216.csv,WARNING,done,3.732,YOY,0.6187,3581,1099,YOY degradation rate = 0.619 %/yr (with caveats)
+my_55_csv_1218.csv,WARNING,done,3.732,YOY,0.3053,3512,1155,YOY degradation rate = 0.305 %/yr (with caveats)
+my_56_csv_1220.csv,WARNING,done,3.732,YOY,-0.1572,3512,1143,YOY degradation rate = -0.157 %/yr (with caveats)
+my_57_csv_1222.csv,WARNING,done,3.732,YOY,0.0348,3512,1100,YOY degradation rate = 0.035 %/yr (with caveats)
+my_58_csv_1224.csv,WARNING,done,3.732,YOY,-6.7764,3512,968,YOY degradation rate = -6.776 %/yr (with caveats)
+my_59_csv_1226.csv,WARNING,done,3.732,YOY,-1.3991,3511,1128,YOY degradation rate = -1.399 %/yr (with caveats)
+my_60_csv_1228.csv,BLOCKED,analyze,2.757,,,2706,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_61_csv_1231.csv,WARNING,done,5.459,YOY (energy-ratio),-2.5663,3570,554,YOY degradation rate = -2.566 %/yr (with caveats)
+my_62_csv_1239.csv,WARNING,done,8.797,YOY (energy-ratio),1.0325,3577,51,YOY degradation rate = 1.032 %/yr (with caveats)
+my_63_csv_1245.csv,BLOCKED,duration,0.394,,,3240,,Only ~5 months (<1 year). Degradation correctly not attempted.
+my_64_csv_1259.csv,WARNING,done,1.782,LR,0.5413,3600,105,LR degradation rate = 0.541 %/yr (with caveats)
+my_65_csv_1260.csv,BLOCKED,duration,0.687,,,3577,,Only ~8 months (<1 year). Degradation correctly not attempted.
+my_66_csv_1262.csv,WARNING,done,1.106,LR,-0.0881,3532,3304,LR degradation rate = -0.088 %/yr (with caveats)
+my_67_csv_1267.csv,BLOCKED,duration,0.808,,,3556,,Only ~10 months (<1 year). Degradation correctly not attempted.
+my_68_csv_1275.csv,WARNING,done,3.028,YOY,-5.1087,3526,1095,YOY degradation rate = -5.109 %/yr (with caveats)
+my_69_csv_1294.csv,BLOCKED,analyze,3.332,,,3546,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_70_csv_1295.csv,BLOCKED,analyze,3.441,,,3550,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_71_csv_1296.csv,BLOCKED,analyze,1.834,,,3530,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_72_csv_1297.csv,BLOCKED,analyze,1.079,,,3531,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_73_csv_1298.csv,BLOCKED,analyze,5.432,,,3587,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_74_csv_1299.csv,BLOCKED,filter,4.378,YOY,,3548,0,Only 0 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_75_csv_1301.csv,BLOCKED,analyze,5.547,,,3582,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_76_csv_1302.csv,BLOCKED,analyze,5.503,,,3592,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_77_csv_1303.csv,BLOCKED,analyze,3.562,,,3590,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_78_csv_1304.csv,BLOCKED,analyze,3.485,,,3577,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_79_csv_1306.csv,WARNING,done,1.109,LR,33.3671,3565,206,LR degradation rate = 33.367 %/yr (with caveats)
+my_80_csv_1309.csv,BLOCKED,analyze,3.075,,,3503,,"Not enough information: no usable DC Power column found, so degradation can't be computed."
+my_81_csv_1311.csv,BLOCKED,duration,0.608,,,2784,,Only ~7 months (<1 year). Degradation correctly not attempted.
+my_82_csv_1312.csv,WARNING,done,1.448,LR,34.6078,2417,62,LR degradation rate = 34.608 %/yr (with caveats)
+my_83_csv_1314.csv,WARNING,done,3.302,YOY,42.7786,3536,863,YOY degradation rate = 42.779 %/yr (with caveats)
+my_84_csv_1315.csv,BLOCKED,filter,1.763,LR,,3434,1,Only 1 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_85_csv_1316.csv,BLOCKED,filter,1.175,LR,,3266,0,Only 0 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_86_csv_1317.csv,BLOCKED,duration,0.0,,,3,,Only ~0 months (<1 year). Degradation correctly not attempted.
+my_87_csv_1318.csv,BLOCKED,filter,4.279,YOY,,3540,1,Only 1 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_88_csv_1319.csv,BLOCKED,filter,5.322,YOY,,3393,1,Only 1 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+my_89_csv_1320.csv,BLOCKED,duration,0.225,,,1495,,Only ~3 months (<1 year). Degradation correctly not attempted.
+my_90_csv_1321.csv,WARNING,done,5.347,YOY,63.7968,3440,526,YOY degradation rate = 63.797 %/yr (with caveats)
+my_91_csv_1322.csv,BLOCKED,duration,0.003,,,3,,Only ~0 months (<1 year). Degradation correctly not attempted.
+my_92_csv_1323.csv,WARNING,done,4.611,YOY,8.0066,3473,1220,YOY degradation rate = 8.007 %/yr (with caveats)
+my_93_csv_1324.csv,WARNING,done,2.453,YOY,66.7478,3552,699,YOY degradation rate = 66.748 %/yr (with caveats)
+my_94_csv_1325.csv,WARNING,done,5.254,YOY,26.9774,3473,1680,YOY degradation rate = 26.977 %/yr (with caveats)
+my_95_csv_1326.csv,WARNING,done,3.622,YOY,32.9115,3581,1782,YOY degradation rate = 32.912 %/yr (with caveats)
+my_96_csv_1328.csv,BLOCKED,duration,0.468,,,1151,,Only ~6 months (<1 year). Degradation correctly not attempted.
+my_97_csv_1329.csv,WARNING,done,5.232,LR,15.5099,3430,1075,LR degradation rate = 15.510 %/yr (with caveats)
+my_98_csv_1330.csv,BLOCKED,duration,0.512,,,3518,,Only ~6 months (<1 year). Degradation correctly not attempted.
+my_99_csv_1331.csv,BLOCKED,filter,1.344,LR,,3541,1,Only 1 row(s) survived filtering (need >= 20) -- not enough clean data to estimate degradation. Correctly refused rather than guessing.
+new_manifest.csv,BLOCKED,analyze,,,,,,Not enough information: no usable PV variables could be identified in this dataset.
+new_my_1.csv,WARNING,done,16.945,YOY (energy-ratio),-1.9897,147394,39014,YOY degradation rate = -1.990 %/yr (with caveats)
+new_my_10.csv,WARNING,done,16.003,YOY (energy-ratio),-0.8969,139192,30626,YOY degradation rate = -0.897 %/yr (with caveats)
+new_my_11.csv,WARNING,done,16.003,YOY (energy-ratio),-0.7968,139192,22644,YOY degradation rate = -0.797 %/yr (with caveats)
+new_my_12.csv,WARNING,done,16.003,YOY (energy-ratio),-2.6446,139192,17919,YOY degradation rate = -2.645 %/yr (with caveats)
+new_my_13.csv,WARNING,done,15.685,YOY (energy-ratio),-1.3639,136377,33503,YOY degradation rate = -1.364 %/yr (with caveats)
+new_my_14.csv,WARNING,done,17.437,YOY (energy-ratio),-2.2047,151728,35658,YOY degradation rate = -2.205 %/yr (with caveats)
+new_my_15.csv,WARNING,done,16.945,YOY (energy-ratio),-1.5462,147396,35070,YOY degradation rate = -1.546 %/yr (with caveats)
+new_my_16.csv,WARNING,done,12.077,YOY (energy-ratio),-4.8977,104761,28375,YOY degradation rate = -4.898 %/yr (with caveats)
+new_my_17.csv,WARNING,done,16.977,YOY (energy-ratio),-0.7984,147689,39570,YOY degradation rate = -0.798 %/yr (with caveats)
+new_my_18.csv,WARNING,done,16.977,YOY (energy-ratio),-1.5854,147689,37880,YOY degradation rate = -1.585 %/yr (with caveats)
+new_my_2.csv,WARNING,done,16.003,YOY (energy-ratio),-0.9163,139192,28237,YOY degradation rate = -0.916 %/yr (with caveats)
+new_my_3.csv,WARNING,done,7.389,YOY (energy-ratio),-1.2367,64760,12177,YOY degradation rate = -1.237 %/yr (with caveats)
+new_my_4.csv,WARNING,done,12.057,YOY (energy-ratio),-0.6434,104623,28471,YOY degradation rate = -0.643 %/yr (with caveats)
+new_my_5.csv,WARNING,done,15.54,YOY (energy-ratio),-0.5711,135154,28429,YOY degradation rate = -0.571 %/yr (with caveats)
+new_my_6.csv,WARNING,done,7.389,YOY (energy-ratio),-0.2051,64760,10381,YOY degradation rate = -0.205 %/yr (with caveats)
+new_my_7.csv,WARNING,done,16.003,YOY (energy-ratio),-0.8109,139192,22720,YOY degradation rate = -0.811 %/yr (with caveats)
+new_my_8.csv,WARNING,done,15.54,YOY,-1.1431,135154,14631,YOY degradation rate = -1.143 %/yr (with caveats)
+new_my_9.csv,WARNING,done,16.003,YOY (energy-ratio),-1.052,139192,36687,YOY degradation rate = -1.052 %/yr (with caveats)
+synthetic_stale_test.csv,WARNING,done,1.996,LR,-1.0048,8760,1179,LR degradation rate = -1.005 %/yr (with caveats)
+system_10__date_2000_05_10.csv,BLOCKED,duration,0.0,,,823,,Only ~0 months (<1 year). Degradation correctly not attempted.
+under2yr_01.csv,WARNING,done,1.292,LR,1.3359,1435,580,LR degradation rate = 1.336 %/yr (with caveats)
+under2yr_02.csv,WARNING,done,1.292,LR,6.2162,1435,572,LR degradation rate = 6.216 %/yr (with caveats)
