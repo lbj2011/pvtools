@@ -242,11 +242,10 @@ def _run_filters(df, mapping):
         pd.Series(clearsky_mask).values & pd.Series(stale_mask).values,
         index=df_f.index)
 
-    # TIME-SHIFT: data-driven correction, exactly as the app's run_filter does it.
+    # TIMESTAMPS AS PROVIDED: no relabeling, no shift correction (mirrors the app).
     if "timezone" in DEFAULT_FILTERS:
         try:
             df_f.index = pd.to_datetime(df_f.index)
-            df_f, _tz_msg = detect_and_fix_time_shifts(df_f, mapping.get("DC Power"))
             current_mask.index = df_f.index
         except Exception:
             pass  # non-datetime index; app tolerates this too

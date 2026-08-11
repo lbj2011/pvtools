@@ -2330,13 +2330,38 @@ filter_agent_body = html.Div([
         className="pvc-step-fold-summary",
     ),
 
+    # QCRAD: optional site location. When both fields are filled, the always-on
+    # basic value filter tightens its irradiance check with sun-position-aware
+    # QCRad limits. Left empty -> the fixed [0, 1500] range, exactly as before.
+    html.Div(html.Details([
+        html.Summary("Site location (optional — enables sun-position-aware irradiance limits)", style={
+            "cursor": "pointer", "color": INK_SOFT, "fontSize": "13px",
+            "fontWeight": "600", "fontFamily": "Archivo, system-ui, sans-serif",
+            "marginBottom": "8px",
+        }),
+        html.Div([
+            html.Div([
+                html.Label("Latitude (°)", style=_label_style),
+                dcc.Input(id="param-site-lat", type="number", value=None, min=-90, max=90,
+                          step=0.01, placeholder="e.g. 37.87", style=_param_input_style),
+            ], style={"flex": "1"}),
+            html.Div([
+                html.Label("Longitude (°)", style=_label_style),
+                dcc.Input(id="param-site-lon", type="number", value=None, min=-180, max=180,
+                          step=0.01, placeholder="e.g. -122.27", style=_param_input_style),
+            ], style={"flex": "1"}),
+        ], style={"display": "flex", "gap": "12px", "marginTop": "8px",
+                  "padding": "12px 14px", "background": "#f1f5f9",
+                  "border": f"1px solid {BORDER}", "borderRadius": "12px"}),
+    ]), className="pvc-step-config-item", style={"marginBottom": "12px"}),
+
     html.Div(section_label("Recommended filters"), className="pvc-step-config-item"),
     html.Div(
         [
             html.Div(
                 filter_row(
                     "cb-timezone", "Time zone & DST correction",
-                    "Detects timestamp breaks (DST jumps, clock resets) from the data itself and repairs them; consistent records are left untouched.",
+                    "Timestamps are used exactly as your dataset provides them — the analysis only needs the record to be consistent with itself.",
                 ),
                 className="pvc-advanced-filter-card",
             ),
@@ -4951,6 +4976,8 @@ def show_analyze_filename(filename):
     State("param-cs-smooth",     "value"),
     State("param-cs-energy",     "value"),
     State("param-stale-window",  "value"),   # NEW-FILTERS
+    State("param-site-lat",      "value"),   # QCRAD
+    State("param-site-lon",      "value"),   # QCRAD
     State("downsample-note",     "data"),    # DOWNSIZE: reminder banner
 
     prevent_initial_call=True
@@ -4958,7 +4985,7 @@ def show_analyze_filename(filename):
 def run_filter(filter_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
         gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_smooth, cs_energy, stale_window, downsample_note):
+        cs_smooth, cs_energy, stale_window, site_lat, site_lon, downsample_note):
 
     trigger = ctx.triggered_id
 
@@ -4991,7 +5018,10 @@ def run_filter(filter_clicks, upload_clicks,
     # malformed dataset can never leave "Apply filters" spinning forever.
     def _do_filter():
         _df = df
-        bv_normal, _bv_outlier = basic_value_filter(_df, mapped_variables_dict)
+        # QCRAD: with a site location, the irradiance check also applies
+        # sun-position-aware physically-possible limits.
+        bv_normal, _bv_outlier = basic_value_filter(_df, mapped_variables_dict,
+                                                    latitude=site_lat, longitude=site_lon)
         _df = _df.loc[bv_normal].copy()
 
         clearsky_mask = np.ones(len(_df), dtype=bool)
@@ -5020,19 +5050,19 @@ def run_filter(filter_clicks, upload_clicks,
         _filter_stats = []
 
         if "timezone" in selected_filters:
-            # TIME-SHIFT (ported from developments): timezone-agnostic. Detects
-            # mid-record timestamp breaks (DST jumps, logger clock resets) from
-            # the data's own solar-noon rhythm and shifts only the breaking
-            # segments back into line. A consistently-labeled record — whatever
-            # its timezone — is left untouched.
+            # TIMESTAMPS AS PROVIDED: no timezone relabeling and no automatic
+            # shift correction. The analysis only needs the record to be
+            # consistent with itself, whatever its timezone ("5am is 5am").
+            # The blanket UTC->US/Pacific relabel scrambled day boundaries for
+            # non-Pacific data; changepoint-based shift detection (still
+            # available as detect_and_fix_time_shifts) proved too trigger-happy
+            # on sparse records in validation (fixed 7 datasets, disturbed 33).
             try:
                 _df_filtered.index = pd.to_datetime(_df_filtered.index)
-                _df_filtered, _tz_msg = detect_and_fix_time_shifts(
-                    _df_filtered, mapped_variables_dict.get("DC Power"))
                 _current_mask.index = _df_filtered.index
-                _filter_stats.append(_tz_msg)
+                _filter_stats.append("Timestamps used as provided by the dataset")
             except Exception:
-                _filter_stats.append("⚠️ Timestamp-shift check failed")
+                _filter_stats.append("⚠️ Timestamp parsing failed")
 
         if "clearsky" in selected_filters:
             if has_irr:
@@ -10318,8 +10348,6 @@ def simple_stage_filter(pdata):
 
         try:
             _df_filtered.index = pd.to_datetime(_df_filtered.index)
-            _df_filtered, _tz_msg = detect_and_fix_time_shifts(
-                _df_filtered, _mapped.get("DC Power"))
             _current_mask.index = _df_filtered.index
         except Exception:
             pass

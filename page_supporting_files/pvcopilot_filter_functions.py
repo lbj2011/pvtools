@@ -326,12 +326,68 @@ def identify_outliers_iqr(df: pd.DataFrame, power_key: str, iqr_multiplier: floa
     return normal_indices, outlier_indices
 
 
+# NEW-FILTERS (#3 QCRad): sun-position-aware irradiance limits. Activates only
+# when the user supplies a site latitude/longitude; otherwise basic_value_filter
+# keeps its fixed range exactly as before.
+def qcrad_irradiance_mask(irr: pd.Series, latitude: float, longitude: float):
+    """
+    QCRad (BSRN) physically-possible limits for irradiance, which vary with
+    solar position instead of using one fixed ceiling.
+
+    The upper bound is 1.5 · E_extra · cos(zenith)^1.2 + 100 W/m² — about
+    2100 W/m² at solar noon but only 100 W/m² at night — so a sensor stuck at
+    e.g. 400 W/m² after sunset fails here while passing a fixed [0, 1500] range.
+    Applied to POA irradiance this is an approximation (the QCRad limits are
+    defined for GHI), but it remains a far tighter physical envelope than a
+    constant bound.
+
+    Timestamps are assumed to be local standard time; the site's UTC offset is
+    approximated from the longitude (offset ≈ longitude / 15°), which is
+    accurate enough for a QC envelope.
+
+    Returns a boolean Series (True = physically plausible), or None if the
+    check cannot run (non-datetime index, pvlib missing, ...).
+    """
+    try:
+        import pvlib
+        from pvanalytics.quality import irradiance as pva_irradiance
+
+        # A NaN/garbage coordinate would make every zenith NaN and fail ALL
+        # rows — validate first and fall back to the fixed range instead.
+        latitude, longitude = float(latitude), float(longitude)
+        if (not np.isfinite(latitude) or not np.isfinite(longitude)
+                or abs(latitude) > 90 or abs(longitude) > 180):
+            return None
+
+        index = irr.index
+        if not isinstance(index, pd.DatetimeIndex):
+            return None
+        if index.tz is not None:
+            times_utc = index.tz_convert('UTC')
+        else:
+            times_utc = (index - pd.Timedelta(hours=round(longitude / 15.0))
+                         ).tz_localize('UTC')
+        solpos = pvlib.solarposition.get_solarposition(times_utc, latitude, longitude)
+        zenith = pd.Series(solpos['zenith'].values, index=index)
+        dni_extra = pvlib.irradiance.get_extra_radiation(
+            index.tz_localize(None) if index.tz is not None else index)
+        dni_extra = pd.Series(np.asarray(dni_extra), index=index)
+        good = pva_irradiance.check_ghi_limits_qcrad(
+            pd.to_numeric(irr, errors='coerce'), zenith, dni_extra)
+        return good.fillna(False)
+    except Exception as e:
+        print(f"  QCRad check unavailable ({type(e).__name__}: {e}) — using fixed range only")
+        return None
+
+
 def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
                        irr_min: float = 0.0,
                        irr_max: float = 1500.0,
                        temp_min: float = -40.0,
                        temp_max: float = 100.0,
-                       power_min: float = -1.0):
+                       power_min: float = -1.0,
+                       latitude: float = None,
+                       longitude: float = None):
     """
     Removes physically implausible sensor readings before any analysis.
 
@@ -339,6 +395,11 @@ def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
     Any row where at least one variable falls outside its valid range is removed.
     This catches sensor faults (e.g. irradiance=34000 W/m², temperature=1800°C)
     that would otherwise corrupt normalization and smoothness scoring.
+
+    When a site latitude/longitude is provided, the irradiance check is
+    additionally tightened with the QCRad physically-possible limits, whose
+    ceiling follows the sun's position (see qcrad_irradiance_mask). Without a
+    location the behavior is exactly the historical fixed range.
 
     Parameters
     ----------
@@ -356,6 +417,9 @@ def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
         Maximum plausible module temperature (°C). Exceeding ~80°C suggests sensor fault.
     power_min : float, default -1.0
         Minimum plausible DC power (W). Small negatives tolerated for noise; large negatives excluded.
+    latitude, longitude : float, optional
+        Site coordinates in decimal degrees. Both must be given to enable the
+        QCRad sun-position-aware irradiance limits (NEW-FILTERS #3).
 
     Returns
     -------
@@ -370,6 +434,14 @@ def basic_value_filter(df: pd.DataFrame, mapped_variables_dict: dict,
     if irr_key and irr_key in df.columns:
         mask &= df[irr_key].between(irr_min, irr_max)
         print(f"  Irradiance [{irr_min}, {irr_max}] W/m²    : removed {(~df[irr_key].between(irr_min, irr_max)).sum()} pts")
+        # NEW-FILTERS (#3 QCRad): tighten with sun-position-aware limits when
+        # the site location is known.
+        if latitude is not None and longitude is not None:
+            qc_good = qcrad_irradiance_mask(df[irr_key], latitude, longitude)
+            if qc_good is not None:
+                extra = (~qc_good & mask).sum()
+                mask &= qc_good
+                print(f"  QCRad sun-position limits          : removed {extra} additional pts")
 
     if temp_key and temp_key in df.columns:
         mask &= df[temp_key].between(temp_min, temp_max)
