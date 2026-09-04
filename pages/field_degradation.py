@@ -30,6 +30,32 @@ df_raw = safe_get_df()
 df = df_raw[(df_raw['duration'] < 100) & (df_raw['rate'] <= 3)]
 
 # ─────────────────────────────────────────────────────────────────────
+# BASEMAP CONFIGURATION
+#
+# CARTO started requiring an API key for its RASTER basemap endpoint in
+# August 2026; unauthenticated raster tiles come back with a repeated
+# "API key required" watermark. Plotly's built-in "carto-positron" style
+# points at that raster endpoint, which is where the watermark came from.
+#
+# The VECTOR basemaps are not watermarked and need no key today, so we
+# point at the positron vector style explicitly. Same cartography, and
+# sharper at high zoom / on retina displays since labels and geometry are
+# rendered client-side.
+#
+# Every map on this page must use the MapLibre API (px.scatter_map /
+# go.Scattermap / layout.map). The legacy Mapbox GL JS v1 API
+# (px.scatter_mapbox / go.Scattermapbox / layout.mapbox) cannot parse this
+# style JSON and renders a blank canvas — axes and traces only, no basemap.
+#
+# If the watermark ever returns (CARTO has said it may extend the key
+# requirement to vector), request a free key at
+# https://carto.com/basemaps/apikey and append "?key=..." below.
+# Keyless fallback if CARTO becomes unusable:
+#   BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron"
+# ─────────────────────────────────────────────────────────────────────
+BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+
+# ─────────────────────────────────────────────────────────────────────
 # Chat run/cancel tracking. Each LLM query gets an incrementing run id;
 # pressing Stop records the current run id as cancelled, so when the
 # (uninterruptible) LLM call finally returns we can discard its result
@@ -1663,7 +1689,7 @@ def update_map_and_histogram(
             ),
             pitch=0,
             zoom=2,
-            style='light'
+            style=BASEMAP_STYLE
         ),
 
         margin=dict(l=0, r=0, t=0, b=0),
@@ -1951,11 +1977,11 @@ def make_map(lat, lon, radius_miles):
     df_inside = df[inside_mask]
     df_outside = df[~inside_mask]
 
-    # --- Step 2: Create figure manually with 2 scattermapbox traces ---
+    # --- Step 2: Create figure manually with 2 scattermap traces ---
     fig = go.Figure()
 
     # Outside points (grey)
-    fig.add_trace(go.Scattermapbox(
+    fig.add_trace(go.Scattermap(
         lat=df_outside['latitude'],
         lon=df_outside['longitude'],
         mode='markers',
@@ -1969,7 +1995,7 @@ def make_map(lat, lon, radius_miles):
     ))
 
     # Inside points (red, with hover info)
-    fig.add_trace(go.Scattermapbox(
+    fig.add_trace(go.Scattermap(
         lat=df_inside['latitude'],
         lon=df_inside['longitude'],
         mode='markers',
@@ -1990,7 +2016,7 @@ def make_map(lat, lon, radius_miles):
         circle_lats.append(dest.latitude)
         circle_lons.append(dest.longitude)
 
-    fig.add_trace(go.Scattermapbox(
+    fig.add_trace(go.Scattermap(
         lat=circle_lats,
         lon=circle_lons,
         mode='lines',
@@ -2010,10 +2036,10 @@ def make_map(lat, lon, radius_miles):
         zoom = max(1, min(zoom, 12))  # clamp to [1,12]
 
     fig.update_layout(
-        mapbox=dict(
+        map=dict(
             center=dict(lat=lat, lon=lon),
             zoom=zoom,
-            style="carto-positron"
+            style=BASEMAP_STYLE
         ),
         margin=dict(l=0, r=0, t=0, b=10),
         showlegend=False,

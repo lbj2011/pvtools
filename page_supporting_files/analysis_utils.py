@@ -374,6 +374,57 @@ def _looks_like_time(series, sample=20, min_frac=0.8):
 # Read data
 # ================================
 
+def downsize_block_mean(df, factor):
+    """
+    Downsize df by averaging blocks of `factor` sequential rows.
+
+    Works for any factor > 1, including decimals: row i is assigned to block
+    floor(i / factor), so a 2.5x downsize alternates between 2-row and 3-row
+    blocks and still lands within one row of len(df)/2.5 overall. Numeric
+    columns take the block mean; non-numeric columns keep the block's first
+    value; a DatetimeIndex is averaged too, so each output timestamp sits at
+    the center of its block.
+
+    Returns the downsized DataFrame (a new object; input untouched). Raises
+    ValueError for factor <= 1 or a non-finite factor.
+    """
+    factor = float(factor)
+    if not np.isfinite(factor) or factor <= 1:
+        raise ValueError(f"Downsize factor must be a finite number > 1 (got {factor}).")
+
+    blocks = np.floor(np.arange(len(df)) / factor).astype(np.int64)
+
+    out = {}
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_numeric_dtype(s):
+            out[col] = s.groupby(blocks).mean()
+        else:
+            out[col] = s.groupby(blocks).first()
+    df_out = pd.DataFrame(out)
+
+    if isinstance(df.index, pd.DatetimeIndex):
+        tz = df.index.tz
+        base_index = df.index.tz_localize(None) if tz is not None else df.index
+        # Normalize to int64 NANOSECONDS explicitly. pandas >= 2 may carry a
+        # datetime64[us] (or [s]) index, whose raw .astype("int64") is in that
+        # unit — feeding it to pd.to_datetime (which assumes ns) silently lands
+        # every timestamp in 1970. Casting to datetime64[ns] first makes the
+        # unit unambiguous on both pandas 2.x and 3.x.
+        ns = pd.Series(base_index.astype("datetime64[ns]").astype("int64"))
+        mean_ns = ns.groupby(blocks).mean().astype("int64")
+        new_index = pd.DatetimeIndex(pd.to_datetime(mean_ns.values, unit="ns"))
+        if tz is not None:
+            new_index = new_index.tz_localize(tz)
+        new_index.name = df.index.name
+        df_out.index = new_index
+    else:
+        df_out.index.name = df.index.name
+
+    df_out.attrs = dict(getattr(df, "attrs", {}))
+    return df_out
+
+
 def parse_contents(contents=None, filename=None, df=None, progress=None):
     """
     Parses uploaded file OR an existing DataFrame (example dataset),
@@ -814,7 +865,7 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             if lb is not None:
                 mapping_notes.append(
                     f"{label.capitalize()} column '{lb}' {reason} — kept anyway "
-                    f"so you can review it; results may be unreliable.")
+                    f"so you can review it; results may be affected.")
                 return lb, side
             return None, None
 
@@ -874,7 +925,7 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                 p_col, p_side = lb, "dc"
                 mapping_notes.append(
                     f"DC Power column '{lb}' {reason} — kept anyway so you can "
-                    f"review it; results may be unreliable.")
+                    f"review it; results may be affected.")
 
         # 4) strict AC direct
         if p_col is None:
@@ -899,7 +950,7 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                 p_col, p_side = lb, "ac"
                 mapping_notes.append(
                     f"AC Power column '{lb}' {reason} — kept anyway so you can "
-                    f"review it; results may be unreliable (AC also includes "
+                    f"review it; results may differ from DC-side values (AC also includes "
                     f"inverter effects).")
 
         # Fill the third electrical quantity from the other two (P = V * I).
@@ -978,7 +1029,7 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                 temp_col = lb
                 mapping_notes.append(
                     f"Module temperature column '{lb}' {reason} — kept anyway; "
-                    f"temperature correction may be unreliable.")
+                    f"temperature correction may be approximate.")
 
         # Time: detect BY NAME first (the LLM's name-based pick, then any column
         # whose name reads like time); only if no time-like NAME exists, fall
@@ -1422,10 +1473,14 @@ def low_irra_power_filter(df, mapped_variables_dict,
 # DAILY AGGREGATION
 # ================================
 def aggregate_daily(df_f, irradiance_col):
+    # S1-BUGFIX: group by the post-dropna frame's OWN index. Grouping by
+    # df_f.index.date (the full, original-length index) raises "Grouper and
+    # axis must be same length" whenever dropna() removes rows — which happens
+    # on any real data that has gaps/NaNs.
+    sub = df_f[['norm', irradiance_col]].dropna()
     daily = (
-        df_f[['norm', irradiance_col]]
-        .dropna()
-        .groupby(df_f.index.date)
+        sub
+        .groupby(sub.index.date)
         .apply(lambda x: np.sum(x['norm'] * x[irradiance_col]) / np.sum(x[irradiance_col]))
     )
 
