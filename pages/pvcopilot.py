@@ -31,6 +31,7 @@ from page_supporting_files.analysis_utils_pkg import (
     clear_sky_filter, get_full_code,
 )
 import base64
+import json
 import os
 import re
 import time
@@ -2369,17 +2370,159 @@ def toggle_next_step_1(progress):
 #   Keeps the original component IDs (upload-data, load-example-btn-*,
 #   upload-status-output) so the existing load/parse callbacks keep working.
 # =============================================================================
-def _shared_example_btn(btn_id, label, description):
+# button id, label, one-line description, latitude, longitude, place name,
+# parquet file under data/.
+#
+# The first three are the original PVDAQ examples, at their real sites per
+# the PVDAQ system metadata (systems_20250729.csv): 1278 is the Agassi Prep
+# Academy roof in Las Vegas, 1403 and 1422 are the DOE RTC Baseline systems
+# in Cocoa Beach and Burlington.  The rest are public benchmark systems with
+# published degradation rates:
+#   * IEA PVPS Task 13 ST2.5 PLR benchmark (Lindig et al. 2021, PiP,
+#     doi:10.1002/pip.3397; data: osf.io/vtr2s) -- EURAC Bolzano, NREL STF,
+#     Pfaffstaetten, UCY Nicosia.
+#   * PVDAQ system 4, the RdTools reference example (Golden, CO).
+#   * PVDAQ system 1300 (St Petersburg, FL): a stress case with a three-year
+#     zero-output outage in the middle of the record.
+# All are hourly block means of the original 1-15 min data, column names
+# left exactly as published so the LLM column mapping is exercised.
+_EXAMPLE_SITES = [
+    ("load-example-btn-1", "System 1278", "171 kW c-Si roof · DC V + I · 2011-20 · PVPRO-ready",
+     36.1952, -115.1582, "Las Vegas, NV, USA",
+     "sys_1278_downsampled_with_VI.parquet"),
+    ("load-example-btn-2", "System 1403", "RTC-FSEC Baseline 6 kW c-Si · DC V + I · 2015-18 · PVPRO-ready",
+     28.405, -80.7709, "Cocoa Beach, FL, USA",
+     "sys_1403_part1_downsampled_with_VI.parquet"),
+    ("load-example-btn-3", "System 1422", "RTC-VT Baseline 6 kW c-Si · power + irradiance · 2016-18",
+     44.4665, -73.1014, "Burlington, VT, USA",
+     "sys_1422_downsampled.parquet"),
+    ("load-example-btn-4", "PVDAQ system 4", "c-Si · AC power + POA · 2010-16 · RdTools reference",
+     39.7406, -105.1774, "Golden, CO, USA",
+     "pvdaq_system4_golden_hourly.parquet"),
+    ("load-example-btn-5", "NREL STF building", "94 kW pc-Si · AC power, 3 POA sources · 2009-18 · IEA Task 13",
+     39.7422, -105.1719, "Golden, CO, USA",
+     "nrel_stf_golden_hourly.parquet"),
+    ("load-example-btn-6", "PVDAQ system 1300", "c-Si · DC + AC · 2013-18 with a 3-yr outage · stress test",
+     27.7701, -82.629, "St Petersburg, FL, USA",
+     "pvdaq_system1300_stpetersburg_hourly.parquet"),
+    ("load-example-btn-7", "EURAC pc-Si 6", "pc-Si · DC V + I + P · 2011-19 · IEA Task 13",
+     46.4576, 11.3285, "Bolzano, Italy",
+     "eurac_bolzano_pcSi6_hourly.parquet"),
+    ("load-example-btn-8", "Pfaffstätten A", "c-Si · DC + AC power · 2013-19 · IEA Task 13",
+     48.017, 16.258, "Pfaffstätten, Austria",
+     "pfaffstaetten_austria_hourly.parquet"),
+    ("load-example-btn-9", "UCY mono-Si", "mono-Si · Pmpp + POA · 2006-16 · IEA Task 13",
+     35.145, 33.410, "Nicosia, Cyprus",
+     "ucy_nicosia_monoSi_hourly.parquet"),
+]
+_EXAMPLE_IDS = [s[0] for s in _EXAMPLE_SITES]
+_EXAMPLE_FILES = {s[0]: s[6] for s in _EXAMPLE_SITES}
+_N_EXAMPLES = len(_EXAMPLE_SITES)
+
+
+_GLOBE_HOME = dict(lon=-40, lat=20, scale=1.0)   # also what "Reset view" restores
+
+
+def _example_globe_figure(selected=None):
+    """The three example systems on a draggable orthographic globe.
+
+    `uirevision` is the important part: it tells Plotly to keep whatever
+    rotation and zoom the user has set when the figure object is replaced, so
+    re-colouring the selected marker does not snap the globe back to its
+    starting view.
+    """
+    lats = [s[3] for s in _EXAMPLE_SITES]
+    lons = [s[4] for s in _EXAMPLE_SITES]
+    is_sel = [s[0] == selected for s in _EXAMPLE_SITES]
+
+    fig = go.Figure()
+    # Halo underneath, so the chosen site reads at a glance while the globe is
+    # turned. Unselected points keep a zero-size halo rather than being
+    # dropped, which keeps the trace point order aligned with _EXAMPLE_SITES.
+    fig.add_trace(go.Scattergeo(
+        lat=lats, lon=lons, mode="markers", hoverinfo="skip",
+        marker=dict(size=[26 if k else 0 for k in is_sel],
+                    color="rgba(47,107,255,0.18)", line=dict(width=0)),
+        showlegend=False,
+    ))
+    fig.add_trace(go.Scattergeo(
+        lat=lats, lon=lons, mode="markers",
+        customdata=[[s[1], s[2], s[5]] for s in _EXAMPLE_SITES],
+        hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[1]}"
+                       "<br>%{customdata[2]}"
+                       "<br>%{lat:.2f}°, %{lon:.2f}°"
+                       "<br><i>click to load</i><extra></extra>"),
+        marker=dict(
+            size=[15 if k else 11 for k in is_sel],
+            color=["#f59e0b" if k else NAVY for k in is_sel],
+            line=dict(width=2, color="rgba(255,255,255,0.95)"),
+            opacity=0.95,
+        ),
+        showlegend=False,
+    ))
+
+    fig.update_geos(
+        projection_type="orthographic",
+        projection_rotation=dict(lon=_GLOBE_HOME["lon"],
+                                 lat=_GLOBE_HOME["lat"], roll=0),
+        showland=True, landcolor="#eef2f9",
+        showocean=True, oceancolor="#dce8f8",
+        showcountries=True, countrycolor="rgba(120,140,180,0.35)",
+        coastlinecolor="rgba(120,140,180,0.55)", coastlinewidth=0.6,
+        showlakes=False, showframe=False,
+        lataxis=dict(showgrid=True, gridcolor="rgba(120,140,180,0.22)",
+                     gridwidth=0.5, dtick=30),
+        lonaxis=dict(showgrid=True, gridcolor="rgba(120,140,180,0.22)",
+                     gridwidth=0.5, dtick=30),
+        bgcolor="rgba(0,0,0,0)",
+    )
+    fig.update_layout(
+        uirevision="example-globe",
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        dragmode="pan",
+        hoverlabel=dict(bgcolor="rgba(255,255,255,0.96)",
+                        bordercolor="rgba(120,140,180,0.45)",
+                        font=dict(family="Archivo, system-ui, sans-serif",
+                                  size=12, color=INK)),
+        height=210,
+    )
+    return fig
+
+
+def _example_view_tab(view, label, active):
+    return html.Button(
+        label, id=f"example-tab-{view}", n_clicks=0,
+        style=_example_view_tab_style(active),
+    )
+
+
+def _example_view_tab_style(active):
+    return {
+        "border": "none", "borderRadius": "999px", "cursor": "pointer",
+        "padding": "4px 12px", "fontSize": "11px", "fontWeight": "700",
+        "letterSpacing": "0.04em",
+        "fontFamily": "Archivo, system-ui, sans-serif",
+        "color": NAVY if active else "#8090ad",
+        "background": "#ffffff" if active else "transparent",
+        "boxShadow": ("0 1px 3px rgba(30,58,120,0.14)" if active else "none"),
+    }
+
+
+def _shared_example_btn(btn_id, label, description, place=None):
+    copy = [
+        html.Span(label, className="pvc-example-title"),
+        html.Span(description, className="pvc-example-description"),
+    ]
+    if place:
+        # Same fact the globe shows on hover, so the two views agree.
+        copy.append(html.Span(place, style={
+            "color": "#8fa0bd", "fontSize": "11.5px", "fontWeight": "600",
+            "lineHeight": "1.25"}))
     return html.Button(
         [
             html.Span("▤", className="pvc-example-icon"),
-            html.Span(
-                [
-                    html.Span(label, className="pvc-example-title"),
-                    html.Span(description, className="pvc-example-description"),
-                ],
-                className="pvc-example-copy",
-            ),
+            html.Span(copy, className="pvc-example-copy"),
         ],
         id=btn_id,
         n_clicks=0,
@@ -2436,30 +2579,87 @@ shared_upload_header = html.Div(
                 # Example datasets sit beside the upload box on wide screens.
                 html.Div(
                     [
-                        html.Div("OR START WITH EXAMPLE DATA", className="pvc-example-heading"),
+                        html.Div("OR PICK AN EXAMPLE SITE",
+                                 className="pvc-example-heading"),
                         html.Div(
                             [
-                                _shared_example_btn(
-                                    "load-example-btn-1", "System 1278",
-                                    "c-Si · DC V + I · PVPRO-ready",
+                                dcc.Graph(
+                                    id="example-globe",
+                                    figure=_example_globe_figure(),
+                                    config={
+                                        "scrollZoom": True,
+                                        "displayModeBar": False,
+                                        "doubleClick": "reset",
+                                        # plotly.js 3.x does not bundle the
+                                        # land/coastline topojson; by default it
+                                        # pulls world_110m.json from
+                                        # cdn.plot.ly and draws nothing at all
+                                        # if that host is unreachable.  Serve
+                                        # our own copy instead.
+                                        "topojsonURL": "/assets/topojson/",
+                                    },
+                                    style={"width": "100%", "height": "210px",
+                                           "cursor": "grab"},
                                 ),
-                                _shared_example_btn(
-                                    "load-example-btn-2", "System 1403",
-                                    "c-Si · DC V + I · PVPRO-ready",
-                                ),
-                                _shared_example_btn(
-                                    "load-example-btn-3", "System 1422",
-                                    "c-Si · power + irradiance",
-                                ),
+                                # Tucked into the corner the globe never fills.
+                                html.Button(
+                                    "\u21ba reset view", id="example-globe-reset",
+                                    n_clicks=0, title="Back to the starting view",
+                                    style={
+                                        "position": "absolute", "right": "2px",
+                                        "bottom": "2px", "border": "none",
+                                        "background": "none", "cursor": "pointer",
+                                        "padding": "2px 4px", "fontSize": "10px",
+                                        "fontWeight": "600", "color": "#9aa7bf",
+                                        "fontFamily": "Archivo, system-ui, sans-serif",
+                                    }),
+                                # Drives the idle spin; the clientside callback
+                                # below turns each tick into one small relayout.
+                                dcc.Interval(id="example-globe-spin",
+                                             interval=80, n_intervals=0),
                             ],
+                            id="example-globe-wrap",
+                            # Fixed, and matched by the list below: switching
+                            # views must not change the card's height.  The
+                            # globe keeps its 210px and is centred in the box.
+                            style={"position": "relative", "height": "264px",
+                                   "display": "flex", "alignItems": "center"},
+                        ),
+                        # The original chips are also the List view, so every
+                        # callback that listens to their n_clicks keeps working
+                        # unchanged; the globe just clicks them for the user.
+                        html.Div(
+                            [_shared_example_btn(btn, label, desc, place)
+                             for btn, label, desc, _lat, _lon, place, _file
+                             in _EXAMPLE_SITES],
                             id="example-row",
                             className="pvc-example-list",
+                            # More chips than fit the fixed height: scroll.
+                            style={"display": "none", "height": "264px",
+                                   "overflowY": "auto", "paddingRight": "4px"},
+                        ),
+                        html.Div(
+                            html.Div(
+                                [_example_view_tab("globe", "Globe", True),
+                                 _example_view_tab("list", "List", False)],
+                                style={"display": "flex", "gap": "2px",
+                                       "padding": "2px", "borderRadius": "999px",
+                                       "background": "rgba(120,140,180,0.13)"},
+                            ),
+                            style={"display": "flex", "justifyContent": "flex-end",
+                                   "marginTop": "8px"},
                         ),
                     ],
                     className="pvc-example-column",
                 ),
             ],
             className="pvc-upload-grid",
+            # Narrower example column than the stylesheet's .95fr: the globe
+            # needs far less room than three stacked cards did.  Inline so it
+            # beats the class rule; the injected media query below restores the
+            # single-column layout on narrow screens, which this would
+            # otherwise override.
+            style={"gridTemplateColumns": "minmax(0,2.1fr) minmax(225px,0.7fr)"},
         ),
         # Empty until a file/example is loaded; success and error messages span
         # the full upload + examples block instead of changing one column's height.
@@ -5815,11 +6015,16 @@ _page_body = html.Div([
     dcc.Store(id="data-source-store",     data=None, storage_type="session"),
     dcc.Store(id="stored-data-file-name", data=None, storage_type="session"),
     # Tracks which example chip is currently "active" (the source of the
-    # loaded dataset).  Values: "load-example-btn-1" | "load-example-btn-2"
-    # | "load-example-btn-3" | None (cleared when the user uploads a file
+    # loaded dataset).  Values: one of _EXAMPLE_IDS | None (cleared when the
+    # user uploads a file
     # or hasn't picked an example yet).  Drives the blue ring around the
     # active chip; the styling itself happens in a clientside callback.
     dcc.Store(id="selected-example-store", data=None),
+    # "globe" (default) or "list" -- which example picker is on screen.
+    dcc.Store(id="example-view-store", data="globe"),
+    # Write-only sinks for the two globe clientside callbacks.
+    dcc.Store(id="_globe-spin-dummy", data=None),
+    dcc.Store(id="_globe-reset-dummy", data=None),
     # NEW: holds the computed degradation rate & method so the chat can reference it
     dcc.Store(id="degradation-result-store", data={}),
 
@@ -6160,6 +6365,11 @@ app.clientside_callback(
                 "to{border-color:rgba(47,107,255,0.22);" +
                 "box-shadow:0 0 12px 1px rgba(47,107,255,0.12)," +
                 "inset 0 0 12px 0 rgba(47,107,255,0.06);}}" +
+                // The example column is narrowed with an inline style, which
+                // also overrides the stylesheet's own single-column rule for
+                // narrow screens -- put that back, with the weight to win.
+                "@media (max-width:900px){.pvcopilot-root .pvc-upload-grid" +
+                "{grid-template-columns:minmax(0,1fr)!important;}}" +
                 // Narrow viewports: the card is one column, so drop the cloud
                 // rather than letting it squeeze the headline.
                 "@media (max-width:980px){.pvc-hero-logos{display:none!important;}}" +
@@ -6725,9 +6935,7 @@ def estimate_filters_from_data(trigger, df_json, mapping):
 
     Input("filter-btn",          "n_clicks"),
     Input("upload-data",         "filename"),
-    Input("load-example-btn-1",  "n_clicks"),
-    Input("load-example-btn-2",  "n_clicks"),
-    Input("load-example-btn-3",  "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
 
     State("filter-options",      "value"),
     State("mapped-vars-store",   "data"),
@@ -6749,11 +6957,12 @@ def estimate_filters_from_data(trigger, df_json, mapping):
 
     prevent_initial_call=True
 )
-def run_filter(filter_clicks, upload_clicks,
-        example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
-        gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_csi, cs_energy, cs_lat, cs_lon, cs_tilt, cs_azimuth,
-        downsample_note, cache_meta):
+def run_filter(filter_clicks, upload_clicks, *args):
+    # The first _N_EXAMPLES positional args are the example chips' n_clicks.
+    (selected_filters, mapped_variables_dict, df_json,
+     gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
+     cs_csi, cs_energy, cs_lat, cs_lon, cs_tilt, cs_azimuth,
+     downsample_note, cache_meta) = args[_N_EXAMPLES:]
 
     trigger = ctx.triggered_id
 
@@ -7304,9 +7513,7 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
 
     Input("run-btn",              "n_clicks"),
     Input("upload-data",          "filename"),
-    Input("load-example-btn-1",   "n_clicks"),
-    Input("load-example-btn-2",   "n_clicks"),
-    Input("load-example-btn-3",   "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
 
     State("dataframe-filtered",      "data"),
     State("mapped-vars-store",       "data"),
@@ -7331,18 +7538,18 @@ def _build_multi_method_layout(results, daily_data, start_date, end_date,
     prevent_initial_call=True
 )
 def analyze_uploaded_data_callback(
-        degradation_clicks, upload_clicks,
-        example1_clicks, example2_clicks, example3_clicks,
-        df_filtered_json, mapped_variables_dict, selected_metric,
-        selected_stat_methods,
-        yoy_window, yoy_iqr, hw_period,
-        arima_p, arima_d, arima_q, arima_s, csd_period,
-        pvpro_cells, pvpro_mps, pvpro_ps, pvpro_alphaisc,
-        pvpro_tech, pvpro_days, pvpro_iters):
+        degradation_clicks, upload_clicks, *args):
+    # The first _N_EXAMPLES positional args are the example chips' n_clicks.
+    (df_filtered_json, mapped_variables_dict, selected_metric,
+     selected_stat_methods,
+     yoy_window, yoy_iqr, hw_period,
+     arima_p, arima_d, arima_q, arima_s, csd_period,
+     pvpro_cells, pvpro_mps, pvpro_ps, pvpro_alphaisc,
+     pvpro_tech, pvpro_days, pvpro_iters) = args[_N_EXAMPLES:]
 
     trigger = ctx.triggered_id
 
-    if trigger in ["load-example-btn-1", "load-example-btn-2", "load-example-btn-3", "upload-data"]:
+    if trigger in _EXAMPLE_IDS or trigger == "upload-data":
         return ["", "", False, "Calculate Degradation", {}, {}, True]
 
     if not df_filtered_json:
@@ -8614,19 +8821,168 @@ def simple_pvpro_poll(_n, job_store, pfiltered, selected_method):
 
 @app.callback(
     Output("selected-example-store", "data", allow_duplicate=True),
-    Input("load-example-btn-1", "n_clicks"),
-    Input("load-example-btn-2", "n_clicks"),
-    Input("load-example-btn-3", "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
     Input("upload-data", "contents"),
     prevent_initial_call=True,
 )
 def track_selected_example(*_):
     trigger = ctx.triggered_id
-    if trigger in ("load-example-btn-1", "load-example-btn-2",
-                   "load-example-btn-3"):
+    if trigger in _EXAMPLE_IDS:
         return trigger
     # An upload happened; the user is no longer using an example dataset.
     return None
+
+
+# =============================================================================
+# CALLBACKS - Globe / List switch for the example picker
+#
+# Both views are always in the DOM; only their `display` changes.  The list IS
+# the original three chips, so switching to it gives back exactly the old
+# behaviour with no duplicated wiring.
+# =============================================================================
+@app.callback(
+    Output("example-view-store", "data"),
+    Input("example-tab-globe", "n_clicks"),
+    Input("example-tab-list", "n_clicks"),
+    prevent_initial_call=True,
+)
+def set_example_view(_g, _l):
+    return "list" if ctx.triggered_id == "example-tab-list" else "globe"
+
+
+@app.callback(
+    Output("example-globe-wrap", "style"),
+    Output("example-row", "style"),
+    Output("example-tab-globe", "style"),
+    Output("example-tab-list", "style"),
+    Input("example-view-store", "data"),
+)
+def switch_example_view(view):
+    globe = (view or "globe") != "list"
+    return (
+        {"position": "relative", "height": "264px", "alignItems": "center",
+         "display": "flex" if globe else "none"},
+        {"height": "264px", "display": "none" if globe else "flex",
+         "overflowY": "auto", "paddingRight": "4px"},
+        _example_view_tab_style(globe),
+        _example_view_tab_style(not globe),
+    )
+
+
+# =============================================================================
+# CALLBACKS - the example-site globe
+#
+# Clicking a point on the globe bumps the matching (hidden) chip's n_clicks.
+# Everything downstream -- loading the parquet, resetting the workflow, the
+# chat context, the status line -- already listens to those chips, so the
+# globe is a new way to press an existing button rather than a second code
+# path that would have to be kept in step with the first.
+# =============================================================================
+@app.callback(
+    [Output(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
+    Input("example-globe", "clickData"),
+    [State(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
+    prevent_initial_call=True,
+)
+def load_example_from_globe(click, *ns):
+    points = (click or {}).get("points") or []
+    if not points:
+        raise dash.exceptions.PreventUpdate
+    # Both traces (halo and marker) carry the sites in the same order, so the
+    # point index identifies the site whichever one the click landed on.
+    point = points[0]
+    idx = point.get("pointIndex", point.get("pointNumber"))
+    if idx is None or not (0 <= idx < len(_EXAMPLE_SITES)):
+        raise dash.exceptions.PreventUpdate
+    counts = [n or 0 for n in ns]
+    out = [dash.no_update] * _N_EXAMPLES
+    out[idx] = counts[idx] + 1
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Idle spin, zoom floor and reset -- all clientside, because each is a single
+# Plotly.relayout and a server round-trip every 80 ms would be absurd.
+#
+# The spin is a relayout rather than a new figure on purpose: replacing the
+# figure 12 times a second would fight `uirevision` and throw away the user's
+# own rotation.
+# ---------------------------------------------------------------------------
+app.clientside_callback(
+    """
+    function(n) {
+        var host = document.getElementById("example-globe");
+        var gd = host && (host.classList.contains("js-plotly-plot")
+                          ? host : host.querySelector(".js-plotly-plot"));
+        if (!gd || !gd._fullLayout || !gd._fullLayout.geo) {
+            return window.dash_clientside.no_update;
+        }
+        if (!gd.__globeInit) {
+            gd.__globeInit = true;
+            // The opening size is the floor: scrolling can zoom in, not out.
+            gd.on("plotly_relayout", function (e) {
+                var sc = e["geo.projection.scale"];
+                if (sc !== undefined && sc < 1 && !gd.__clamping) {
+                    gd.__clamping = true;
+                    Plotly.relayout(gd, {"geo.projection.scale": 1})
+                          .then(function () { gd.__clamping = false; });
+                }
+            });
+        }
+        // Pause while the pointer is on the globe, so hovering a site or
+        // dragging it is not fighting the animation.  Asking the element
+        // whether it is hovered beats mouseenter/mouseleave listeners, which
+        // Plotly's own drag layers swallow.
+        if (host.matches(":hover") || host.offsetParent === null) {
+            return window.dash_clientside.no_update;   // hovered, or List view
+        }
+        if (window.matchMedia &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            return window.dash_clientside.no_update;
+        }
+        var proj = gd._fullLayout.geo.projection || {};
+        var lon = (proj.rotation && proj.rotation.lon) || 0;
+        lon = ((lon + 0.2 + 180) % 360) - 180;
+        Plotly.relayout(gd, {"geo.projection.rotation.lon": lon});
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("_globe-spin-dummy", "data"),
+    Input("example-globe-spin", "n_intervals"),
+)
+
+
+app.clientside_callback(
+    """
+    function(n) {
+        if (!n) { return window.dash_clientside.no_update; }
+        var host = document.getElementById("example-globe");
+        var gd = host && (host.classList.contains("js-plotly-plot")
+                          ? host : host.querySelector(".js-plotly-plot"));
+        if (gd && gd._fullLayout) {
+            Plotly.relayout(gd, {
+                "geo.projection.rotation.lon": -40,
+                "geo.projection.rotation.lat": 20,
+                "geo.projection.scale": 1
+            });
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("_globe-reset-dummy", "data"),
+    Input("example-globe-reset", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+
+@app.callback(
+    Output("example-globe", "figure"),
+    Input("selected-example-store", "data"),
+)
+def highlight_example_site(selected):
+    """Re-draw with the chosen site enlarged and amber. `uirevision` in the
+    figure keeps the user's rotation and zoom across this replacement."""
+    return _example_globe_figure(selected)
 
 
 # Style-update clientside callback. Layout and typography live in the shared
@@ -8637,7 +8993,11 @@ app.clientside_callback(
         var resting = {
             "border": "1px solid rgba(255,255,255,0.82)",
             "background": "rgba(255,255,255,0.46)",
-            "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.65)"
+            "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.65)",
+            // The list scrolls inside the globe's fixed height, so each chip
+            // keeps its natural size instead of being squeezed to fit.
+            "minHeight": "0",
+            "flex": "0 0 auto"
         };
         var active = Object.assign({}, resting, {
             "border": "2px solid #2f6bff",
@@ -8645,16 +9005,10 @@ app.clientside_callback(
             "boxShadow": "0 0 0 3px rgba(47,107,255,0.12)"
         });
 
-        return [
-            selected === "load-example-btn-1" ? active  : resting,
-            selected === "load-example-btn-2" ? active  : resting,
-            selected === "load-example-btn-3" ? active  : resting
-        ];
+        return IDS.map(function (id) { return selected === id ? active : resting; });
     }
-    """,
-    [Output("load-example-btn-1", "style"),
-     Output("load-example-btn-2", "style"),
-     Output("load-example-btn-3", "style")],
+    """.replace("IDS", json.dumps(_EXAMPLE_IDS)),
+    [Output(_eid, "style") for _eid in _EXAMPLE_IDS],
     Input("selected-example-store", "data"),
 )
 
@@ -8773,7 +9127,10 @@ app.clientside_callback(
 # data-source-store write below.
 app.clientside_callback(
     """
-    function(analyze_n, ex1_n, ex2_n, ex3_n, upload_contents) {
+    function() {
+        // (analyze_n, <one n_clicks per example chip>, upload_contents)
+        var analyze_n = arguments[0];
+        var upload_contents = arguments[arguments.length - 1];
         var ctx = window.dash_clientside.callback_context;
         if (!ctx.triggered || ctx.triggered.length === 0) {
             return [false, "Run prescreening"];
@@ -8788,15 +9145,13 @@ app.clientside_callback(
             if (!upload_contents) return [false, "Run prescreening"];
             return [true, "Uploading data..."];
         }
-        // Any of the three example chips.
+        // Any of the example chips.
         return [true, "Uploading data..."];
     }
     """,
     [Output("analyze-btn", "disabled"), Output("analyze-btn", "children")],
     Input("analyze-btn", "n_clicks"),
-    Input("load-example-btn-1", "n_clicks"),
-    Input("load-example-btn-2", "n_clicks"),
-    Input("load-example-btn-3", "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
     Input("upload-data", "contents"),
     prevent_initial_call=True
 )
@@ -10026,9 +10381,7 @@ def toggle_raw_table(n_clicks, df_json, cache_meta, current_style):
     Output("dataframe-original",   "data",     allow_duplicate=True),
     Output("downsample-note",      "data",     allow_duplicate=True),
     Input("analyze-btn",          "n_clicks"),
-    Input("load-example-btn-1",   "n_clicks"),
-    Input("load-example-btn-2",   "n_clicks"),
-    Input("load-example-btn-3",   "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
     State("upload-data",          "contents"),
     State("upload-data",          "filename"),
     State("dataframe-store",      "data"),
@@ -10037,21 +10390,16 @@ def toggle_raw_table(n_clicks, df_json, cache_meta, current_style):
     State("analyze-status-token", "data"),
     prevent_initial_call=True
 )
-def analyze_uploaded_data_callback(
-        analyze_clicks, example_clicks_1, example_clicks_2, example_clicks_3,
-        contents, filename, stored_df_json, data_source, stored_file_name,
-        status_token):
+def analyze_uploaded_data_callback(analyze_clicks, *args):
+    # The first _N_EXAMPLES positional args are the example chips' n_clicks.
+    (contents, filename, stored_df_json, data_source, stored_file_name,
+     status_token) = args[_N_EXAMPLES:]
 
     trigger = ctx.triggered_id
 
     # Example dataset
-    if trigger in ["load-example-btn-1", "load-example-btn-2", "load-example-btn-3"]:
-        file_map = {
-            "load-example-btn-1": "sys_1278_downsampled_with_VI.parquet",
-            "load-example-btn-2": "sys_1403_part1_downsampled_with_VI.parquet",
-            "load-example-btn-3": "sys_1422_downsampled.parquet",
-        }
-        example_filename = file_map.get(trigger)
+    if trigger in _EXAMPLE_IDS:
+        example_filename = _EXAMPLE_FILES.get(trigger)
         try:
             df = pd.read_parquet(f"data/{example_filename}")
             df_json = df.to_json(date_format="iso", orient="split")
@@ -10466,9 +10814,7 @@ def restore_session(_ts, meta, df_json, mapped, columns_meta, notes, progress,
     Output("download-link",  "style",    allow_duplicate=True),
     Input("upload-data",         "filename"),
     Input("analyze-btn",         "n_clicks"),
-    Input("load-example-btn-1",  "n_clicks"),
-    Input("load-example-btn-2",  "n_clicks"),
-    Input("load-example-btn-3",  "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
     prevent_initial_call=True,
 )
 def clear_code_panel_on_new_data(*_):
@@ -10511,7 +10857,7 @@ def autoopen_pvpro_params_panel(metric):
 #
 # Triggered whenever the user loads a different dataset -- either by
 # uploading a file (`upload-data.filename`) or clicking one of the
-# three example chips (`load-example-btn-{1,2,3}`).
+# example chips (`load-example-btn-*`, see _EXAMPLE_SITES).
 #
 # What this does
 # --------------
@@ -10571,9 +10917,7 @@ def autoopen_pvpro_params_panel(metric):
     # master. (The short-data gate may afterwards move it off YoY if needed.)
     Output("metric-stat-radio", "value", allow_duplicate=True),
     Input("upload-data",         "filename"),
-    Input("load-example-btn-1",  "n_clicks"),
-    Input("load-example-btn-2",  "n_clicks"),
-    Input("load-example-btn-3",  "n_clicks"),
+    *[Input(_eid, "n_clicks") for _eid in _EXAMPLE_IDS],
     prevent_initial_call=True,
 )
 def reset_pvpro_params_on_new_data(*_):
@@ -12575,9 +12919,7 @@ def simple_start(n_clicks, prev_trigger, method):
 # each real stage completes.
 # =============================================================================
 _EXAMPLE_FRIENDLY = {
-    "sys_1278_downsampled_with_VI.parquet": "Example data 1",
-    "sys_1403_part1_downsampled_with_VI.parquet": "Example data 2",
-    "sys_1422_downsampled.parquet": "Example data 3",
+    _site[6]: f"Example data · {_site[1]} ({_site[5]})" for _site in _EXAMPLE_SITES
 }
 
 

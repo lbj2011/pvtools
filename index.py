@@ -32,6 +32,14 @@ import pages.iv_correction_tool
 import pages.pv_climate_stressors
 import pages.pv_pathway
 
+# Internal dataset-review tool at /dataset-review/ (a separate Dash app on the same server).
+# Deliberately not linked from the navbar or any page: internal testing only.
+try:
+    import dataset_review
+    dataset_review.mount(server)
+except Exception as _e:  # never let it break the public site
+    print(f"dataset review not mounted: {_e}")
+
 # ------------------------------------------------
 # Lazy page loader
 # ------------------------------------------------

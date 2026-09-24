@@ -373,3 +373,93 @@ assets/pvpro_logo_flat.png
 not import it (it was rejected during the dependency survey — 114 packages and
 a forced numpy 2.x). Its mark is credit, not a dependency claim; nothing in
 Step 2 or Step 3 attributes a filter or a metric to it.
+
+## Example-data picker — interactive globe
+
+The three example-dataset cards are replaced by a draggable orthographic globe
+(`dcc.Graph(id="example-globe")`, two `go.Scattergeo` traces). Drag rotates,
+scroll zooms (`config={"scrollZoom": True}`), double-click resets, hover shows
+the system name, its column set, the place and the coordinates, and a click
+loads that dataset.
+
+* **The three chips are still in the DOM, hidden** (`display: none`). Eight
+  existing callbacks listen to `load-example-btn-{1,2,3}.n_clicks`; rather than
+  duplicate that wiring, `load_example_from_globe` bumps the matching chip's
+  `n_clicks` from the globe's `clickData`. The globe is a new way to press an
+  existing button, not a second code path to keep in step.
+* `highlight_example_site` redraws the figure when `selected-example-store`
+  changes, enlarging the chosen marker and turning it amber with a halo.
+  `uirevision="example-globe"` on the layout is what keeps the user's rotation
+  and zoom across that redraw — without it, selecting a site would snap the
+  globe back to its opening view.
+* Two traces, not one: the halo is drawn underneath with `hoverinfo="skip"` and
+  size 0 for the unselected sites, which keeps the point order identical in
+  both traces so `pointIndex` identifies the site whichever trace the click
+  landed on.
+* No new dependency — plotly is already pinned (`plotly>=6.0.0`).
+
+### Globe / List switch, idle spin, zoom floor, reset
+
+* A small segmented control beside the heading flips `example-view-store`
+  between `"globe"` and `"list"`. Both views stay in the DOM and only their
+  `display` changes; the List view **is** the original three chips, so it is
+  the old behaviour exactly, with nothing duplicated.
+* The globe drifts on its own: a 80 ms `dcc.Interval` drives a clientside
+  callback that advances `geo.projection.rotation.lon` by 0.2° per tick (about
+  2.5°/s, ~2.5 min a turn). It is a `Plotly.relayout`, not a new figure —
+  re-rendering the figure twelve times a second would fight `uirevision` and
+  throw away whatever rotation the user had set.
+* The spin pauses while the pointer is over the globe, tested via
+  `gd.matches(":hover")` rather than mouseenter/mouseleave listeners, which
+  Plotly's own drag layers swallow. It also pauses in List view
+  (`offsetParent === null`) and under `prefers-reduced-motion`.
+* **Zoom floor.** A `plotly_relayout` handler clamps `geo.projection.scale`
+  back to 1 whenever a scroll takes it below, so the opening size is the
+  smallest the globe gets; zooming in is unrestricted.
+* **Reset view** puts rotation and scale back to `_GLOBE_HOME`
+  (lon −40, lat 20, scale 1) — the same constant the initial figure uses, so
+  the two cannot drift apart. The button is hidden in List view.
+* The example column is narrowed from the stylesheet's `.95fr` to `0.7fr` with
+  an inline `grid-template-columns`; because that inline style also overrides
+  the stylesheet's own `max-width: 900px` single-column rule, that rule is
+  re-injected with `!important` alongside the other injected CSS.
+
+**Coordinates are placeholders.** `_EXAMPLE_SITES` currently puts the systems in
+Golden CO, Seville and Brisbane, chosen only so the three are spread far enough
+apart that rotating the globe is worth doing. A map asserts that the points are
+where the systems are, so these need replacing with the real locations.
+
+**The topojson is served locally.** plotly.js 3.x does not bundle the
+land/coastline topojson; by default it fetches `world_110m.json` from
+`https://cdn.plot.ly/topojson/` the first time a geo trace draws, and if that
+host is unreachable the globe renders as nothing at all — no sphere, no
+graticule, only the scatter markers. That is what happened in practice, so
+`assets/topojson/world_110m.json` (137 KB, from the `sane-topojson` package
+plotly itself publishes) now ships with the app and the graph config points at
+it with `"topojsonURL": "/assets/topojson/"`. The app has no URL prefix, so the
+absolute `/assets/` path is safe.
+
+**`dcc.Graph(id=...)` is a wrapper, not the plot.** Dash renders the id on an
+outer div and the plotly graph as a `.js-plotly-plot` child, so
+`document.getElementById("example-globe")._fullLayout` is `undefined`. Every
+one of the three clientside callbacks hit its guard and silently returned
+`no_update` — the symptom was a globe that would not spin, a zoom floor that
+did not clamp and a reset button that did nothing. They now resolve the graph
+with `host.querySelector(".js-plotly-plot")`, and ask the *wrapper* about
+`:hover`, since that is what the pointer is actually over.
+
+**Both views are exactly 264 px tall**, so switching does not make the card
+jump. 264 is what the list actually needs — three chips at their natural 81 px
+plus two 10 px gaps — and the globe keeps its own 210 px, centred in that box
+rather than stretched. The chips' inline style (which the style callback owns,
+so the override has to live there) sets `min-height: 0; flex: 1 1 0` in place
+of the stylesheet's 76 px floor, so the three divide the fixed height exactly.
+
+**The list view names the site too**, on a third muted line, and both views are
+now generated from `_EXAMPLE_SITES`, so a site cannot appear in one and not the
+other.
+
+**Layout.** The heading has a line to itself; the Globe / List switch sits
+below both views, right-aligned, so it stays reachable in either one; and
+"↺ reset view" is a small muted label in the bottom-right corner of the globe
+box, which the sphere never fills.

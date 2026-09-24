@@ -70,3 +70,6 @@ htmlcov/
 
 # ppt files
 .pptx
+
+# internal dataset review: data comes from S3, never committed
+dataset_review/data/
