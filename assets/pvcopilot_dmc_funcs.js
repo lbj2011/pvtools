@@ -14,9 +14,23 @@
 
 var dmcfuncs = window.dashMantineFunctions = window.dashMantineFunctions || {};
 
+// Truncates from the end with an ellipsis at a fixed character budget. CSS
+// text-overflow:ellipsis needs a definitively bounded box to engage, and this
+// popover renders in a portal whose row width isn't reliably constrained —
+// so the display text is shortened here in JS instead of relying on layout,
+// which showed up as very long names running to the container's raw edge
+// with no "..." at all. The full name is unaffected — it's still the
+// `title` on the row (hover) and the untouched `option.value` used as the
+// actual selection.
+function truncateForList(str, maxChars) {
+    if (!str || str.length <= maxChars) return str;
+    return str.slice(0, maxChars - 1) + "\u2026";
+}
+
 dmcfuncs.renderVarMapOption = function (input) {
     var option = input.option || {};
-    var name = option.label != null ? option.label : option.value;
+    var fullName = option.label != null ? option.label : option.value;
+    var name = truncateForList(fullName, 32);
     var tag = option.quality || "";
 
     // Left: a small bullet marker, then the column name. The bullet appears on
@@ -47,6 +61,11 @@ dmcfuncs.renderVarMapOption = function (input) {
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
+                    // Kept as a defensive backup in case the row ever does get
+                    // a real bounded width — harmless either way now that the
+                    // string itself is already short.
+                    minWidth: 0,
+                    flex: "1 1 auto",
                 },
             },
             name
@@ -71,11 +90,15 @@ dmcfuncs.renderVarMapOption = function (input) {
         // not just the color.
         var pillText = (isNeutral ? "Note: " : "Warning: ") + tag;
 
+        var pillTextFull = pillText;
+        var pillTextShown = truncateForList(pillText, 26);
+
         children.push(
             React.createElement(
                 "span",
                 {
                     key: "pill",
+                    title: pillTextFull,
                     style: {
                         marginInlineStart: "auto", // <- pushes pill to the right
                         flex: "0 0 auto",
@@ -90,9 +113,14 @@ dmcfuncs.renderVarMapOption = function (input) {
                         borderRadius: "980px",
                         padding: "3px 8px",
                         whiteSpace: "nowrap",
+                        // Defensive bound: even an unusually long quality
+                        // message can't push the row past the popover edge.
+                        maxWidth: "140px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                     },
                 },
-                pillText
+                pillTextShown
             )
         );
     }
@@ -100,16 +128,39 @@ dmcfuncs.renderVarMapOption = function (input) {
     return React.createElement(
         "div",
         {
+            // Full, untruncated column name as a native tooltip — the "name"
+            // span above shows the shortened form, so this is what lets
+            // hovering ANYWHERE on the option row reveal the complete value.
+            title: fullName,
             style: {
                 display: "flex",
                 alignItems: "center",
                 width: "100%",
+                minWidth: 0,
                 gap: "8px",
+                // Hard backstop: even if the name+pill combination is wider
+                // than expected for some edge case, this clips the ROW at the
+                // popover's own boundary instead of letting content bleed
+                // past its rounded border (name/pill truncation above should
+                // already prevent this, but this makes it impossible either way).
+                overflow: "hidden",
             },
         },
         children
     );
 };
+
+// Dismiss button for success messages (".pvc-dismissible" banners/cards, each
+// with one ".pvc-dismiss-btn" in a corner). One delegated listener handles
+// every instance, present now or added later by a future Dash re-render, so
+// no per-banner Dash callback or id is needed — clicking just hides that
+// banner's own DOM node.
+document.addEventListener("click", function (event) {
+    var btn = event.target.closest && event.target.closest(".pvc-dismiss-btn");
+    if (!btn) return;
+    var banner = btn.closest(".pvc-dismissible");
+    if (banner) banner.style.display = "none";
+});
 
 // Keep the newest server event visible and let the user drag the complete
 // progress monitor by its header. The translation is saved across Dash

@@ -1196,6 +1196,28 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         mapped_variables_dict = {}
         mapping_notes = []
 
+    # Coerce every mapped numeric-role column to a real numeric dtype before
+    # handing df back. A column stored as text (a common CSV/export quirk —
+    # "1200.5" as a string, or a mostly-numeric column with a few blank/
+    # sentinel strings mixed in) passes THIS function's own detection just
+    # fine — the column name and role are correctly identified — but every
+    # actual numeric operation on it downstream (a figure's axis range, a
+    # filter comparison, normalize()'s arithmetic, PVPRO's fitting) would
+    # otherwise fail with a raw, unhelpful TypeError, or worse, silently
+    # poison a value used by another calculation right after it (seen in
+    # make_overview_figures, where an Irradiance column with even one
+    # unparseable value used to take Temperature's figure down with it).
+    # This is the one place every caller's df ultimately comes from, so
+    # fixing it here — once — means figures, filters, normalize(), and
+    # PVPRO all get clean numeric data without needing their own version of
+    # the same coercion.
+    if df is not None and mapped_variables_dict:
+        for _role in ("DC Power", "Irradiance", "Module temperature",
+                     "DC Voltage", "DC Current"):
+            _col = mapped_variables_dict.get(_role)
+            if _col and _col in df.columns and not pd.api.types.is_numeric_dtype(df[_col]):
+                df[_col] = pd.to_numeric(df[_col], errors="coerce")
+
     return df, summary_table, mapped_variables_dict, code_read, mapping_notes
 
 
@@ -1257,6 +1279,21 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
                          title_font=dict(size=11))
         return fig
 
+    def _numeric_column(key):
+        """Coerces a mapped column to numeric (text/mixed-dtype columns —
+        a common CSV/export quirk — otherwise fail every arithmetic or
+        comparison operation below with a raw, unhelpful TypeError). Raises
+        ValueError with a clear message if every value is unusable, so the
+        caller's own except-block reports a real reason instead of a
+        confusing "'>' not supported between str and int" from deep inside
+        a min/max comparison."""
+        s = df[key]
+        if not pd.api.types.is_numeric_dtype(s):
+            s = pd.to_numeric(s, errors="coerce")
+        if s.notna().sum() == 0:
+            raise ValueError(f"Column '{key}' has no usable numeric values")
+        return s
+
     # -------------------------
     # 1. Power (blue)
     # -------------------------
@@ -1269,11 +1306,13 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if power_key not in df.columns:
             raise ValueError(f"Column '{power_key}' not found")
 
+        power_series = _numeric_column(power_key)
+
         fig_power = go.Figure()
 
         fig_power.add_trace(go.Scattergl(
             x=df.index,
-            y=df[power_key],
+            y=power_series,
             mode="markers",
             name="Power Output",
             opacity=0.18,
@@ -1298,11 +1337,13 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if irr_key not in df.columns:
             raise ValueError(f"Column '{irr_key}' not found")
 
+        irr_series = _numeric_column(irr_key)
+
         fig_irr = go.Figure()
 
         fig_irr.add_trace(go.Scattergl(
             x=df.index,
-            y=df[irr_key],
+            y=irr_series,
             mode="markers",
             name="Irradiance",
             opacity=0.18,
@@ -1312,19 +1353,19 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         fig_irr = apply_layout(fig_irr, "Irradiance", "Irrad. (W/m²)")
 
         # --- Apply irradiance limit ---
-        ymax = df[irr_key].max()
-        ymin = df[irr_key].min()
+        irr_ymax = irr_series.max()
+        irr_ymin = irr_series.min()
 
-        y_lower = ymin
-        y_upper = ymax
+        irr_y_lower = irr_ymin
+        irr_y_upper = irr_ymax
 
-        if ymax > 1500:
-            y_upper = 1500
+        if irr_ymax > 1500:
+            irr_y_upper = 1500
 
-        if ymin < 0:
-            y_lower = 0
+        if irr_ymin < 0:
+            irr_y_lower = 0
 
-        fig_irr.update_yaxes(range=[y_lower, y_upper])
+        fig_irr.update_yaxes(range=[irr_y_lower, irr_y_upper])
 
         figures.append(dcc.Graph(figure=fig_irr))
 
@@ -1343,35 +1384,45 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if temp_raw not in df.columns:
             raise ValueError(f"Column '{temp_raw}' not found")
 
+        temp_series = _numeric_column(temp_raw)
+
         fig_temp = go.Figure()
 
         fig_temp.add_trace(go.Scattergl(
             x=df.index,
-            y=df[temp_raw],
+            y=temp_series,
             mode="markers",
             name="Module Temp raw",
             opacity=0.18,
             marker=dict(color=COLORS["temp_raw"], size=4)
         ))
 
-        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
-
         fig_temp = apply_layout(fig_temp, "Temperature", "Temp (°C)")
 
         # --- Apply temperature limit ---
-        ymax = df[temp_raw].max()
-        ymin = df[temp_raw].min()
+        # Own local names (temp_y_lower/temp_y_upper), computed BEFORE the
+        # only update_yaxes call for this figure. The previous version set
+        # the axis range once using the IRRADIANCE block's leftover
+        # y_lower/y_upper (from before Temperature had computed its own),
+        # then again with its own correct values — since those were shared,
+        # unscoped names, a plain string column anywhere upstream (Irradiance
+        # included) could leave them holding text, and Temperature's own,
+        # perfectly fine numeric column would still fail on the first,
+        # premature range update. One computation, right before the one
+        # place it's used, removes the whole class of that bug.
+        temp_ymax = temp_series.max()
+        temp_ymin = temp_series.min()
 
-        y_lower = ymin
-        y_upper = ymax
+        temp_y_lower = temp_ymin
+        temp_y_upper = temp_ymax
 
-        if ymax > 150:
-            y_upper = 80
+        if temp_ymax > 150:
+            temp_y_upper = 80
 
-        if ymin < -50:
-            y_lower = -40
+        if temp_ymin < -50:
+            temp_y_lower = -40
 
-        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
+        fig_temp.update_yaxes(range=[temp_y_lower - 20, temp_y_upper + 20])
 
         figures.append(dcc.Graph(figure=fig_temp))
 
@@ -1385,10 +1436,11 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         v_key = mapped_variables_dict.get("DC Voltage")
 
         if v_key and v_key in df.columns:
+            v_series = _numeric_column(v_key)
             fig_v = go.Figure()
             fig_v.add_trace(go.Scattergl(
                 x=df.index,
-                y=df[v_key],
+                y=v_series,
                 mode="markers",
                 name="DC Voltage",
                 opacity=0.18,
@@ -1407,10 +1459,11 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         i_key = mapped_variables_dict.get("DC Current")
 
         if i_key and i_key in df.columns:
+            i_series = _numeric_column(i_key)
             fig_i = go.Figure()
             fig_i.add_trace(go.Scattergl(
                 x=df.index,
-                y=df[i_key],
+                y=i_series,
                 mode="markers",
                 name="DC Current",
                 opacity=0.18,
@@ -1429,15 +1482,53 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 # NORMALIZATION
 # ================================
 def normalize(df, mapped_variables_dict, gamma=-0.004):
+    """Normalizes DC Power by Irradiance (and, when available, a module
+    temperature correction) into a comparable capacity-factor-like series.
+
+    Irradiance and DC Power are hard requirements — there is no meaningful
+    normalization without them, so a missing/absent key raises a clear
+    KeyError naming which one, rather than the interpreter's own bare
+    KeyError with just the dict key. Module temperature is genuinely
+    optional: without it, the temperature term is skipped entirely (gamma
+    has no effect) rather than crashing, since a real deployment very often
+    doesn't have a module-temperature sensor at all and normalization by
+    irradiance alone is still useful.
+
+    Each input column is coerced to numeric first — a column stored as text
+    (a common CSV/export quirk) would otherwise fail the arithmetic below
+    with a raw, unhelpful TypeError instead of just having its bad values
+    become NaN.
+    """
+    if "Irradiance" not in mapped_variables_dict or not mapped_variables_dict["Irradiance"]:
+        raise KeyError("normalize() requires 'Irradiance' to be mapped")
+    if "DC Power" not in mapped_variables_dict or not mapped_variables_dict["DC Power"]:
+        raise KeyError("normalize() requires 'DC Power' to be mapped")
 
     irr_key = mapped_variables_dict["Irradiance"]
     power_key = mapped_variables_dict["DC Power"]
-    temp_C_key = mapped_variables_dict["Module temperature"]
+    temp_C_key = mapped_variables_dict.get("Module temperature")
 
-    df['norm'] = df[power_key] / (
-        df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
+    def _numeric(s):
+        return s if pd.api.types.is_numeric_dtype(s) else pd.to_numeric(s, errors="coerce")
 
-    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    irr = _numeric(df[irr_key])
+    power = _numeric(df[power_key])
+    df[irr_key] = irr
+    df[power_key] = power
+
+    if temp_C_key and temp_C_key in df.columns:
+        temp_C = _numeric(df[temp_C_key])
+        df[temp_C_key] = temp_C
+        temp_term = (1 + gamma * (temp_C - 25))
+    else:
+        # No module temperature available: skip the correction rather than
+        # fail. A constant 1.0 here is the same no-op the correction term
+        # would be AT exactly 25°C — i.e. normalizing by irradiance alone.
+        temp_term = 1.0
+
+    df['norm'] = power / (irr * temp_term) * 1000
+
+    df.loc[irr < 50, 'norm'] = np.nan
 
     return df
 
@@ -1450,14 +1541,24 @@ def low_irra_power_filter(df, mapped_variables_dict,
                           norm_lower=0.01, norm_upper_pct=99):
     mask = pd.Series(True, index=df.index)
 
-    irr_key = mapped_variables_dict["Irradiance"]
-    power_key = mapped_variables_dict["DC Power"]
+    irr_key = mapped_variables_dict.get("Irradiance")
+    power_key = mapped_variables_dict.get("DC Power")
+    if not irr_key:
+        raise KeyError("low_irra_power_filter() requires 'Irradiance' to be mapped")
+    if not power_key:
+        raise KeyError("low_irra_power_filter() requires 'DC Power' to be mapped")
+
+    def _numeric(s):
+        return s if pd.api.types.is_numeric_dtype(s) else pd.to_numeric(s, errors="coerce")
+
+    irr = _numeric(df[irr_key])
+    power = _numeric(df[power_key])
 
     # irradiance filter
-    mask &= df[irr_key] > irr_thresh
+    mask &= irr > irr_thresh
 
     # power filter
-    mask &= df[power_key] > power_ratio * df[irr_key]
+    mask &= power > power_ratio * irr
 
     # norm range filter
     upper = df['norm'].quantile(norm_upper_pct / 100)
@@ -2644,6 +2745,13 @@ def compute_pvpro(df,
     tm_key  = mapped_variables_dict["Module temperature"]
 
     df_p = df[[v_key, i_key, irr_key, tm_key]].copy()
+    # A column stored as text (a common CSV/export quirk) would otherwise
+    # fail every comparison below (irradiance_threshold, > 0, ...) with a
+    # raw TypeError instead of just becoming NaN and getting dropped by the
+    # dropna() call right after.
+    for _col in (v_key, i_key, irr_key, tm_key):
+        if not pd.api.types.is_numeric_dtype(df_p[_col]):
+            df_p[_col] = pd.to_numeric(df_p[_col], errors="coerce")
     df_p.index = pd.to_datetime(df_p.index)
     df_p = df_p.dropna()
     df_p = df_p[df_p[irr_key] > irradiance_threshold]

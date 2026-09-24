@@ -1,0 +1,28 @@
+# Additional dependencies for page_supporting_files/analysis_utils_pkg.py
+# (package-backed PV-Copilot analysis).  Verified against the pins in
+# requirements.txt: python 3.11, numpy==1.26.4, pandas==2.0.3, scipy==1.13.1,
+# pvlib==0.9.5.  Nothing in requirements.txt has to change.
+#
+# --- Tier 1: rdtools -------------------------------------------------------
+# rdtools 2.1.8 is the last release compatible with pvlib<0.11 / pandas<2.1.
+# It declares `xgboost` as a hard dependency (191 MB wheel for 1.7.6; the
+# current 3.x wheel is 125 MB + a 326 MB nvidia-nccl dependency).  rdtools
+# only uses xgboost for its optional xgboost_clip_filter, so we install the
+# 5 MB CPU-only build and rdtools itself with --no-deps:
+#
+#     pip install -r requirements_pkg.txt
+#     pip install --no-deps rdtools==2.1.8
+#
+# (Dockerfile: add the second line after the existing `pip install -r`.)
+xgboost-cpu>=2.0
+h5py>=3.7
+matplotlib>=3.5
+# statsmodels, scikit-learn, plotly, scipy, pvlib: already in requirements.txt
+
+# --- Tier 2: pvanalytics (optional) ----------------------------------------
+# analysis_utils_pkg falls back to pure pandas when these are missing.
+# pvanalytics pulls scikit-image (+imageio, tifffile, pillow) ~35 MB.
+# `ruptures` is pvanalytics' optional dependency for shifts_ruptures
+# (time-shift / DST detection).
+pvanalytics==0.2.2
+ruptures>=1.1

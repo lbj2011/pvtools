@@ -576,9 +576,9 @@ html, body { background: #ffffff !important; }
 }
 .pvcopilot-root .pvc-yoy-summary-card {
   display:flex;
-  height:460px;
+  height:440px;
   min-height:0;
-  max-height:460px;
+  max-height:440px;
   box-sizing:border-box;
   flex-direction:column;
   padding:32px 28px 28px;
@@ -632,9 +632,9 @@ html, body { background: #ffffff !important; }
 .pvcopilot-root .pvc-yoy-status-separator { margin:0 3px; color:#71809e; }
 .pvcopilot-root .pvc-yoy-status-value { min-width:0; color:#344568; font-weight:800; }
 .pvcopilot-root .pvc-yoy-chart-card {
-  height:460px;
+  height:440px;
   min-height:0;
-  max-height:460px;
+  max-height:440px;
   overflow:hidden;
   box-sizing:border-box;
   padding:28px 26px 12px;
@@ -649,17 +649,63 @@ html, body { background: #ffffff !important; }
 }
 .pvcopilot-root .pvc-yoy-graph {
   width:100% !important;
-  height:390px !important;
+  height:368px !important;
   min-width:0;
-  max-height:390px !important;
+  max-height:368px !important;
   overflow:hidden;
 }
 .pvcopilot-root .pvc-yoy-graph .js-plotly-plot,
 .pvcopilot-root .pvc-yoy-graph .plot-container,
 .pvcopilot-root .pvc-yoy-graph .svg-container {
-  height:390px !important;
-  max-height:390px !important;
+  height:368px !important;
+  max-height:368px !important;
 }
+
+/* Global field-degradation context strip (used in every result summary card). */
+.pvcopilot-root .pvc-dist {
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid rgba(120,140,180,.16);
+}
+/* In the fixed-height YOY card, anchor the strip to the bottom so any spare
+   space becomes a small gap above it rather than empty space beneath. */
+.pvcopilot-root .pvc-yoy-summary-card .pvc-dist { margin-top:auto; }
+.pvcopilot-root .pvc-dist-label {
+  color:#8392b0;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.075em;
+  text-transform:uppercase;
+  margin-bottom:2px;
+}
+.pvcopilot-root .pvc-dist-graph {
+  width:100% !important;
+  height:165px !important;
+  min-width:0;
+}
+.pvcopilot-root .pvc-dist-graph .js-plotly-plot,
+.pvcopilot-root .pvc-dist-graph .plot-container,
+.pvcopilot-root .pvc-dist-graph .svg-container {
+  height:165px !important;
+}
+.pvcopilot-root .pvc-dist-caption {
+  margin-top:6px;
+  color:#71809e;
+  font-size:11.5px;
+  line-height:1.4;
+}
+.pvcopilot-root .pvc-dist-caption-sub {
+  margin-top:1px;
+  color:#94a1bb;
+  font-size:11px;
+}
+.pvcopilot-root .pvc-dist-link {
+  color:#2f6bff;
+  font-weight:700;
+  text-decoration:none;
+  border-bottom:1px solid rgba(47,107,255,.35);
+}
+.pvcopilot-root .pvc-dist-link:hover { border-bottom-color:#2f6bff; }
 .pvcopilot-root .pvc-yoy-chart-empty { padding:80px 20px; color:#8090ad; text-align:center; }
 
 /* Actions shown only after a Simple-mode result replaces the start panel. */
@@ -725,18 +771,21 @@ html, body { background: #ffffff !important; }
 .pvcopilot-root .pvc-simple-pvpro-trends {
   min-width:0;
   min-height:382px;
-  border:1px solid rgba(255,255,255,.86);
-  border-radius:27px;
-  box-shadow:0 14px 38px rgba(30,58,120,.08),inset 0 1px 0 rgba(255,255,255,.74);
+  border:1px solid rgba(255,255,255,.84);
+  border-radius:26px;
+  box-shadow:0 14px 38px rgba(30,58,120,.08),inset 0 1px 0 rgba(255,255,255,.72);
 }
+/* Simple-mode summary cards (YOY + PVPRO) share one visual language. */
 .pvcopilot-root .pvc-simple-pvpro-summary {
   display:flex;
+  min-height:430px;
+  box-sizing:border-box;
   flex-direction:column;
-  padding:26px 24px 25px;
-  background:linear-gradient(145deg,rgba(245,250,255,.80),rgba(244,250,247,.66));
+  padding:32px 28px 28px;
+  background:linear-gradient(145deg,rgba(218,237,255,.78),rgba(239,248,240,.62));
 }
 .pvcopilot-root .pvc-simple-pvpro-kicker {
-  color:#8191af;
+  color:#8392b0;
   font-size:13px;
   font-weight:800;
   letter-spacing:.075em;
@@ -745,30 +794,34 @@ html, body { background: #ffffff !important; }
 .pvcopilot-root .pvc-simple-pvpro-rate {
   display:flex;
   align-items:baseline;
-  flex-wrap:wrap;
-  margin-top:19px;
+  margin-top:26px;
+  white-space:nowrap;
 }
 .pvcopilot-root .pvc-simple-pvpro-rate-value {
-  color:#2164bd;
-  font-size:clamp(48px,4.5vw,62px);
+  color:#172342;
+  font-size:clamp(52px,5.6vw,72px);
   font-weight:850;
   letter-spacing:-.055em;
   line-height:.95;
 }
 .pvcopilot-root .pvc-simple-pvpro-rate-unit {
   margin-left:9px;
-  color:#586887;
-  font-size:18px;
+  color:#647391;
+  font-size:22px;
   font-weight:750;
   white-space:nowrap;
 }
-.pvcopilot-root .pvc-simple-pvpro-details {
-  margin-top:auto;
-  color:#657493;
+.pvcopilot-root .pvc-simple-pvpro-meta {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:25px;
+  color:#647391;
   font-size:14px;
-  line-height:1.7;
+  font-weight:500;
 }
-.pvcopilot-root .pvc-simple-pvpro-details strong { color:#283754; font-weight:800; }
+.pvcopilot-root .pvc-simple-pvpro-meta .pvc-beta-badge { margin-left:0; }
+.pvcopilot-root .pvc-simple-pvpro-summary .pvc-dist { margin-top:auto; }
 .pvcopilot-root .pvc-simple-pvpro-window { white-space:nowrap; }
 .pvcopilot-root .pvc-simple-pvpro-trends {
   display:grid;
@@ -925,6 +978,31 @@ html, body { background: #ffffff !important; }
   text-align:left;
 }
 .pvcopilot-root .pvc-simple-progress:empty { display:none; margin-top:0; }
+
+/* Working banner: three dots that light up in turn + a live elapsed readout. */
+.pvcopilot-root .pvc-working-dots {
+  display:inline-flex;
+  margin-left:1px;
+  color:#2f6bff;
+  font-weight:800;
+  letter-spacing:1px;
+}
+.pvcopilot-root .pvc-working-dots span {
+  animation:pvc-workingDot 1.2s infinite ease-in-out;
+  opacity:.25;
+}
+.pvcopilot-root .pvc-working-dots span:nth-child(2) { animation-delay:.2s; }
+.pvcopilot-root .pvc-working-dots span:nth-child(3) { animation-delay:.4s; }
+@keyframes pvc-workingDot { 0%,70%,100% { opacity:.25; } 35% { opacity:1; } }
+.pvcopilot-root .pvc-working-elapsed {
+  margin-left:auto;
+  padding-left:14px;
+  color:#5a6784;
+  font-size:12.5px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+  font-family:Archivo,system-ui,sans-serif;
+}
 
 /* Advanced mode: persistent four-step rail + one active workspace panel. */
 .pvcopilot-root .pvc-advanced-workspace { min-width:0; }
@@ -1121,6 +1199,9 @@ html, body { background: #ffffff !important; }
   min-height:34px !important;
   height:34px !important;
   font-size:12.5px !important;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 .pvcopilot-root #advanced-data-body .pvc-step1-mapping-surface {
   padding:13px 14px !important;
@@ -1356,35 +1437,35 @@ html, body { background: #ffffff !important; }
   box-sizing:border-box;
   flex-direction:column;
   padding:27px 25px 25px;
-  background:linear-gradient(145deg,rgba(245,250,255,.82),rgba(245,250,247,.66));
+  background:linear-gradient(145deg,rgba(218,237,255,.78),rgba(239,248,240,.62));
 }
 .pvcopilot-root .pvc-advanced-result-kicker {
-  color:#8191af;
-  font-size:12.5px;
-  font-weight:850;
-  letter-spacing:.09em;
+  color:#8392b0;
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:.075em;
   text-transform:uppercase;
 }
 .pvcopilot-root .pvc-advanced-single-rate,
 .pvcopilot-root .pvc-advanced-pvpro-rate {
   display:flex;
   align-items:baseline;
-  flex-wrap:wrap;
-  margin-top:22px;
+  margin-top:24px;
+  white-space:nowrap;
 }
 .pvcopilot-root .pvc-advanced-single-rate-value,
 .pvcopilot-root .pvc-advanced-pvpro-rate-value {
-  color:#2164bd;
-  font-size:clamp(46px,4.2vw,64px);
+  color:#172342;
+  font-size:clamp(48px,4.6vw,68px);
   font-weight:850;
   letter-spacing:-.055em;
   line-height:.95;
 }
 .pvcopilot-root .pvc-advanced-single-rate-unit,
 .pvcopilot-root .pvc-advanced-pvpro-rate-unit {
-  margin-left:8px;
-  color:#586887;
-  font-size:18px;
+  margin-left:9px;
+  color:#647391;
+  font-size:22px;
   font-weight:750;
   white-space:nowrap;
 }
@@ -1394,6 +1475,18 @@ html, body { background: #ffffff !important; }
   font-size:14px;
   line-height:1.72;
 }
+.pvcopilot-root .pvc-advanced-meta {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:24px;
+  color:#647391;
+  font-size:14px;
+  font-weight:500;
+}
+.pvcopilot-root .pvc-advanced-meta .pvc-beta-badge { margin-left:0; }
+.pvcopilot-root .pvc-advanced-single-summary .pvc-dist,
+.pvcopilot-root .pvc-advanced-pvpro-summary .pvc-dist { margin-top:auto; }
 .pvcopilot-root .pvc-advanced-result-details strong { color:#283754; font-weight:800; }
 .pvcopilot-root .pvc-advanced-result-chart-card {
   overflow:hidden;
@@ -2169,3 +2262,43 @@ html, body { background: #ffffff !important; }
   .pvcopilot-root .pvc-simple-pvpro-params { grid-template-columns:minmax(0,1fr); }
   .pvcopilot-root .pvc-simple-result-actions { width:100%; }
 }
+/* ---------------------------------------------------------------------------
+   Step 2 filter panel: master/detail.
+   Left rail lists the filters (checkbox = on/off, click = select); the right
+   pane holds the selected filter's settings, so one tall settings block no
+   longer stretches a grid row.  Inactive/active chrome is set inline by the
+   `select_filter_tab` callback; only hover and the responsive stack live here.
+--------------------------------------------------------------------------- */
+.pvcopilot-root .pvc-advanced-filter-split {
+  display:grid !important;
+  grid-template-columns:minmax(0,300px) minmax(0,1fr);
+  gap:16px;
+  align-items:start;
+}
+.pvcopilot-root .pvc-filter-rail { min-width:0; }
+.pvcopilot-root .pvc-filter-tab:hover { background:#ffffff !important; }
+.pvcopilot-root .pvc-filter-tab:last-child { margin-bottom:0 !important; }
+.pvcopilot-root .pvc-filter-detail {
+  min-width:0;
+  padding:16px 18px;
+  border:1px solid rgba(255,255,255,.78);
+  border-radius:17px;
+  background:rgba(255,255,255,.62);
+  min-height:100%;
+}
+@media (max-width:900px){
+  .pvcopilot-root .pvc-advanced-filter-split { grid-template-columns:minmax(0,1fr); }
+}
+/* A lone number setting does not need the full width of the settings pane. */
+.pvcopilot-root .pvc-filter-detail input[type="number"] { max-width:240px; }
+
+/* Number inputs: drop the browser's spin buttons everywhere on this page.
+   The app already did this for inputs tagged `.pnum`; the parameter boxes in
+   the filter/metric panels were never tagged, so Chrome drew its oversized
+   -/+ stepper inside them. Same declarations, applied by type instead. */
+.pvcopilot-root input[type="number"]::-webkit-outer-spin-button,
+.pvcopilot-root input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pvcopilot-root input[type="number"] { -moz-appearance: textfield; appearance: textfield; }

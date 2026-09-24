@@ -14,22 +14,11 @@ from page_supporting_files.analysis_utils import parse_contents
 from dash import callback_context as ctx
 from io import StringIO
 import traceback
-# ---------------------------------------------------------------------------
-# Analysis backend.  The filter / normalisation / aggregation / degradation
-# functions now come from analysis_utils_pkg (pvlib + rdtools + pvanalytics);
-# see PKG_MIGRATION_NOTES.md.  Signatures are identical to the hand-written
-# versions kept in analysis_utils.py / pvcopilot_filter_functions.py, which
-# are still used for what has no package equivalent (HW, ARIMA, clear-sky,
-# column identification, overview figures, PVPRO layout estimate).
-# ---------------------------------------------------------------------------
-from page_supporting_files.analysis_utils import make_overview_figures, compute_hw, compute_arima
+from page_supporting_files.analysis_utils import make_overview_figures, normalize, low_irra_power_filter, aggregate_daily, compute_yoy, get_full_code
+from page_supporting_files.analysis_utils import compute_lr, compute_hw, compute_arima, compute_csd, compute_pvpro
 from page_supporting_files.analysis_utils import estimate_pvpro_params
 from page_supporting_files.analysis_utils import downsize_block_mean  # DOWNSIZE: >10k-row panel
-from page_supporting_files.analysis_utils_pkg import (
-    normalize, basic_value_filter, low_irra_power_filter, identify_outliers_iqr,
-    aggregate_daily, compute_yoy, compute_lr, compute_csd, compute_pvpro,
-    clear_sky_filter, get_full_code,
-)
+from page_supporting_files.pvcopilot_filter_functions import identify_outliers_iqr, clear_sky_filter, basic_value_filter
 import base64
 import os
 import re
@@ -1239,10 +1228,7 @@ def soft_blue_callout(children, icon=None, margin_bottom="14px", margin_top="0")
 _STATUS_CALLOUT_TONES = {
     "info":    {"color": "#0c4a6e", "background": "#eff6ff", "border": "#bfdbfe"},
     "success": {"color": _SUCCESS_TEXT, "background": _SUCCESS_BG, "border": _SUCCESS_BORDER},
-    # Advisory notices (data notes, method fallbacks, disabled options) are
-    # informational, not failures, so they use a quiet slate palette rather
-    # than the amber that read like an error.
-    "warning": {"color": "#334155", "background": "#f8fafc", "border": "#cbd5e1"},
+    "warning": {"color": "#92400e", "background": "#fffbeb", "border": "#fbbf24"},
     "error":   {"color": "#b91c1c", "background": "#fef2f2", "border": "#f87171"},
 }
 
@@ -1252,7 +1238,7 @@ def _tone_icon_badge(tone, size=22):
     same visual language as _success_check_badge's checkmark. Returns None
     for tones that don't get one (info stays plain; success has its own
     checkmark badge already)."""
-    spec = {"warning": ("!", "#64748b"), "error": ("\u2715", "#dc2626")}.get(tone)
+    spec = {"warning": ("!", "#f59e0b"), "error": ("\u2715", "#dc2626")}.get(tone)
     if spec is None:
         return None
     symbol, bg = spec
@@ -1267,45 +1253,10 @@ def _tone_icon_badge(tone, size=22):
 
 _TONE_FALLBACK_TITLE = {"warning": "Warning", "error": "Error"}
 
-_ADVISORY_FONT = "Archivo, system-ui, sans-serif"
-_ADVISORY_INDENT = "28px"   # 18px badge + 10px gap -> body aligns with the title text
-
-
-def _advisory_panel(title, items, margin_bottom="14px", margin_top="0"):
-    """THE single look for every non-blocking notice in the app (Data Notes,
-    method fallbacks, disabled-option explanations, ...): slate badge +
-    small upper-case letter-spaced title on one line, then one bullet per
-    item, indented to the title text.  `items` is a list; each item is a
-    string or a list of Dash children for one bullet line."""
-    pal = _STATUS_CALLOUT_TONES["warning"]
-    rows = []
-    for it in items or []:
-        content = it if isinstance(it, list) else [it]
-        rows.append(html.Div(
-            [html.Span("\u2022", style={"flex": "0 0 auto", "width": "12px"}),
-             html.Div(content, style={"flex": "1 1 auto"})],
-            style={"display": "flex", "alignItems": "flex-start",
-                   "fontSize": "13px", "color": pal["color"], "lineHeight": "1.5",
-                   "fontFamily": _ADVISORY_FONT, "marginBottom": "3px",
-                   "marginLeft": _ADVISORY_INDENT}))
-    header = html.Div([
-        _tone_icon_badge("warning", size=18),
-        html.Span(title, style={
-            "fontSize": "13px", "color": pal["color"], "textTransform": "uppercase",
-            "letterSpacing": "0.1em", "fontWeight": "600", "opacity": "0.85",
-            "fontFamily": _ADVISORY_FONT}),
-    ], style={"display": "flex", "alignItems": "center",
-              "marginBottom": "8px" if rows else "0"})
-    return html.Div([header] + rows, style={
-        "padding": "12px 16px", "marginTop": margin_top, "marginBottom": margin_bottom,
-        "background": pal["background"], "border": f"1px solid {pal['border']}",
-        "borderRadius": "16px",
-    })
-
 
 def status_callout(children, tone="info", icon=None,
                    margin_bottom="14px", margin_top="0"):
-    """Result banner tinted by outcome: success green, warning slate (advisory), error red,
+    """Result banner tinted by outcome: success green, warning amber, error red,
     anything else the neutral blue of soft_blue_callout.
 
     Warning and error render as icon + bold title on one line, details on
@@ -1329,14 +1280,6 @@ def status_callout(children, tone="info", icon=None,
     elif tone in _TONE_FALLBACK_TITLE:
         title = _TONE_FALLBACK_TITLE[tone]
         details = children
-
-    if tone == "warning":
-        # Every advisory notice shares one shape (see _advisory_panel).
-        items = []
-        if details is not None:
-            items.append(details if isinstance(details, list) else [details])
-        return _advisory_panel(title or "Note", items,
-                               margin_bottom=margin_bottom, margin_top=margin_top)
 
     badge = _tone_icon_badge(tone)
     body = []
@@ -1413,181 +1356,122 @@ def _exp_outer_style():
     }
 
 
-# =============================================================================
-# STEP 2 FILTER DETAILS
-#
-# These used to live in one accordion under the Apply button, listing every
-# filter.  Each entry now sits in its own settings panel, under that filter's
-# parameters, so the explanation is next to the knobs it explains.  Only the
-# always-applied basic value filter and the shared reference list -- neither of
-# which belongs to a single filter -- stay in a block of their own.
-# =============================================================================
-def _filter_detail_body(key):
-    """Explanation + equations for one filter, or None when it has none."""
-    if key == "basic":
-        return html.Div([
-            html.B("Physical range limits. "),
-            "Applied automatically before every other filter. Removes implausible "
-            "sensor readings: irradiance outside [0, 1500] W/m\u00b2 (",
-            html.Code("rdtools.filtering.poa_filter"),
-            "), module temperature outside [\u221240, 100] \u00b0C (",
-            html.Code("rdtools.filtering.tcell_filter"),
-            "), and DC power below \u22121 W. This catches sensor faults \u2014 an "
-            "irradiance of 34,000 W/m\u00b2, a module at 1,800 \u00b0C \u2014 that would "
-            "otherwise corrupt normalization and clear-sky scoring.",
-            html.Br(), html.Br(),
-            html.B("Time zone & DST. "),
-            "Corrects timestamps for local time-zone offsets and Daylight Saving Time "
-            "transitions, so the datetime index is monotonic and properly localized "
-            "before any temporal analysis.",
-        ], style=_exp_inner_style())
-
-    if key == "low-irra-power":
-        return html.Div([
-            "Removes non-representative operating points using three simultaneous conditions: ",
-            "\u2460 irradiance above a minimum threshold (",
-            html.Code("rdtools.filtering.poa_filter"), "); ",
-            "\u2461 power exceeding a minimum fraction of irradiance; ",
-            "\u2462 temperature-corrected normalized power ",
-            html.Span("(norm = P / [G \u00b7 (1 + \u03b3(T \u2212 25))] \u00d7 1000)",
-                      style={"fontFamily": "Times New Roman, serif"}),
-            html.Sup("[1]"),
-            " within a valid range (", html.Code("rdtools.filtering.normalized_filter"),
-            "). Points failing any condition are excluded. The normalization itself is ",
-            html.Code("rdtools.normalization.pvwatts_dc_power"), ".",
-        ], style=_exp_inner_style())
-
-    if key == "outlier":
-        return html.Div([
-            "Detects statistical outliers on the temperature-corrected normalized power "
-            "signal using the IQR method", html.Sup("[1]"), " as implemented in ",
-            html.Code("pvanalytics.quality.outliers.tukey"), ". Points outside ",
-            html.Span("[Q1 \u2212 k\u00b7IQR, Q3 + k\u00b7IQR]",
-                      style={"fontFamily": "Times New Roman, serif"}),
-            " (default k = 1.5, Tukey's fence) are flagged and excluded from downstream "
-            "degradation analysis.",
-        ], style=_exp_inner_style())
-
-    if key == "clearsky":
-        return html.Div([
-            "Applied to the raw irradiance signal before power normalization, preserving "
-            "the full intraday profile. Each daytime sample is compared against a ",
-            html.B("clear-sky reference"), ", and a day is kept when at least the chosen "
-            "fraction of its daytime samples pass.",
-            html.Br(), html.Br(),
-
-            html.B("The reference. "),
-            "With site coordinates it is modelled: ",
-            html.Code("pvlib.location.Location.get_clearsky"),
-            " (Ineichen\u2013Perez", html.Sup("[1]"),
-            ", with pvlib's bundled Linke-turbidity climatology) transposed to the array "
-            "plane by ", html.Code("pvlib.irradiance.get_total_irradiance"),
-            ". Tilt and azimuth are taken from the form, else fitted from the measured "
-            "power with ", html.Code("pvanalytics.system.infer_orientation_fit_pvwatts"),
-            ", else assumed (tilt = |latitude|, equator-facing). The modelled curve is "
-            "then put on the record's own clock (the median offset between measured and "
-            "modelled daily peak times, which absorbs DST, a logger left on UTC and "
-            "longitude error alike) and on its own scale (",
-            html.Code("rdtools.normalization.irradiance_rescale"),
-            "), because the clear-sky index is a ratio and array geometry, sensor "
-            "calibration and soiling all bias the level.",
-            html.Br(), html.Br(),
-
-            html.B("Without coordinates, "),
-            "the reference is an empirical envelope taken from the measurements "
-            "themselves: a high quantile of each time-of-day over a \u00b130-day window. "
-            "It needs no input at all; its weakness is a window containing no clear day, "
-            "where the envelope sits too low.",
-            html.Br(), html.Br(),
-
-            html.B("The test. "),
-            "For data sampled every 15 minutes or finer, the five Reno \u0026 Hansen "
-            "criteria", html.Sup("[2]"), " (", html.Code("pvlib.clearsky.detect_clearsky"),
-            "). For coarser records the clear-sky index (",
-            html.Code("rdtools.filtering.csi_filter"),
-            "): measured / clear-sky within \u00b1k of 1. The Reno thresholds are "
-            "calibrated for 1-minute GHI and reject nearly everything on hourly data, so "
-            "they are not used there.",
-        ], style=_exp_inner_style())
-
-    return None
-
-
-def _filter_references(key):
-    """The works each filter actually rests on. Kept per filter rather than in
-    one shared list at the bottom of the step, so a reader never has to match
-    a superscript against a list several screens away."""
-    if key == "basic":
-        return [
-            ["NREL RdTools \u2014 ", html.Code("rdtools.filtering"),
-             " documentation (range filters). ",
-             html.A("rdtools.readthedocs.io",
-                    href="https://rdtools.readthedocs.io/en/stable/api.html",
-                    target="_blank", style=_exp_link_style()), "."],
-        ]
-    if key == "low-irra-power":
-        return [
-            ["IEC 60891:2021 \u2014 Photovoltaic devices: Procedures for temperature "
-             "and irradiance corrections to measured I-V characteristics. ",
-             html.A("webstore.iec.ch",
-                    href="https://webstore.iec.ch/en/publication/61766",
-                    target="_blank", style=_exp_link_style()), "."],
-        ]
-    if key == "outlier":
-        return [
-            ["Kim, G. G., Hyun, J. H., Choi, J. H., Bhang, B. G., \u0026 Ahn, H. K. "
-             "(2023). Quality analysis of photovoltaic system using descriptive "
-             "statistics of power performance index. ", html.Em("IEEE Access"),
-             ", 11, 28427\u201328438. ",
-             html.A("10.1109/ACCESS.2023.3257373",
-                    href="https://doi.org/10.1109/ACCESS.2023.3257373",
-                    target="_blank", style=_exp_link_style()), "."],
-        ]
-    if key == "clearsky":
-        return [
-            ["Ineichen, P., \u0026 Perez, R. (2002). A new airmass independent "
-             "formulation for the Linke turbidity coefficient. ",
-             html.Em("Solar Energy"), ", 73(3), 151\u2013157. ",
-             html.A("10.1016/S0038-092X(02)00045-2",
-                    href="https://doi.org/10.1016/S0038-092X(02)00045-2",
-                    target="_blank", style=_exp_link_style()), "."],
-            ["Reno, M. J., \u0026 Hansen, C. W. (2016). Identification of periods of "
-             "clear sky irradiance in time series of GHI measurements. ",
-             html.Em("Renewable Energy"), ", 90, 520\u2013531. ",
-             html.A("10.1016/j.renene.2015.12.031",
-                    href="https://doi.org/10.1016/j.renene.2015.12.031",
-                    target="_blank", style=_exp_link_style()), "."],
-        ]
-    return []
-
-
-def _filter_detail_panel(key):
-    """The per-filter explanation, as a collapsed disclosure under its
-    parameters. Returns None for a filter with nothing to explain."""
-    body = _filter_detail_body(key)
-    refs = _filter_references(key)
-    if body is None and not refs:
-        return None
-
-    inner = [body] if body is not None else []
-    if refs:
-        inner.append(html.Div("References", style={
-            "fontSize": "11px", "fontWeight": "700", "color": NAVY,
-            "marginTop": "12px", "marginBottom": "2px",
-            "fontFamily": "Archivo, system-ui, sans-serif"}))
-        inner.append(html.Ol(
-            [html.Li(r, style={"marginBottom": "4px"}) for r in refs],
-            style={"paddingLeft": "16px", "marginTop": "4px", "marginBottom": "0",
-                   "fontSize": "11px", "color": "#4a6fa5", "lineHeight": "1.5"}))
-
+def filter_explanations_block():
+    """Collapsible 'Filter detail' panel with descriptions, equations, refs.
+    Ported from the original PV-Copilot reference content."""
     return html.Details([
-        html.Summary("How this filter works (equations \u0026 references)",
-                     style=_exp_summary_style()),
-        # Same soft-blue card the shared reference list used to have, so an
-        # expanded explanation reads as one block rather than loose text.
-        html.Div(inner, style=_exp_outer_style()),
-    ], style={"marginTop": "16px", "paddingTop": "14px",
-              "borderTop": f"1px solid {BORDER}"})
+        html.Summary("Filter details (equations & references)", style={
+            "cursor": "pointer", "color": INK_SOFT, "fontSize": "13px", "fontWeight": "600",
+            "fontFamily": "Archivo, system-ui, sans-serif",
+        }),
+        html.Div([
+
+            html.Details([
+                html.Summary(html.B("Basic value filter (always applied)"), style=_exp_summary_style()),
+                html.Div(
+                    "Applied automatically before all other filters. Removes physically implausible "
+                    "sensor readings: irradiance outside [0, 1500] W/m², module temperature outside "
+                    "[−40, 100] °C, and DC power below −1 W. Catches sensor faults (e.g. irradiance = "
+                    "34,000 W/m²) that would corrupt normalization and clear-sky scoring.",
+                    style=_exp_inner_style()
+                ),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("Time zone & DST correction"), style=_exp_summary_style()),
+                html.Div(
+                    "Corrects timestamps for local time-zone offsets and Daylight Saving Time (DST) "
+                    "transitions. Ensures the datetime index is monotonic and properly localized before "
+                    "any temporal analysis.",
+                    style=_exp_inner_style()
+                ),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("Low irradiance / power filter"), style=_exp_summary_style()),
+                html.Div([
+                    "Removes non-representative operating points using three simultaneous conditions: ",
+                    "① irradiance above a minimum threshold; ",
+                    "② power exceeding a minimum fraction of irradiance; ",
+                    "③ temperature-corrected normalized power ",
+                    html.Span("(norm = P / [G · (1 + γ(T − 25))] × 1000)", style={"fontFamily": "Times New Roman, serif"}),
+                    html.Sup("[1]"),
+                    " within a valid range. Points failing any condition are excluded."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("Outlier removal (IQR)"), style=_exp_summary_style()),
+                html.Div([
+                    "Detects statistical outliers on the temperature-corrected normalized power signal "
+                    "using the IQR method",
+                    html.Sup("[2]"),
+                    ". Points outside ",
+                    html.Span("[Q1 − k·IQR, Q3 + k·IQR]", style={"fontFamily": "Times New Roman, serif"}),
+                    " (default k = 1.5, Tukey's fence) are flagged and excluded from downstream "
+                    "degradation analysis."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            html.Details([
+                html.Summary(html.B("Clear-sky filter"), style=_exp_summary_style()),
+                html.Div([
+                    "Applied to the raw irradiance signal before power normalization, preserving the "
+                    "full intraday bell-shaped profile needed for smoothness scoring. Follows the "
+                    "approach of Meyers et al.",
+                    html.Sup("[3]"),
+                    " The algorithm is resolution-aware:",
+                    html.Br(), html.Br(),
+                    html.B("Sub-daily data (≥4 readings/day): "),
+                    "① a smoothness score derived from the L1-norm of the 2nd-order temporal difference "
+                    "of the intraday irradiance signal (smooth bell-shaped profiles score high); ",
+                    "② a seasonally-normalized daily energy score (ratio of daily irradiance sum to a "
+                    "rolling 90th-percentile baseline, ±30-day window). A day is classified as clear "
+                    "only if both scores exceed their respective thresholds (AND rule).",
+                    html.Br(), html.Br(),
+                    html.B("Coarse / downsampled data (<4 readings/day): "),
+                    "smoothness cannot be reliably estimated from sparse samples, so the filter falls "
+                    "back to energy-only mode — retaining days whose seasonally-normalized irradiance "
+                    "exceeds the energy threshold."
+                ], style=_exp_inner_style()),
+            ], style={"marginBottom": "6px"}),
+
+            # References
+            html.Hr(style={"borderColor": BORDER, "margin": "10px 0 6px"}),
+            html.Details([
+                html.Summary("References", style={
+                    "cursor": "pointer", "fontSize": "11px", "fontWeight": "700", "color": NAVY,
+                }),
+                html.Ol([
+                    html.Li([
+                        "IEC 60891:2021 — Photovoltaic devices: Procedures for temperature and "
+                        "irradiance corrections to measured I-V characteristics. ",
+                        html.A("webstore.iec.ch", href="https://webstore.iec.ch/en/publication/61766",
+                               target="_blank", style=_exp_link_style()), "."
+                    ], style={"marginBottom": "4px"}),
+                    html.Li([
+                        "Kim, G. G., Hyun, J. H., Choi, J. H., Bhang, B. G., & Ahn, H. K. (2023). "
+                        "Quality analysis of photovoltaic system using descriptive statistics of "
+                        "power performance index. ", html.Em("IEEE Access"), ", 11, 28427–28438. ",
+                        html.A("10.1109/ACCESS.2023.3257373",
+                               href="https://doi.org/10.1109/ACCESS.2023.3257373",
+                               target="_blank", style=_exp_link_style()), "."
+                    ], style={"marginBottom": "4px"}),
+                    html.Li([
+                        "B. E. Meyers, E. Apostolaki-Iosifidou, and L. Schelhas, \"Solar Data Tools: "
+                        "Automatic Solar Data Processing Pipeline,\" ",
+                        html.Em("2020 47th IEEE Photovoltaic Specialists Conference (PVSC)"),
+                        ", Calgary, AB, Canada, 2020, pp. 0655–0656. doi: ",
+                        html.A("10.1109/PVSC45281.2020.9300847",
+                               href="https://doi.org/10.1109/PVSC45281.2020.9300847",
+                               target="_blank", style=_exp_link_style()), "."
+                    ]),
+                ], style={"paddingLeft": "16px", "marginTop": "6px", "marginBottom": "0",
+                          "fontSize": "11px", "color": "#4a6fa5", "lineHeight": "1.5"})
+            ]),
+
+        ], style=_exp_outer_style())
+    ], style={"marginTop": "12px"})
 
 
 def metric_explanations_block():
@@ -2526,8 +2410,6 @@ def filter_row(checkbox_id, label, description, customize_body=None):
 
 _param_input_style = {
     "width": "100%",
-    # A single threshold does not need the full width of the settings pane.
-    "maxWidth": "240px",
     "fontSize": "14px",
     "padding": "6px 8px",
     "borderRadius": "6px",
@@ -2535,14 +2417,6 @@ _param_input_style = {
     "color": INK,
     "fontFamily": "Archivo, system-ui, sans-serif",
     "background": "white",
-    # Drop the browser's built-in number stepper. The stylesheet has the
-    # equivalent rules (and the ::-webkit-inner-spin-button one, which cannot
-    # be expressed inline), but they are not reaching these inputs, so the
-    # declarations that CAN live inline are set here where nothing can
-    # override or cache them away.
-    "appearance": "textfield",
-    "WebkitAppearance": "textfield",
-    "MozAppearance": "textfield",
 }
 
 _label_style = {"fontSize": "13px", "fontWeight": "600", "color": INK, "marginBottom": "3px", "fontFamily": "Archivo, system-ui, sans-serif"}
@@ -2588,56 +2462,6 @@ _PVPRO_DOT_ON = {"display": "inline-block", "width": "7px", "height": "7px",
                  "borderRadius": "50%", "background": "#3b82f6",
                  "marginRight": "6px", "verticalAlign": "middle"}
 _PVPRO_DOT_OFF = {"display": "none"}
-
-
-# =============================================================================
-# UPSTREAM-PACKAGE LOGOS
-#
-# The analysis now runs on pvlib / RdTools / PVAnalytics, so each place that
-# calls one of them shows whose code is doing the work.  Files live in
-# assets/function_logos/.  The three marks have very different aspect ratios
-# (RdTools 6.6:1, PVAnalytics 4.1:1, pvlib 2.4:1), so they are sized by HEIGHT
-# and left to find their own width -- matching them on width would make pvlib
-# tower over the other two.
-# =============================================================================
-# file, alt text, project URL, optical scale.  The scale equalises how heavy
-# each mark LOOKS at a shared row height: pvlib's is nearly square and reads as
-# tiny next to the two wordmarks, while RdTools' is 6.6:1 and would run away
-# with the row if it were not pulled in.
-_PKG_LOGOS = {
-    "rdtools":     ("function_logos/rdtools_logo.png", "RdTools",
-                    "https://github.com/NREL/rdtools", 0.72),
-    "pvlib":       ("function_logos/pvlib_logo.png", "pvlib",
-                    "https://github.com/pvlib/pvlib-python", 1.30),
-    "pvanalytics": ("function_logos/pvanalytics_logo.png", "PVAnalytics",
-                    "https://github.com/pvlib/pvanalytics", 1.05),
-}
-
-
-def _pkg_logo(key, height=18, link=True):
-    """One package mark. `link=False` for marks that sit inside a <label>:
-    there a click would both follow the link and toggle the checkbox."""
-    src, alt, href, scale = _PKG_LOGOS[key]
-    img = html.Img(src=app.get_asset_url(src), alt=alt, title=alt,
-                   style={"height": f"{round(height * scale)}px", "width": "auto",
-                          "display": "block", "opacity": "0.9"})
-    if not link:
-        return img
-    return html.A(img, href=href, target="_blank", title=f"{alt} on GitHub",
-                  style={"display": "inline-flex", "flexShrink": "0",
-                         "textDecoration": "none"})
-
-
-def _pkg_logo_row(keys, height=18, link=True, margin_left="auto"):
-    """Right-aligned strip of package marks (empty when `keys` is empty, so
-    callers can pass the list straight from a table)."""
-    if not keys:
-        return None
-    return html.Div(
-        [_pkg_logo(k, height=height, link=link) for k in keys],
-        style={"display": "flex", "alignItems": "center", "gap": "12px",
-               "marginLeft": margin_left, "flexShrink": "0"},
-    )
 
 
 def _beta_badge():
@@ -2707,7 +2531,7 @@ _PVPRO_STEP_TARGETS = [
 low_irra_params = html.Div([
     html.Div([
         html.Label("γ — temperature coefficient of power (/°C)", style=_label_style),
-        dcc.Input(id="param-gamma", type="number", value=-0.004, step=0.001, style=_param_input_style, className="pnum"),
+        dcc.Input(id="param-gamma", type="number", value=-0.004, step=0.001, style=_param_input_style),
         # Filled in by toggle_gamma_availability_note when Module temperature
         # isn't mapped — gamma has no effect on the result in that case since
         # normalize() skips the temperature correction entirely.
@@ -2716,12 +2540,12 @@ low_irra_params = html.Div([
     html.Div([
         html.Label("Min. irradiance threshold (W/m²)", style=_label_style),
         html.Div("Excludes data below this irradiance level.", style=_help_style),
-        dcc.Input(id="param-irr-thresh", type="number", value=300, step=10, min=0, style=_param_input_style, className="pnum"),
+        dcc.Input(id="param-irr-thresh", type="number", value=300, step=10, min=0, style=_param_input_style),
     ], style={"marginBottom": "10px"}),
     html.Div([
         html.Label("Min. power / irradiance ratio", style=_label_style),
         html.Div("Rejects points where P < ratio × G.", style=_help_style),
-        dcc.Input(id="param-power-ratio", type="number", value=0.02, step=0.005, min=0, style=_param_input_style, className="pnum"),
+        dcc.Input(id="param-power-ratio", type="number", value=0.02, step=0.005, min=0, style=_param_input_style),
     ]),
     dcc.Input(id="param-norm-lower",     type="number", value=0.01, style={"display": "none"}),
     dcc.Input(id="param-norm-upper-pct", type="number", value=99,   style={"display": "none"}),
@@ -2730,265 +2554,21 @@ low_irra_params = html.Div([
 outlier_params = html.Div([
     html.Label("IQR multiplier (k)", style=_label_style),
     html.Div("Bounds = [Q1 − k·IQR, Q3 + k·IQR]. Tukey default k = 1.5.", style=_help_style),
-    dcc.Input(id="param-iqr-multiplier", type="number", value=1.5, step=0.1, min=0.1, style=_param_input_style, className="pnum"),
+    dcc.Input(id="param-iqr-multiplier", type="number", value=1.5, step=0.1, min=0.1, style=_param_input_style),
 ])
-
-# GeoNames cities15000, the same file pages/field_degradation.py searches.
-# Loaded once at import; the page still works (city box simply finds nothing)
-# when the CSV has not been generated -- see
-# page_supporting_files/build_cities_csv.py.
-_CITIES_CSV_PATH = os.path.join("data", "cities15000.csv")
-
-
-def _load_city_table():
-    try:
-        cdf = pd.read_csv(_CITIES_CSV_PATH,
-                          keep_default_na=False,     # 'NA' is Namibia's ISO code
-                          na_values=[""])
-        if "population" in cdf.columns:
-            cdf = cdf.sort_values("population", ascending=False).reset_index(drop=True)
-        return cdf
-    except Exception as e:
-        print(f"[pvcopilot] {_CITIES_CSV_PATH} not loaded ({type(e).__name__}); "
-              "city search in the clear-sky filter is disabled.")
-        return pd.DataFrame(columns=["name", "asciiname", "country_code",
-                                     "latitude", "longitude", "population"])
-
-
-_CS_CITIES = _load_city_table()
-
-
-def _city_option(row):
-    """Option value carries the coordinates, so selecting one needs no lookup."""
-    return {"label": f"{row['name']}, {row['country_code']}",
-            "value": f"{row['latitude']:.4f},{row['longitude']:.4f}"}
-
-
-_CS_CITY_DEFAULT_OPTIONS = ([_city_option(r) for _, r in _CS_CITIES.head(8).iterrows()]
-                            if not _CS_CITIES.empty else [])
-
-
-def _cs_site_field(label, input_id, placeholder, step, minimum=None, maximum=None):
-    """One optional site field in the clear-sky panel (half-width)."""
-    kw = {}
-    if minimum is not None:
-        kw["min"] = minimum
-    if maximum is not None:
-        kw["max"] = maximum
-    return html.Div([
-        html.Label(label, style={**_label_style, "fontSize": "12px",
-                                 "display": "block", "marginBottom": "4px"}),
-        dcc.Input(id=input_id, type="number", value=None, step=step,
-                  placeholder=placeholder, debounce=True,
-                  style={**_param_input_style, "width": "100%"}, className="pnum", **kw),
-    ], style={"flex": "1 1 0", "minWidth": "0"})
-
 
 clearsky_params = html.Div([
     html.Div([
-        html.Label("Clear-sky index tolerance", style=_label_style),
-        html.Div("Keeps points whose measured / clear-sky ratio is within ±k of 1 "
-                 "(rdtools.filtering.csi_filter; default 0.15).", style=_help_style),
-        dcc.Input(id="param-cs-csi", type="number", value=0.15, step=0.01,
-                  min=0.01, max=1.0, style=_param_input_style, className="pnum"),
+        html.Label("Smoothness threshold", style=_label_style),
+        html.Div("Min per-day smoothness (0–1). Higher = stricter.", style=_help_style),
+        dcc.Input(id="param-cs-smooth", type="number", value=0.3, step=0.05, min=0.0, max=1.0, style=_param_input_style),
     ], style={"marginBottom": "10px"}),
     html.Div([
-        html.Label("Min. clear share of a day", style=_label_style),
-        html.Div("A day counts as clear when at least this fraction of its daytime "
-                 "points pass (0–1). Higher = stricter.", style=_help_style),
-        dcc.Input(id="param-cs-energy", type="number", value=0.5, step=0.05,
-                  min=0.0, max=1.0, style=_param_input_style, className="pnum"),
-    ], style={"marginBottom": "12px"}),
-
-    # ---- optional site information -----------------------------------------
-    html.Div([
-        html.Label("Site location (optional)", style=_label_style),
-        html.Div("With coordinates the clear-sky reference comes from pvlib's Ineichen "
-                 "model instead of an envelope estimated from your own data — more "
-                 "reliable when the record has few clear days. Tilt and azimuth are "
-                 "fitted from your power data (pvanalytics) when left blank.",
-                 style=_help_style),
-        html.Div([
-            html.Label("City", style={**_label_style, "fontSize": "12px",
-                                      "display": "block", "marginBottom": "4px"}),
-            dcc.Dropdown(
-                id="param-cs-city",
-                options=_CS_CITY_DEFAULT_OPTIONS,
-                placeholder="Search a city to fill the coordinates\u2026",
-                clearable=True, searchable=True, optionHeight=34,
-                style={"fontSize": "13px"},
-            ),
-        ], style={"marginTop": "6px", "maxWidth": "480px"}),
-        html.Div([
-            _cs_site_field("Latitude", "param-cs-lat", "e.g. 37.87", 0.001, -90, 90),
-            _cs_site_field("Longitude", "param-cs-lon", "e.g. -122.27", 0.001, -180, 180),
-        ], style={"display": "flex", "gap": "10px", "marginTop": "8px"}),
-        html.Div([
-            _cs_site_field("Tilt (°)", "param-cs-tilt", "auto", 1, 0, 90),
-            _cs_site_field("Azimuth (°)", "param-cs-azimuth", "auto", 1, 0, 360),
-        ], style={"display": "flex", "gap": "10px", "marginTop": "8px"}),
+        html.Label("Energy threshold", style=_label_style),
+        html.Div("Min seasonally-normalized daily irradiance (0–1).", style=_help_style),
+        dcc.Input(id="param-cs-energy", type="number", value=0.5, step=0.05, min=0.0, max=1.0, style=_param_input_style),
     ]),
 ])
-
-
-# =============================================================================
-# STEP 2 FILTER PANEL -- master/detail.
-#
-# The four filters used to sit in a 2x2 grid, each with its own inline
-# "Customize parameters" expander.  Once the clear-sky filter grew a site
-# section that layout fell apart: one card became several times taller than
-# its neighbour and the grid row stretched to match.  The filters are now a
-# LIST on the left (checkbox = on/off, click = select) and the selected
-# filter's settings occupy a panel on the right, which keeps the block the
-# same height whatever is being edited.
-#
-# Every parameter panel stays MOUNTED (hidden with display:none) rather than
-# being swapped in on selection: the Apply-filters callback reads them all as
-# States, and a State cannot resolve against a component that is not in the
-# layout.
-# =============================================================================
-# key, title, checkbox id, description, params block, upstream packages, locked
-#
-# The first entry bundles everything that runs on EVERY analysis: the physical
-# range limits (which never had a tab, only a paragraph in the old accordion)
-# and the time-zone / DST correction. They are grouped because neither is a
-# judgement call about which points are interesting -- they are what has to be
-# true before any of the other filters mean anything -- so the row is locked on
-# rather than being a checkbox that should never be cleared.
-FILTER_TABS = [
-    ("basic", "Basic checks & time correction", "cb-timezone",
-     "Physical range limits plus time-zone and daylight-saving correction. "
-     "Always applied.",
-     None, ["rdtools"], True),
-    ("clearsky", "Clear-sky filter", "cb-clearsky",
-     "Keeps smooth, cloud-free irradiance profiles for comparable operating conditions.",
-     "clearsky_params", ["rdtools", "pvlib", "pvanalytics"], False),
-    ("low-irra-power", "Low irradiance / power filter", "cb-low-irra-power",
-     "Drops low-light points where the power-to-irradiance relationship is noisy.",
-     "low_irra_params", ["rdtools"], False),
-    ("outlier", "Outlier removal (IQR)", "cb-outlier",
-     "Removes statistical outliers in the normalized series using an IQR rule.",
-     "outlier_params", ["pvanalytics"], False),
-]
-_FILTER_TAB_DEFAULT = "clearsky"
-
-
-def _filter_tab_style(active):
-    return {
-        "display": "flex", "alignItems": "flex-start", "gap": "10px",
-        "padding": "12px 13px", "borderRadius": "14px", "cursor": "pointer",
-        "border": f"1px solid {'#bcd2ff' if active else 'rgba(255,255,255,.78)'}",
-        "background": "#ffffff" if active else "rgba(255,255,255,.52)",
-        "boxShadow": "0 6px 16px rgba(47,107,255,.10)" if active else "none",
-        "transition": "background .15s ease, border-color .15s ease",
-        "marginBottom": "8px",
-    }
-
-
-def _filter_tab(key, label, checkbox_id, description, active, locked=False):
-    """One row of the left rail.
-
-    `locked` keeps the checkbox present (its value still feeds the
-    `filter-options` sync, so the pipeline keeps running this step) but
-    disabled, because clearing it is not a supported state.
-    """
-    title_children = [label]
-    if locked:
-        title_children.append(html.Span("always on", style={
-            "marginLeft": "8px", "fontSize": "10.5px", "fontWeight": "700",
-            "letterSpacing": "0.04em", "textTransform": "uppercase",
-            "color": "#475569", "background": "#e2e8f0",
-            "borderRadius": "999px", "padding": "2px 7px",
-            "verticalAlign": "middle", "whiteSpace": "nowrap"}))
-    return html.Div(
-        [
-            dbc.Checkbox(id=checkbox_id, value=True, disabled=locked,
-                         input_style={"accentColor": NAVY},
-                         style={"marginTop": "1px", "flex": "0 0 auto"}),
-            html.Div([
-                html.Div(title_children, style={
-                    "fontSize": "14px", "fontWeight": "700",
-                    "color": NAVY if active else INK,
-                    "fontFamily": "Archivo, system-ui, sans-serif",
-                    "lineHeight": "1.3"}),
-                html.Div(description, style={
-                    "fontSize": "12px", "color": INK_SOFT, "marginTop": "3px",
-                    "lineHeight": "1.45",
-                    "fontFamily": "Archivo, system-ui, sans-serif"}),
-            ], style={"flex": "1 1 auto", "minWidth": "0"}),
-        ],
-        id={"type": "filter-tab", "key": key},
-        n_clicks=0,
-        className="pvc-filter-tab",
-        style=_filter_tab_style(active),
-    )
-
-
-def _filter_summary_bullets(items, lead=None):
-    rows = []
-    if lead:
-        rows.append(html.Div(lead, style={
-            "fontSize": "13px", "color": INK_SOFT, "lineHeight": "1.55",
-            "marginBottom": "10px",
-            "fontFamily": "Archivo, system-ui, sans-serif"}))
-    for it in items:
-        rows.append(html.Div(
-            [html.Span("\u2022", style={"flex": "0 0 auto", "width": "14px",
-                                        "color": NAVY, "fontWeight": "700"}),
-             html.Div(it, style={"flex": "1 1 auto"})],
-            style={"display": "flex", "alignItems": "flex-start",
-                   "fontSize": "13px", "color": INK, "lineHeight": "1.55",
-                   "marginBottom": "6px",
-                   "fontFamily": "Archivo, system-ui, sans-serif"}))
-    return html.Div(rows)
-
-
-def _filter_summary_body(key):
-    """What a filter WITHOUT adjustable settings does, in brief."""
-    if key == "basic":
-        return _filter_summary_bullets(
-            [
-                [html.B("Irradiance"), " kept within 0\u20131500 W/m\u00b2 \u2014 anything "
-                 "outside is a sensor fault, not weather."],
-                [html.B("Module temperature"), " kept within \u221240 to 100 \u00b0C."],
-                [html.B("DC power"), " below \u22121 W dropped (small negatives at night "
-                 "are normal noise and are kept)."],
-                [html.B("Timestamps"), " localized, and daylight-saving jumps corrected, "
-                 "so the time axis is monotonic before anything else runs."],
-            ],
-            lead="Runs on every analysis, before the filters below \u2014 these are the "
-                 "conditions the other filters assume are already true.")
-    return None
-
-
-def _filter_panel(key, label, body, active, packages=()):
-    """One filter's settings: name on the left of the heading row, the marks
-    of the packages that implement it on the right."""
-    if body is None:
-        body = _filter_summary_body(key) or html.Div(
-            "This filter has no adjustable settings \u2014 it is applied automatically.",
-            style={"fontSize": "13px", "color": INK_SOFT, "lineHeight": "1.55",
-                   "fontFamily": "Archivo, system-ui, sans-serif"})
-    heading = [
-        html.Div(label, style={
-            "fontSize": "12px", "fontWeight": "700", "color": INK_SOFT,
-            "textTransform": "uppercase", "letterSpacing": "0.08em",
-            "fontFamily": "Archivo, system-ui, sans-serif"}),
-    ]
-    logos = _pkg_logo_row(list(packages), height=18)
-    if logos is not None:
-        heading.append(logos)
-    return html.Div(
-        [
-            html.Div(heading, style={
-                "display": "flex", "alignItems": "center", "gap": "12px",
-                "marginBottom": "12px", "flexWrap": "wrap"}),
-            html.Div(body, style={"maxWidth": "720px"}),
-            html.Div(_filter_detail_panel(key), style={"maxWidth": "720px"}),
-        ],
-        id={"type": "filter-panel", "key": key},
-        style={"display": "block" if active else "none"},
-    )
 
 
 _FILTER_EST_BTN_STYLE = {
@@ -3043,31 +2623,42 @@ filter_agent_body = html.Div([
                "justifyContent": "space-between", "gap": "12px",
                "flexWrap": "wrap"},
     ),
-    # `pvc-step-config-item` is the marker the step-fold CSS hides, so this
-    # note collapses together with the filter settings it describes instead of
-    # dangling under the collapsed "Filters applied" header.
-    html.Div(id="filter-autofill-note", style={"marginBottom": "10px"},
-             className="pvc-step-config-item"),
+    html.Div(id="filter-autofill-note", style={"marginBottom": "10px"}),
     html.Div(
         [
-            # left rail: the filters themselves
             html.Div(
-                [_filter_tab(k, label, cb, desc, k == _FILTER_TAB_DEFAULT, locked)
-                 for k, label, cb, desc, _body, _pkgs, locked in FILTER_TABS],
-                className="pvc-filter-rail",
+                filter_row(
+                    "cb-timezone", "Time zone & DST correction",
+                    "Aligns timestamps to local solar time and corrects daylight-saving jumps.",
+                ),
+                className="pvc-advanced-filter-card",
             ),
-            # right pane: settings for the selected filter
             html.Div(
-                [_filter_panel(k, label,
-                               {"clearsky_params": clearsky_params,
-                                "low_irra_params": low_irra_params,
-                                "outlier_params": outlier_params}.get(body_name),
-                               k == _FILTER_TAB_DEFAULT, packages=pkgs)
-                 for k, label, _cb, _desc, body_name, pkgs, _locked in FILTER_TABS],
-                className="pvc-filter-detail",
+                filter_row(
+                    "cb-clearsky", "Clear-sky filter",
+                    "Keeps smooth, cloud-free irradiance profiles for comparable operating conditions.",
+                    clearsky_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            html.Div(
+                filter_row(
+                    "cb-low-irra-power", "Low irradiance / power filter",
+                    "Drops low-light points where the power-to-irradiance relationship is noisy.",
+                    low_irra_params,
+                ),
+                className="pvc-advanced-filter-card",
+            ),
+            html.Div(
+                filter_row(
+                    "cb-outlier", "Outlier removal (IQR)",
+                    "Removes statistical outliers in the normalized series using an IQR rule.",
+                    outlier_params,
+                ),
+                className="pvc-advanced-filter-card",
             ),
         ],
-        className="pvc-advanced-filter-split pvc-step-config-item",
+        className="pvc-advanced-filter-grid pvc-step-config-item",
         style={
             "padding": "16px 18px",
             "background": "#f8fafc",
@@ -3098,6 +2689,8 @@ filter_agent_body = html.Div([
         }
     ),
 
+    # Collapsible filter explanations (descriptions, equations, references)
+    html.Div(filter_explanations_block(), className="pvc-step-config-item"),
 
     # Output area
     dcc.Loading(
@@ -3125,20 +2718,18 @@ filter_agent_body = html.Div([
 metric_options = [
     {
         "label": html.Div([
-            html.Div([
-                html.B("YoY", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
-                html.Span(" — Year-over-Year", style={"color": INK_SOFT, "fontSize": "14px"}),
-            ], style={"display": "flex", "alignItems": "center", "gap": "6px", "flexWrap": "wrap"}),
+            html.B("YoY", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
+            html.Span(" — Year-over-Year", style={"color": INK_SOFT, "fontSize": "14px"}),
             html.Details([
                 html.Summary("Customize parameters", style={"cursor": "pointer", "color": INK_SOFT, "fontSize": "13px", "marginTop": "4px"}),
                 html.Div([
                     html.Div([
                         html.Div("Rolling trend window (days)", style=_label_style),
-                        dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7, style=_param_input_style, className="pnum"),
+                        dcc.Input(id="param-yoy-window", type="number", value=30, step=5, min=7, style=_param_input_style),
                     ], style={"flex": "1 1 0", "minWidth": "0"}),
                     html.Div([
                         html.Div("IQR multiplier k", style=_label_style),
-                        dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5, style=_param_input_style, className="pnum"),
+                        dcc.Input(id="param-yoy-iqr", type="number", value=1.5, step=0.1, min=0.5, style=_param_input_style),
                     ], style={"flex": "1 1 0", "minWidth": "0"}),
                 ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}", "display": "flex", "gap": "12px"}),
             ]),
@@ -3147,10 +2738,8 @@ metric_options = [
     },
     {
         "label": html.Div([
-            html.Div([
-                html.B("LR", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
-                html.Span(" — Linear regression", style={"color": INK_SOFT, "fontSize": "14px"}),
-            ], style={"display": "flex", "alignItems": "center", "gap": "6px", "flexWrap": "wrap"}),
+            html.B("LR", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
+            html.Span(" — Linear regression", style={"color": INK_SOFT, "fontSize": "14px"}),
             dcc.Input(id="param-yoy-iqr-dummy", style={"display": "none"}),
         ]),
         "value": "LR",
@@ -3163,7 +2752,7 @@ metric_options = [
                 html.Summary("Customize parameters", style={"cursor": "pointer", "color": INK_SOFT, "fontSize": "13px", "marginTop": "4px"}),
                 html.Div([
                     html.Div("Seasonal period (months)", style=_label_style),
-                    dcc.Input(id="param-hw-period", type="number", value=12, step=1, min=2, style=_param_input_style, className="pnum"),
+                    dcc.Input(id="param-hw-period", type="number", value=12, step=1, min=2, style=_param_input_style),
                 ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
@@ -3179,19 +2768,19 @@ metric_options = [
                     html.Div(style={"display": "flex", "gap": "8px", "marginBottom": "8px"}, children=[
                         html.Div([
                             html.Div("p", style=_label_style),
-                            dcc.Input(id="param-arima-p", type="number", value=1, step=1, min=0, style=_param_input_style, className="pnum"),
+                            dcc.Input(id="param-arima-p", type="number", value=1, step=1, min=0, style=_param_input_style),
                         ], style={"flex": "1"}),
                         html.Div([
                             html.Div("d", style=_label_style),
-                            dcc.Input(id="param-arima-d", type="number", value=1, step=1, min=0, style=_param_input_style, className="pnum"),
+                            dcc.Input(id="param-arima-d", type="number", value=1, step=1, min=0, style=_param_input_style),
                         ], style={"flex": "1"}),
                         html.Div([
                             html.Div("q", style=_label_style),
-                            dcc.Input(id="param-arima-q", type="number", value=0, step=1, min=0, style=_param_input_style, className="pnum"),
+                            dcc.Input(id="param-arima-q", type="number", value=0, step=1, min=0, style=_param_input_style),
                         ], style={"flex": "1"}),
                     ]),
                     html.Div("Seasonal period s (months)", style=_label_style),
-                    dcc.Input(id="param-arima-s", type="number", value=12, step=1, min=2, style=_param_input_style, className="pnum"),
+                    dcc.Input(id="param-arima-s", type="number", value=12, step=1, min=2, style=_param_input_style),
                 ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
@@ -3199,15 +2788,13 @@ metric_options = [
     },
     {
         "label": html.Div([
-            html.Div([
-                html.B("CSD", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
-                html.Span(" — Classical Seasonal Decomposition", style={"color": INK_SOFT, "fontSize": "14px"}),
-            ], style={"display": "flex", "alignItems": "center", "gap": "6px", "flexWrap": "wrap"}),
+            html.B("CSD", style={"fontFamily": "Archivo, system-ui, sans-serif", "fontSize": "16px"}),
+            html.Span(" — Classical Seasonal Decomposition", style={"color": INK_SOFT, "fontSize": "14px"}),
             html.Details([
                 html.Summary("Customize parameters", style={"cursor": "pointer", "color": INK_SOFT, "fontSize": "13px", "marginTop": "4px"}),
                 html.Div([
                     html.Div("Seasonal period (months)", style=_label_style),
-                    dcc.Input(id="param-csd-period", type="number", value=12, step=1, min=2, style=_param_input_style, className="pnum"),
+                    dcc.Input(id="param-csd-period", type="number", value=12, step=1, min=2, style=_param_input_style),
                 ], style={"marginTop": "6px", "padding": "10px", "background": "#f1f5f9", "borderRadius": "12px", "border": f"1px solid {BORDER}"}),
             ]),
         ]),
@@ -3234,6 +2821,22 @@ metric_options = [
                         style={"color": INK_SOFT, "fontSize": "14px"},
                     ),
                 ], style={"flex": "1", "minWidth": "0"}),
+                # Logo link — opens the upstream PVPRO repo in a new tab.
+                html.A(
+                    html.Img(
+                        src=app.get_asset_url("pvpro_logo.png"),
+                        alt="PVPRO",
+                        style={"height": "40px", "width": "auto",
+                               "display": "block"},
+                    ),
+                    href="https://github.com/DuraMAT/pvpro",
+                    target="_blank",
+                    title="PVPRO on GitHub",
+                    style={"marginLeft": "auto", "paddingLeft": "12px",
+                           "flexShrink": "0",
+                           "display": "inline-block",
+                           "textDecoration": "none"},
+                ),
             ], style={"display": "flex", "alignItems": "center",
                       "justifyContent": "space-between",
                       "width": "100%"}),
@@ -3385,43 +2988,11 @@ stat_metric_options  = [o for o in metric_options if o["value"] != "PVPRO"]
 pvpro_metric_options = [o for o in metric_options if o["value"] == "PVPRO"]
 
 
-# Minimum dataset span (years) before YoY is offered.
-# rdtools.degradation_year_on_year refuses series shorter than two years
-# (it needs every point to have a partner one year later), so YoY is gated at
-# 2.0 yr instead of the former 1.0 yr heuristic. The gate below checks the RAW
-# record; the filtered daily series can be shorter still (leading/trailing
-# NaN power), so the calculation callbacks re-check on the daily series and
-# fall back to LR with an explicit note when YoY is not possible.
-_MIN_YEARS_FOR_YOY = 2.0
-
-
-def _daily_span_years(daily):
-    """Span of the filtered daily series in years (None if unavailable)."""
-    try:
-        idx = pd.to_datetime(daily.dropna().index)
-        if len(idx) < 2:
-            return None
-        return (idx.max() - idx.min()).days / 365.25
-    except Exception:
-        return None
-
-
-def _yoy_possible(daily):
-    span = _daily_span_years(daily)
-    return span is not None and span >= _MIN_YEARS_FOR_YOY
-
-
-def _yoy_fallback_note(used, span_years, requested="YoY"):
-    """Callout explaining that YoY could not be computed on this record and
-    which method was reported instead."""
-    span_txt = f"{span_years:.1f} years" if span_years is not None else "too short a span"
-    return status_callout(
-        [html.Strong(f"{requested} not available for this record"),
-         f"Year-over-Year (rdtools) needs at least {_MIN_YEARS_FOR_YOY:g} years of "
-         f"usable data; this record spans {span_txt} after filtering. "
-         f"The rate shown is from {used} instead."],
-        tone="warning", margin_bottom="14px",
-    )
+# Minimum dataset span (years) before YoY is offered. YoY compares each day to
+# the same day one year earlier, so it strictly needs data spanning more than a
+# year to yield any comparison. Set to 1.0 per request; raise toward 2.0 for
+# more robust YoY (a ~1-year span yields very few comparison points).
+_MIN_YEARS_FOR_YOY = 1.0
 
 
 def _duration_years(df, mapped=None):
@@ -3648,14 +3219,33 @@ def _data_notes_panel(notes):
     children list unguarded."""
     if not notes:
         return None
-    items = []
-    for n in notes:
-        if " \u2014 " in n:
-            lead, rest = n.split(" \u2014 ", 1)
-            items.append([html.Strong(lead), " \u2014 " + rest])
-        else:
-            items.append([html.Strong(n)])
-    return _advisory_panel("Data notes", items)
+    _palette = _STATUS_CALLOUT_TONES["warning"]
+    return html.Div(
+        [html.Div([
+            _tone_icon_badge("warning", size=18),
+            html.Span("data notes", style={
+                "fontSize": "13px", "color": _palette["color"], "textTransform": "uppercase",
+                "letterSpacing": "0.1em", "fontWeight": "600",
+                "opacity": "0.75",
+                "fontFamily": "Archivo, system-ui, sans-serif",
+            }),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "8px"})] + [
+            html.Div(
+                ["\u2022 "] + (
+                    [html.Strong(n.split(" \u2014 ", 1)[0]), " \u2014 " + n.split(" \u2014 ", 1)[1]]
+                    if " \u2014 " in n else [html.Strong(n)]
+                ),
+                style={
+                    "fontSize": "13px", "color": _palette["color"], "lineHeight": "1.5",
+                    "fontFamily": "Archivo, system-ui, sans-serif", "marginBottom": "3px",
+                }) for n in notes
+        ],
+        style={
+            "padding": "12px 16px", "marginBottom": "14px",
+            "background": _palette["background"], "border": f"1px solid {_palette['border']}",
+            "borderRadius": "16px",
+        },
+    )
 
 
 def _numeric_coverage_issues(df, mapped):
@@ -3850,95 +3440,18 @@ def build_stat_metric_options(disable_yoy=False):
     return opts
 
 
-# src, alt, href, width px, left px, top px, keyframe, duration s, delay s
-_HERO_LOGOS = [
-    ("function_logos/rdtools_logo_flat.png", "RdTools",
-     "https://github.com/NREL/rdtools", 100, 139, 49, "A", 6.4, 0.0),
-    ("function_logos/pvanalytics_logo_flat.png", "PVAnalytics",
-     "https://github.com/pvlib/pvanalytics", 80, 112, 84, "B", 8.3, -4.4),
-    ("function_logos/pvlib_logo_flat.png", "pvlib",
-     "https://github.com/pvlib/pvlib-python", 86, 131, 0, "C", 7.6, -1.9),
-    ("pvpro_logo_flat.png", "PVPRO",
-     "https://github.com/DuraMAT/pvpro", 92, 27, 24, "A", 5.9, -3.1),
-    ("function_logos/sdt_logo_flat.png", "Solar Data Tools",
-     "https://github.com/slacgismo/solar-data-tools", 80, 6, 70, "B", 7.1, -2.5),
-]
-
-
-def _hero_orbit(w, h, dashed=False, pulse=(7.0, 0.0)):
-    """One tilted orbit ring.  A plain div with a 50% radius draws an ellipse
-    far more cheaply than an SVG, and needs no extra Dash component type."""
-    dur, delay = pulse
-    return html.Div(className="pvc-hero-ring", style={
-        "animationDuration": f"{dur}s", "animationDelay": f"{delay}s",
-        "position": "absolute", "left": "50%", "top": "50%",
-        "width": f"{w}px", "height": "{}px".format(h),
-        "marginLeft": f"{-w / 2}px", "marginTop": f"{-h / 2}px",
-        "borderRadius": "50%",
-        "border": ("1px dashed rgba(47,107,255,0.11)" if dashed
-                   else "1px solid rgba(47,107,255,0.09)"),
-        "transform": "rotate(-16deg)",
-        "pointerEvents": "none"})
-
-
-def _hero_logo_cloud():
-    """The four packages the pipeline actually calls, drifting slowly in the
-    blank half of the hero.  Hovering one stops it so the link can be hit."""
-    # Orbits first so they sit behind the marks.  The radii are the same
-    # ellipses the mark positions were solved on (rx/ry 138/58 and 94/40,
-    # tilted -16 deg), so every mark really does sit on a ring.
-    marks = [
-        _hero_orbit(216, 74, pulse=(7.4, 0.0)),
-        _hero_orbit(140, 48, dashed=True, pulse=(6.1, -2.3)),
-        # A third, innermost ring: with the marks pushed out onto the two
-        # outer orbits the middle read as a hole.
-        _hero_orbit(80, 27, dashed=True, pulse=(5.2, -3.7)),
-        # The "sun": just enough of a mark to make the rings read as orbits.
-        html.Div(style={
-            "position": "absolute", "left": "50%", "top": "50%",
-            "width": "7px", "height": "7px", "marginLeft": "-3.5px",
-            "marginTop": "-3.5px", "borderRadius": "50%",
-            "background": "radial-gradient(circle, rgba(255,176,60,0.85) 0%, "
-                          "rgba(255,176,60,0.15) 70%, rgba(255,176,60,0) 100%)",
-            "boxShadow": "0 0 14px 5px rgba(255,176,60,0.18)",
-            "pointerEvents": "none"}),
-    ]
-    for src, alt, href, w, left, top, kind, dur, delay in _HERO_LOGOS:
-        marks.append(html.A(
-            html.Img(src=app.get_asset_url(src), alt=alt, title=alt,
-                     style={"width": f"{w}px", "height": "auto", "display": "block"}),
-            href=href, target="_blank", title=f"{alt} on GitHub",
-            className=f"pvc-hero-logo pvc-hero-logo-{kind.lower()}",
-            style={"position": "absolute", "left": f"{left}px", "top": f"{top}px",
-                   "animationDuration": f"{dur}s", "animationDelay": f"{delay}s",
-                   "textDecoration": "none"},
-        ))
-    return html.Div(marks, className="pvc-hero-logos", style={
-        "position": "relative", "width": "250px", "height": "128px",
-        "flex": "0 0 250px"})
-
-
-def _metric_category_heading(text, logos=None):
-    """Heading introducing a category of degradation method.
-
-    `logos` is a component placed at the right end of the same line: the
-    packages behind that category are credited ONCE here rather than on every
-    option, which is what the per-option marks turned into (three RdTools
-    marks in one column).
-    """
-    label = html.Div(text, style={
-        "fontSize": "14px",
-        "color": INK,
+def _metric_category_heading(text):
+    """Small uppercase, letter-spaced heading used to introduce each category
+    of degradation method in the radio group."""
+    return html.Div(text, style={
+        "fontSize": "11px",
+        "color": INK_SOFT,
         "textTransform": "uppercase",
-        "letterSpacing": "0.08em",
-        "fontWeight": "800",
+        "letterSpacing": "0.1em",
+        "fontWeight": "600",
         "fontFamily": "Archivo, system-ui, sans-serif",
+        "marginBottom": "8px",
     })
-    if logos is None:
-        return html.Div(label, style={"marginBottom": "8px"})
-    return html.Div([label, logos], style={
-        "display": "flex", "alignItems": "center", "gap": "14px",
-        "marginBottom": "8px", "flexWrap": "wrap"})
 
 
 def _ai_diagnostic_panel(prefix):
@@ -3996,24 +3509,13 @@ calc_agent_body = html.Div([
         className="pvc-step-fold-summary",
     ),
     html.Div(section_label("Choose a metric"), className="pvc-step-config-item"),
-    # Populated by gate_yoy_by_duration() when the record is too short for YoY.
-    # It sits directly under the section heading (rather than below the method
-    # list) so the reason a method is greyed out is visible before the person
-    # scrolls through the options.  `pvc-step-config-item` is the marker the
-    # step-fold CSS hides, so the note collapses away with the rest of the
-    # metric settings instead of dangling under the collapsed header.
-    html.Div(id="yoy-disabled-note", style={"display": "none"},
-             className="pvc-step-config-item"),
     html.Div([
         # Category 1 — statistical / trend methods (YoY, LR, HW, ARIMA, CSD).
         # Heading on the left, "Select all / Clear all" toggle on the right.
         # The button selects every enabled method or clears them; the clientside
         # sync keeps this group mutually exclusive with the PVPRO option below.
         html.Div([
-            # YoY / LR / CSD are rdtools; HW and ARIMA are statsmodels, which
-            # has no mark -- the per-method attribution is in "Metric details".
-            _metric_category_heading("statistical / trend methods",
-                                     logos=_pkg_logo_row(["rdtools"], height=18)),
+            _metric_category_heading("statistical / trend methods"),
             html.Button(
                 "Select all",
                 id="metric-stat-selectall-btn",
@@ -4040,6 +3542,9 @@ calc_agent_body = html.Div([
                         "accentColor": NAVY},
             style={"marginBottom": "0"},
         ),
+        # Populated by gate_yoy_by_duration() when the dataset is too short.
+        html.Div(id="yoy-disabled-note", style={"display": "none"}),
+
         # Visual separator between the two categories.  Stepped up from
         # the BORDER token (#e2e8f0) to slate-400 because lighter shades
         # disappear on the #f8fafc card background; the user explicitly
@@ -4051,20 +3556,7 @@ calc_agent_body = html.Div([
         }),
 
         # Category 2 — physics-based SDM fit (PVPRO only, for now).
-        _metric_category_heading(
-            "single-diode-model fitting",
-            logos=html.Div([
-                html.A(
-                    html.Img(src=app.get_asset_url("pvpro_logo.png"), alt="PVPRO",
-                             title="PVPRO",
-                             style={"height": "26px", "width": "auto", "display": "block"}),
-                    href="https://github.com/DuraMAT/pvpro", target="_blank",
-                    title="PVPRO on GitHub",
-                    style={"display": "inline-flex", "flexShrink": "0",
-                           "textDecoration": "none"}),
-                _pkg_logo("pvlib", height=17),
-            ], style={"display": "flex", "alignItems": "center", "gap": "14px",
-                      "marginLeft": "auto", "flexShrink": "0"})),
+        _metric_category_heading("single-diode-model fitting"),
         dcc.RadioItems(
             id="metric-pvpro-radio",
             value=None,
@@ -4277,13 +3769,8 @@ def build_hero(eyebrow, sub_children):
                 "margin": "0 0 12px",
             }),
             html.P(
-                [
-                    "Upload a PV time-series — PV Copilot ",
-                    html.B("computes the degradation rate"),
-                    " on established ",
-                    html.B("open-source PV packages"),
-                    ".",
-                ],
+                "Upload a PV time-series — Copilot screens, filters and computes "
+                "the degradation rate end-to-end.",
                 style={
                     "margin": "0 0 16px", "fontSize": "16px",
                     "lineHeight": "1.55", "color": INK_SOFT,
@@ -4325,10 +3812,6 @@ def build_hero(eyebrow, sub_children):
 common_header = html.Div(
     html.Div(
         [
-          html.Div(
-            [
-              html.Div(
-                [
             html.Div("✦  LLM-EMPOWERED PV DEGRADATION PIPELINE", style={
                 "fontSize": "15px",
                 "color": ACCENT,
@@ -4348,26 +3831,14 @@ common_header = html.Div(
                 "margin": "0 0 12px",
             }),
             html.P(
-                [
-                    "Upload a PV time-series — PV Copilot ",
-                    html.B("computes the degradation rate"),
-                    " on established ",
-                    html.B("open-source PV packages"),
-                    ".",
-                ],
+                "Upload a PV time-series — Copilot screens, filters and computes "
+                "the degradation rate end-to-end.",
                 style={
                     "margin": 0, "fontSize": "17px", "lineHeight": "1.55",
                     "color": INK_SOFT, "fontFamily": "Archivo, system-ui, sans-serif",
                 },
             ),
-                ],
-                style={"flex": "1 1 520px", "minWidth": "0"},
-              ),
-              _hero_logo_cloud(),
-            ],
-            style={"display": "flex", "alignItems": "center", "gap": "28px"},
-          ),
-          soft_blue_callout(
+            soft_blue_callout(
                 [
                     html.B("Note: "),
                     "This tool is currently under active development. ",
@@ -4384,7 +3855,7 @@ common_header = html.Div(
                 ],
                 margin_top="20px",
                 margin_bottom="0",
-          ),
+            ),
         ],
         style={"padding": "40px 44px 24px"},
     ),
@@ -6111,137 +5582,6 @@ app.clientside_callback(
 
 
 # =============================================================================
-# CLIENTSIDE — remove the browser's number-input stepper.
-#
-# Chrome only drops it for the ::-webkit-inner-spin-button pseudo-element, and
-# a pseudo-element cannot be written as an inline style.  The same rules live
-# in assets/pvcopilot_styles.css, but they were not reaching these inputs
-# (stale asset fingerprint / cache), so the rule is also injected into <head>
-# once on load: that path ships with this file, exactly like the layout, so it
-# cannot get out of sync with it.  Injecting twice is harmless -- the element
-# is created only when its id is absent.
-# =============================================================================
-app.clientside_callback(
-    """
-    function(_v) {
-        var ID = "pvc-no-number-spinner";
-        if (!document.getElementById(ID)) {
-            var st = document.createElement("style");
-            st.id = ID;
-            st.textContent =
-                "input[type=number]::-webkit-outer-spin-button," +
-                "input[type=number]::-webkit-inner-spin-button{" +
-                "-webkit-appearance:none!important;appearance:none!important;" +
-                "margin:0!important;display:none!important;}" +
-                "input[type=number]{-moz-appearance:textfield!important;}" +
-                // Hero package marks: transform-only so the whole animation
-                // stays on the compositor and never triggers layout.
-                ".pvc-hero-logo{opacity:.88;will-change:transform;" +
-                "animation-name:pvcFloatA;animation-timing-function:ease-in-out;" +
-                "animation-iteration-count:infinite;animation-direction:alternate;}" +
-                ".pvc-hero-logo:hover{opacity:1;animation-play-state:paused;}" +
-                ".pvc-hero-logo-b{animation-name:pvcFloatB;}" +
-                ".pvc-hero-logo-c{animation-name:pvcFloatC;}" +
-                "@keyframes pvcFloatA{from{transform:translate3d(0,2px,0) rotate(-0.7deg);}" +
-                "to{transform:translate3d(0,-4px,0) rotate(0.7deg);}}" +
-                "@keyframes pvcFloatB{from{transform:translate3d(0,-3px,0) rotate(0.6deg);}" +
-                "to{transform:translate3d(0,3px,0) rotate(-0.8deg);}}" +
-                "@keyframes pvcFloatC{from{transform:translate3d(0,3px,0) rotate(0.5deg);}" +
-                "to{transform:translate3d(0,-4px,0) rotate(-0.5deg);}}" +
-                // The orbits glow: the ring brightens and throws a soft halo,
-                // then fades back.  Staggered periods keep the three from
-                // pulsing as one.
-                ".pvc-hero-ring{animation-name:pvcRingGlow;" +
-                "animation-timing-function:ease-in-out;" +
-                "animation-iteration-count:infinite;animation-direction:alternate;}" +
-                "@keyframes pvcRingGlow{" +
-                "from{border-color:rgba(47,107,255,0.07);" +
-                "box-shadow:0 0 0 0 rgba(47,107,255,0);}" +
-                "to{border-color:rgba(47,107,255,0.22);" +
-                "box-shadow:0 0 12px 1px rgba(47,107,255,0.12)," +
-                "inset 0 0 12px 0 rgba(47,107,255,0.06);}}" +
-                // Narrow viewports: the card is one column, so drop the cloud
-                // rather than letting it squeeze the headline.
-                "@media (max-width:980px){.pvc-hero-logos{display:none!important;}}" +
-                "@media (prefers-reduced-motion:reduce){" +
-                ".pvc-hero-logo,.pvc-hero-ring{animation:none!important;}}";
-            document.head.appendChild(st);
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output("_cb-sync-dummy", "data"),
-    Input("filter-options", "value"),
-)
-
-
-# =============================================================================
-# CALLBACK — city search in the clear-sky filter's site section.
-#
-# Prefix match on GeoNames' `asciiname`, which in this dump is the English
-# ASCII form ("Munich", not "M\u00fcnchen" -- so search in English).  Rows are
-# pre-sorted by population, so the well-known city of a repeated name comes
-# first.  The option's VALUE carries "lat,lon", which makes filling the two
-# number boxes a pure string split.
-# =============================================================================
-@app.callback(
-    Output("param-cs-city", "options"),
-    Input("param-cs-city", "search_value"),
-    prevent_initial_call=True,
-)
-def update_cs_city_options(search):
-    if _CS_CITIES.empty:
-        return []
-    if not search or len(search.strip()) < 2:
-        return _CS_CITY_DEFAULT_OPTIONS
-    s = search.strip().lower()
-    hits = _CS_CITIES[_CS_CITIES["asciiname"].str.lower().str.startswith(s)].head(50)
-    return [_city_option(r) for _, r in hits.iterrows()]
-
-
-@app.callback(
-    Output("param-cs-lat", "value"),
-    Output("param-cs-lon", "value"),
-    Input("param-cs-city", "value"),
-    prevent_initial_call=True,
-)
-def fill_coordinates_from_city(city_value):
-    """A city is a shortcut for the two coordinate boxes, not a separate
-    setting: it writes into them and the filter only ever reads the numbers,
-    so a typed correction afterwards always wins."""
-    if not city_value:
-        return dash.no_update, dash.no_update
-    try:
-        lat_str, lon_str = str(city_value).split(",")
-        return round(float(lat_str), 4), round(float(lon_str), 4)
-    except (ValueError, AttributeError):
-        return dash.no_update, dash.no_update
-
-
-# =============================================================================
-# CALLBACK — Step 2 filter selection (left rail -> right settings pane).
-#
-# Outputs are pattern-matched over FILTER_TABS, and the components are created
-# in that same order, so the returned lists line up with them positionally --
-# the same convention render_advanced_navigation uses for the step tabs.
-# =============================================================================
-@app.callback(
-    Output({"type": "filter-tab", "key": ALL}, "style"),
-    Output({"type": "filter-panel", "key": ALL}, "style"),
-    Input({"type": "filter-tab", "key": ALL}, "n_clicks"),
-    prevent_initial_call=True,
-)
-def select_filter_tab(_clicks):
-    trigger = ctx.triggered_id
-    active = trigger.get("key") if isinstance(trigger, dict) else _FILTER_TAB_DEFAULT
-    keys = [k for k, *_rest in FILTER_TABS]   # FILTER_TABS order == layout order
-    if active not in keys:
-        active = _FILTER_TAB_DEFAULT
-    return ([_filter_tab_style(k == active) for k in keys],
-            [{"display": "block" if k == active else "none"} for k in keys])
-
-
-# =============================================================================
 # CLIENTSIDE SYNC — two visible RadioItems -> one hidden master radio.
 #
 # The "Choose a metric" panel splits its options into two visible groups
@@ -6313,37 +5653,21 @@ app.clientside_callback(
     Output("yoy-disabled-note", "children"),
     Output("yoy-disabled-note", "style"),
     Input("dataframe-store",     "data"),
-    Input("dataframe-filtered",  "data"),
     State("mapped-vars-store",   "data"),
     State("metric-stat-radio",   "value"),
     prevent_initial_call=True,
 )
-def gate_yoy_by_duration(df_json, df_filtered_json, mapped_vars, current_value):
+def gate_yoy_by_duration(df_json, mapped_vars, current_value):
     try:
         df = _df_from_store(df_json) if df_json else None
     except Exception:
         df = None
-    # Step 2 output: the span that actually reaches rdtools. It can be much
-    # shorter than the raw record (leading/trailing NaN power, filters), so
-    # when it is available it decides the gate.
-    filtered_years = None
-    try:
-        if df_filtered_json:
-            _dff = _df_from_store(df_filtered_json)
-            if _dff is not None and len(_dff) > 1 \
-                    and pd.api.types.is_datetime64_any_dtype(_dff.index):
-                filtered_years = (_dff.index.max() - _dff.index.min()).days / 365.25
-    except Exception:
-        filtered_years = None
     # Resolve duration against the mapped Time axis, not unconditionally
     # df.index — Time can be a real column instead of the index (common for
     # CSVs with a plain timestamp column), in which case the index is just a
     # meaningless row-count RangeIndex and would silently compute "0 days"
     # regardless of the data's real span. See _duration_years.
     duration_years = _duration_years(df, mapped_vars) if df is not None else None
-    if filtered_years is not None:
-        duration_years = filtered_years if duration_years is None \
-            else min(duration_years, filtered_years)
 
     disable_yoy = duration_years is not None and duration_years < _MIN_YEARS_FOR_YOY
     options = build_stat_metric_options(disable_yoy=disable_yoy)
@@ -6357,14 +5681,11 @@ def gate_yoy_by_duration(df_json, df_filtered_json, mapped_vars, current_value):
             new_value = current if current else ["LR"]
         else:
             new_value = dash.no_update
-        span_txt = (f"this record spans {duration_years:.1f} years"
-                    + (" after filtering" if filtered_years is not None else ""))
-        note = status_callout(
-            [html.Strong("YoY disabled for this record"),
-             f"Year-over-Year (rdtools) needs at least {_MIN_YEARS_FOR_YOY:g} years "
-             f"of usable data; {span_txt}. Linear regression is selected instead."],
-            tone="warning", margin_top="0", margin_bottom="12px")
-        note_style = {}
+        note = (f"YoY needs at least {_MIN_YEARS_FOR_YOY:g} year"
+                f"{'s' if _MIN_YEARS_FOR_YOY != 1 else ''} of data; "
+                "it's disabled for this dataset.")
+        note_style = {"fontSize": "12px", "color": "#92400e", "fontStyle": "italic",
+                      "marginTop": "8px", "fontFamily": "Archivo, system-ui, sans-serif"}
     else:
         new_value = dash.no_update
         note = ""
@@ -6387,7 +5708,7 @@ def toggle_gamma_availability_note(mapped_vars):
     return html.Span(
         "No module temperature identified \u2014 this has no effect; power "
         "will be normalized without temperature correction.",
-        style={"fontSize": "11.5px", "color": "#475569", "fontStyle": "italic",
+        style={"fontSize": "11.5px", "color": "#92400e", "fontStyle": "italic",
                "fontFamily": "Archivo, system-ui, sans-serif"},
     )
 
@@ -6647,7 +5968,7 @@ def estimate_filters_from_data(trigger, df_json, mapping):
     time.sleep(1)  # keep the thinking banner visible for at least a beat
 
     def _note(children, tone="ok"):
-        color = "#475569" if tone == "warn" else INK_SOFT
+        color = "#b45309" if tone == "warn" else INK_SOFT
         return html.Div(children, className="pvcopilot-note-float-in",
                         style={"fontSize": "12px", "color": color,
                                "marginTop": "2px", "lineHeight": "1.55",
@@ -6738,12 +6059,8 @@ def estimate_filters_from_data(trigger, df_json, mapping):
     State("param-norm-lower",    "value"),
     State("param-norm-upper-pct","value"),
     State("param-iqr-multiplier","value"),
-    State("param-cs-csi",        "value"),
+    State("param-cs-smooth",     "value"),
     State("param-cs-energy",     "value"),
-    State("param-cs-lat",        "value"),
-    State("param-cs-lon",        "value"),
-    State("param-cs-tilt",       "value"),
-    State("param-cs-azimuth",    "value"),
     State("downsample-note",     "data"),    # DOWNSIZE: reminder banner
     State("session-cache-meta",  "data"),
 
@@ -6752,8 +6069,7 @@ def estimate_filters_from_data(trigger, df_json, mapping):
 def run_filter(filter_clicks, upload_clicks,
         example1_clicks, example2_clicks, example3_clicks, selected_filters, mapped_variables_dict, df_json,
         gamma, irr_thresh, power_ratio, norm_lower, norm_upper_pct, iqr_multiplier,
-        cs_csi, cs_energy, cs_lat, cs_lon, cs_tilt, cs_azimuth,
-        downsample_note, cache_meta):
+        cs_smooth, cs_energy, downsample_note, cache_meta):
 
     trigger = ctx.triggered_id
 
@@ -6804,16 +6120,12 @@ def run_filter(filter_clicks, upload_clicks,
         _df = _df.loc[bv_normal].copy()
 
         clearsky_ok = np.ones(len(_df), dtype=bool)   # positional over _df rows
-        cs_info = None
         if "clearsky" in selected_filters:
-            normal_idx, outlier_idx, cs_info = clear_sky_filter(
-                _df, irra_key,
-                csi_threshold=cs_csi if cs_csi is not None else 0.15,
-                day_fraction=cs_energy if cs_energy is not None else 0.5,
-                latitude=cs_lat, longitude=cs_lon,
-                tilt=cs_tilt, azimuth=cs_azimuth,
-                power_key=(mapped_variables_dict or {}).get("DC Power"),
-                return_info=True)
+            _cs_smooth = cs_smooth if cs_smooth is not None else 0.3
+            _cs_energy = cs_energy if cs_energy is not None else 0.5
+            normal_idx, outlier_idx = clear_sky_filter(_df, irra_key,
+                                                        smoothness_threshold=_cs_smooth,
+                                                        energy_threshold=_cs_energy)
             clearsky_ok = _df.index.isin(normal_idx)
 
         # normalize() (analysis_utils.py) now skips the temperature/gamma
@@ -6842,14 +6154,9 @@ def run_filter(filter_clicks, upload_clicks,
             removed_by["clearsky"] = cs_removed
             alive = alive & ~cs_removed
             _n = len(_df_filtered) or 1
-            _detail = ""
-            if cs_info:
-                _detail = (f" \u2014 {cs_info['n_clear_days']}/{cs_info['n_days']} clear days, "
-                           f"{'pvlib Reno detector' if cs_info['method'] == 'reno' else 'rdtools clear-sky index'}; "
-                           f"reference: {cs_info['reference']}")
             _filter_stats.append(
                 f"Clear-sky filter removed {int(cs_removed.sum())} points "
-                f"({cs_removed.sum() / _n * 100:.1f}%)" + _detail)
+                f"({cs_removed.sum() / _n * 100:.1f}%)")
 
         if "low-irra-power" in selected_filters:
             normal_idx, outlier_idx = low_irra_power_filter(
@@ -7450,12 +6757,7 @@ def analyze_uploaded_data_callback(
         # ---- MULTI-METHOD: run them all, render a comparison ----------------
         if len(methods) > 1:
             results = []            # list of (method, rd, fig)
-            yoy_skipped = False
             for m in methods:
-                if m == "YOY" and not _yoy_possible(daily_data):
-                    yoy_skipped = True
-                    results.append((m, np.nan, None))
-                    continue
                 # S1-TIMEOUT: each method runs under the step timeout so one
                 # pathological method can't stall the whole comparison.
                 try:
@@ -7475,12 +6777,6 @@ def analyze_uploaded_data_callback(
 
             multi_layout = _build_multi_method_layout(
                 results, daily_data, start_date, end_date, duration_years)
-            if yoy_skipped:
-                multi_layout = html.Div([
-                    _yoy_fallback_note("the other selected methods",
-                                       _daily_span_years(daily_data)),
-                    multi_layout,
-                ])
 
             methods_rates = {
                 m: (round(float(rd), 4) if rd is not None and np.isfinite(rd) else None)
@@ -7527,17 +6823,12 @@ def analyze_uploaded_data_callback(
         # Regression rather than failing the step. If even LR can't fit,
         # explain clearly instead of rendering a meaningless "nan%/year".
         def _compute_fast():
-            if selected_metric == "YOY" and not _yoy_possible(daily_data):
-                # rdtools would raise "must provide at least two years"; go
-                # straight to the LR fallback and tell the user why below.
+            try:
+                _rd, _fig = _dispatch_stat_method(selected_metric, daily_data, stat_params)
+            except Exception:
+                if selected_metric == "LR":
+                    raise
                 _rd, _fig = np.nan, None
-            else:
-                try:
-                    _rd, _fig = _dispatch_stat_method(selected_metric, daily_data, stat_params)
-                except Exception:
-                    if selected_metric == "LR":
-                        raise
-                    _rd, _fig = np.nan, None
             _used = selected_metric
             if (_rd is None or not np.isfinite(_rd)) and selected_metric != "LR":
                 _rd_lr, _fig_lr = _dispatch_stat_method("LR", daily_data, stat_params)
@@ -7560,17 +6851,8 @@ def analyze_uploaded_data_callback(
                 "Try Linear Regression, or adjust the method's parameters."),
                 "", False, "Calculate Degradation", {}, {}, True]
 
-        # Reflect the method actually used (in case of fallback) in the result,
-        # and keep a note explaining the fallback for the result card.
-        fallback_note = None
+        # Reflect the method actually used (in case of fallback) in the result.
         if _used_metric != selected_metric:
-            if selected_metric == "YOY":
-                fallback_note = _yoy_fallback_note(_used_metric, _daily_span_years(daily_data))
-            else:
-                fallback_note = status_callout(
-                    [html.Strong(f"{selected_metric} could not fit this record. "),
-                     f"The rate shown is from {_used_metric} instead."],
-                    tone="warning", margin_bottom="14px")
             selected_metric = _used_metric
 
         # Too sparse to fit a trend: both the chosen method AND the LR fallback
@@ -7635,7 +6917,6 @@ def analyze_uploaded_data_callback(
     ])
 
     degradation_layout = html.Div(className="pvc-advanced-single-result slide-in-up", children=[
-        *([fallback_note] if fallback_note is not None else []),
         summary_block,
         html.Div(className="pvc-advanced-result-chart-card", children=[
             html.Div("Power trend", className="pvc-advanced-result-kicker"),
@@ -8400,7 +7681,7 @@ def clear_simple_result_for_method_switch(_method):
     Input("simple-stash", "data"),
 )
 def toggle_simple_start_and_result(stash):
-    result_ready = (stash or {}).get("method") in ("YOY", "LR", "PVPRO")
+    result_ready = (stash or {}).get("method") in ("YOY", "PVPRO")
     if result_ready:
         return {"display": "none"}, {"display": "block"}
     return {}, {"display": "none"}
@@ -12901,7 +12182,7 @@ def simple_stage_filter(pdata):
         _cs_note = ""
         try:
             cs_normal_idx, _ = clear_sky_filter(
-                _df, _irra_key, power_key=(_mapped or {}).get("DC Power"))
+                _df, _irra_key, smoothness_threshold=0.3, energy_threshold=0.5)
             _cand = np.asarray(_df.index.isin(cs_normal_idx), dtype=bool)
             # Guard: clear-sky scoring is threshold-based and can degenerate to
             # zero clear days on some records. Removing 100% of the data is
@@ -13177,10 +12458,7 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
             pfiltered["df_good"], {"path": pfiltered.get("cache_path")})
         _irra_key = pfiltered["irra_key"]
         _daily = aggregate_daily(_df_good, _irra_key)
-        if _yoy_possible(_daily):
-            _rd, _fig = compute_yoy(_daily, rolling_window=30, iqr_multiplier=1.5)
-        else:
-            _rd, _fig = np.nan, None     # rdtools YoY needs >= 2 yr; use LR
+        _rd, _fig = compute_yoy(_daily, rolling_window=30, iqr_multiplier=1.5)
         _used = "YOY"
         if _rd is None or not np.isfinite(_rd):
             _rd_lr, _fig_lr = compute_lr(_daily)
@@ -13228,14 +12506,12 @@ def simple_stage_calc(pfiltered, cells, mps, ps, alphaisc, tech, days, iters):
     n_kept = pfiltered["n_kept"]
     n_removed = max(n_raw - n_kept, 0)
     pct_kept = (n_kept / n_raw * 100) if n_raw else 0.0
-    trend_summary = _summarize_daily_series(daily_data, _metric_label(_used_method))
+    trend_summary = _summarize_daily_series(daily_data, _metric_label("YOY"))
     source_name = pfiltered["source_name"]
 
     stash = {
         "rate_pct": float(rate_pct),
-        "method": _used_method,
-        "method_requested": "YOY",
-        "daily_span_years": _daily_span_years(daily_data),
+        "method": "YOY",
         "duration_years": float(duration_years),
         "start": start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date),
         "end":   end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date),
@@ -13595,9 +12871,7 @@ def _simple_result_layout(stash):
             html.Span("%/yr", className="pvc-yoy-rate-unit"),
         ]),
         html.Div(
-            [{"YOY": "Year-on-year", "LR": "Linear regression"}.get(
-                 str(stash.get("method", "YOY")).upper(), str(stash.get("method"))),
-             html.Span("·"), f"{duration_years:.1f}-year record"],
+            ["Year-on-year", html.Span("·"), f"{duration_years:.1f}-year record"],
             className="pvc-yoy-meta",
         ),
         _global_deg_strip(rate_pct * 100),
@@ -13620,16 +12894,9 @@ def _simple_result_layout(stash):
 
     details = _simple_pipeline_details(stash)
     notes_panel = _data_notes_panel(stash.get("data_notes"))
-    fallback_note = None
-    if str(stash.get("method", "YOY")).upper() != "YOY":
-        fallback_note = _yoy_fallback_note(
-            {"LR": "Linear regression"}.get(str(stash.get("method")).upper(), stash.get("method")),
-            stash.get("daily_span_years"))
     return html.Div(
         (
             [notes_panel] if notes_panel is not None else []
-        ) + (
-            [fallback_note] if fallback_note is not None else []
         ) + [
             html.Div([summary_card, chart_card],
                      className="pvc-simple-yoy-result slide-in-up"),
