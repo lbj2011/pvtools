@@ -5,7 +5,7 @@
    its own gradient only on .pvcopilot-root */
 html, body { background: #ffffff !important; }
 
-.pvcopilot-root { --pvc-advanced-step-max-height:calc(100vh - 220px); position: relative; overflow: hidden; margin-top: -22px; margin-bottom: -54px; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color: #1c2540; font-size: 15px; line-height: 1.5;
+.pvcopilot-root { --pvc-advanced-step-max-height:calc(100vh - 220px); position: relative; overflow: hidden; margin-top: -22px; margin-bottom: 0; padding-bottom: 48px; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color: #1c2540; font-size: 15px; line-height: 1.5;
   /* Oversized gradient slowly panned by pvc-bgDrift, so the page reads as a
      living wash rather than static colour blocks. */
   background:linear-gradient(125deg,#cfe9ff 0%,#e4f2ff 24%,#eef5fd 46%,#fdf6e6 64%,#dcecff 84%,#c9e4ff 100%);
@@ -2003,7 +2003,7 @@ html, body { background: #ffffff !important; }
 /* Narrow-screen layout. These selectors intentionally override the component
    inline desktop grids while leaving all desktop dimensions unchanged. */
 @media (max-width:760px) {
-  .pvcopilot-root { margin-top:-10px; margin-bottom:-30px; font-size:14px; overflow-x:hidden; }
+  .pvcopilot-root { margin-top:-10px; margin-bottom:0; padding-bottom:28px; font-size:14px; overflow-x:hidden; }
   .pvcopilot-root::before { height:max(calc(var(--pvc-advanced-step-max-height) + 920px), 100dvh); }
   .pvcopilot-shell { width:100%; min-width:0; padding:12px 8px 24px; box-sizing:border-box; justify-content:flex-start; }
   .pvcopilot-root .glass { border-radius:21px; }

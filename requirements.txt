@@ -61,3 +61,4 @@ statsmodels>=0.14.6
 dash_model_viewer==0.0.1   # 1.0.0 dropped DashModelViewer (used by pv_pathway)
 networkx >= 3.4.2
 dash-mantine-components==2.8.0
+pycountry>=23.12.11

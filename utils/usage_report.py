@@ -25,7 +25,7 @@ except ImportError:          # run as a plain script from inside utils/
 TZ = "America/Los_Angeles"
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COLUMNS = ["ts", "vid", "ip", "tool", "event", "trigger", "status", "ms", "kb",
-           "ua", "ref", "country", "net", "err", "x"]
+           "ua", "ref", "country", "city", "region", "lat", "lon", "net", "err", "x"]
 
 # app-level facts attached with usage_log.note(); flattened to x_<key> columns
 X_KEYS = ["stage", "mode", "method", "source", "dataset", "rows", "rows_kept", "cols",

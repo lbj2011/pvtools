@@ -40,8 +40,10 @@ load_dotenv()
 _PW_SALT = b"pvtools-admin-v1"
 _PW_ITER = 200_000
 
-PALETTE = ["#3B4CC0", "#7B61C9", "#4C8FD6", "#A07BD8", "#2E3A8C",
-           "#6FB1E8", "#5B3E9E", "#C4A8EB", "#1F6FB2", "#8C8FD9"]
+# Categorical colours: distinct hues so series are easy to tell apart.
+PALETTE = ["#3B4CC0", "#E8862F", "#14A098", "#D6457A", "#7B4FC9",
+           "#3F9A4A", "#B8860B", "#4C8FD6", "#8C564B", "#7F7F7F"]
+BAR_BLUE, BAR_SKY, BAR_PURPLE = "#3B4CC0", "#4C8FD6", "#7B61C9"   # single-series bars
 _CACHE_TTL_S = 300
 _cache = {"t": 0.0, "rows": []}
 
@@ -133,24 +135,69 @@ def _empty(msg="No data in this range", height=200):
     return _style(fig, height=height)
 
 
+def _country_lines(g, top=8):
+    """'US 8<br>CN 2<br>...' -- unique visitors per country for one group."""
+    c = (g.assign(country=g["country"].fillna("").replace("", "Unknown"))
+           .groupby("country")["who"].nunique().sort_values(ascending=False))
+    lines = [f"{k} {v}" for k, v in c.head(top).items()]
+    if len(c) > top:
+        lines.append(f"+{len(c) - top} more")
+    return "<br>".join(lines)
+
+
 def _fig_daily(df):
+    """Unique visitors per tool over time. Short ranges (<= 3 days) are binned
+    by hour so the individual visit times stay visible; longer ranges by day.
+    Empty bins are filled with 0 so the lines do not jump across gaps."""
     if df.empty:
         return _empty()
-    d = (df.assign(day=df["ts_local"].dt.date)
-           .groupby(["day", "tool"])["who"].nunique().rename("visitors").reset_index())
-    fig = px.line(d, x="day", y="visitors", color="tool", markers=True,
-                  color_discrete_sequence=PALETTE)
-    fig.update_xaxes(title=None)
-    fig.update_yaxes(title="Unique visitors", rangemode="tozero")
-    return _style(fig)
+    t = df["ts_local"]
+    span = t.max() - t.min()
+    if span <= pd.Timedelta(hours=6):
+        freq, unit, fine = "5min", "5 min", True
+    elif span <= pd.Timedelta(days=3):
+        freq, unit, fine = "h", "hour", True
+    else:
+        freq, unit, fine = "D", "day", False
+    hourly = fine
+    if t.dt.tz is not None:          # wall-clock local time; avoids DST floor issues
+        t = t.dt.tz_localize(None)
+    bins = t.dt.floor(freq)
+    d = (df.assign(bin=bins).groupby(["bin", "tool"])["who"].nunique()
+           .unstack("tool", fill_value=0))
+    full = pd.date_range(d.index.min(), d.index.max(), freq=freq)
+    d = d.reindex(full, fill_value=0)
+    d.index.name = "bin"
+    d = d.reset_index().melt(id_vars="bin", var_name="tool", value_name="visitors")
+    cc = (df.assign(bin=bins).groupby(["bin", "tool"])[["country", "who"]].apply(_country_lines)
+            .rename("countries").reset_index())
+    d = d.merge(cc, on=["bin", "tool"], how="left").fillna({"countries": ""})
+    fig = px.line(d, x="bin", y="visitors", color="tool", markers=True,
+                  custom_data=["countries"], color_discrete_sequence=PALETTE)
+    if hourly:
+        fig.update_xaxes(title="Pacific time", tickformat="%H:%M\n%b %d")
+    else:
+        fig.update_xaxes(title=None, tickformat="%b %d", dtick=86400000.0 if len(full) <= 31 else None)
+    fig.update_yaxes(title="Unique visitors / " + unit, rangemode="tozero")
+    fig.update_traces(hovertemplate="<b>%{fullData.name}</b> · %{x}<br>%{y} visitors"
+                                    "<br>%{customdata[0]}<extra></extra>")
+    fig = _style(fig, height=330)
+    fig.update_layout(legend=dict(y=-0.35))
+    return fig
 
 
-def _fig_tools(summary):
+def _fig_tools(summary, df=None):
     if summary.empty:
         return _empty()
     s = summary.sort_values("visitors")
+    if df is not None and not df.empty and "country" in df:
+        cc = df.groupby("tool")[["country", "who"]].apply(_country_lines)
+        s = s.assign(countries=s["tool"].map(cc).fillna(""))
+    else:
+        s = s.assign(countries="")
     fig = px.bar(s, x="visitors", y="tool", orientation="h", text="visitors",
-                 color_discrete_sequence=PALETTE)
+                 custom_data=["countries"], color_discrete_sequence=PALETTE)
+    fig.update_traces(hovertemplate="<b>%{y}</b> · %{x} visitors<br>%{customdata[0]}<extra></extra>")
     fig.update_xaxes(title="Unique visitors")
     fig.update_yaxes(title=None)
     return _style(fig)
@@ -167,26 +214,18 @@ def _fig_funnel(df):
             (tool, "Uploaded data", g.loc[g["is_upload"], "who"].nunique()),
         ]
     f = pd.DataFrame(rows, columns=["tool", "stage", "visitors"])
-    fig = px.bar(f, x="tool", y="visitors", color="stage", barmode="group",
-                 color_discrete_sequence=[PALETTE[0], PALETTE[1], PALETTE[3]])
-    fig.update_xaxes(title=None)
-    fig.update_yaxes(title="Unique visitors")
-    return _style(fig)
-
-
-def _fig_heatmap(df):
-    if df.empty:
-        return _empty()
-    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    t = df["ts_local"]
-    pv = (pd.crosstab(t.dt.dayofweek, t.dt.hour)
-            .reindex(index=range(7), columns=range(24), fill_value=0))
-    fig = go.Figure(go.Heatmap(z=pv.values, x=list(range(24)), y=days,
-                               colorscale=[[0, "#F4F3FB"], [0.5, "#7B61C9"], [1, "#2E3A8C"]],
-                               hovertemplate="%{y} %{x}:00 — %{z} events<extra></extra>"))
-    fig.update_xaxes(title="Hour (Pacific time)", dtick=3)
-    fig.update_yaxes(autorange="reversed")
-    return _style(fig)
+    order = f[f["stage"] == "Opened"].sort_values("visitors")["tool"].tolist()
+    fig = px.bar(f, x="visitors", y="tool", color="stage", barmode="group", orientation="h",
+                 text="visitors", category_orders={"tool": order[::-1],
+                                                   "stage": ["Opened", "Used a control", "Uploaded data"]},
+                 color_discrete_map={"Opened": "#3B4CC0", "Used a control": "#14A098",
+                                     "Uploaded data": "#E8862F"})
+    for tr in fig.data:      # no "0" labels on empty bars
+        tr.text = [("" if v == 0 else str(v)) for v in tr.x]
+    fig.update_traces(textposition="outside", cliponaxis=False, textfont_size=12)
+    fig.update_xaxes(title="Unique visitors")
+    fig.update_yaxes(title=None)
+    return _style(fig, height=380)
 
 
 def _fig_actions(df):
@@ -194,13 +233,13 @@ def _fig_actions(df):
     if a.empty:
         return _empty("No actions in this range")
     t = (a.assign(label=a["tool"] + " · " + a["trigger"].fillna("?"))
-          .groupby("label").size().nlargest(15).sort_values().rename("n").reset_index())
+          .groupby("label").size().nlargest(12).sort_values().rename("n").reset_index())
     fig = px.bar(t, x="n", y="label", orientation="h", text="n",
-                 color_discrete_sequence=[PALETTE[1]])
+                 color_discrete_sequence=[BAR_PURPLE])
     fig.update_traces(textposition="outside", textangle=0, cliponaxis=False)
     fig.update_xaxes(title="Times used")
     fig.update_yaxes(title=None)
-    return _style(fig, height=420)
+    return _style(fig, height=380)
 
 
 def _fig_counts(series, xlabel, color):
@@ -215,7 +254,7 @@ def _fig_counts(series, xlabel, color):
     fig.update_xaxes(title=xlabel)
     fig.update_yaxes(title=None)
     # height follows the number of bars, so one category is not a giant slab
-    _style(fig, height=max(200, 110 + 34 * len(c)))
+    _style(fig, height=min(330, max(200, 110 + 30 * len(c))))
     fig.update_layout(bargap=0.35)
     return fig
 
@@ -226,14 +265,69 @@ def _fig_refs(df):
     v = df[df["event"] == "visit"]
     if v.empty:
         return _empty("No visits in this range")
-    return _fig_counts(v["ref"].fillna("(direct / bookmark / link)"), "Visits", PALETTE[2])
+    return _fig_counts(v["ref"].fillna("(direct / bookmark / link)"), "Visits", BAR_SKY)
+
+
+def _iso3(code):
+    try:
+        import pycountry
+        c = pycountry.countries.get(alpha_2=str(code).upper())
+        return (c.alpha_3, c.name) if c else (None, None)
+    except Exception:
+        return None, None
+
+
+def _fig_map(df):
+    """World map: countries shaded by unique visitors; city bubbles on top when
+    Cloudflare location headers (city / lat / lon) are available."""
+    if df.empty:
+        return _empty(height=420)
+    fig = go.Figure()
+    c = df.dropna(subset=["country"])
+    c = c[~c["country"].isin(["XX", "T1", ""])]
+    if not c.empty:
+        g = c.groupby("country")
+        t = pd.DataFrame({"visitors": g["who"].nunique(),
+                          "tools": g[["tool", "who"]].apply(lambda x: ", ".join(
+                              x.groupby("tool")["who"].nunique().sort_values(ascending=False)
+                               .head(4).index))}).reset_index()
+        t[["iso3", "name"]] = t["country"].apply(lambda k: pd.Series(_iso3(k)))
+        t = t.dropna(subset=["iso3"])
+        if not t.empty:
+            fig.add_trace(go.Choropleth(
+                locations=t["iso3"], z=t["visitors"], locationmode="ISO-3",
+                customdata=t[["name", "tools"]],
+                colorscale=[[0, "#DCE3F7"], [1, "#2E3A8C"]], marker_line_color="#ffffff",
+                marker_line_width=0.5, colorbar=dict(title="Visitors", thickness=12, len=0.6),
+                hovertemplate="<b>%{customdata[0]}</b><br>%{z} visitors"
+                              "<br>Tools: %{customdata[1]}<extra></extra>"))
+    p = df.dropna(subset=["lat", "lon"]) if {"lat", "lon"} <= set(df.columns) else df.iloc[0:0]
+    if not p.empty:
+        p = p.assign(city=p["city"].fillna("?"), region=p["region"].fillna(""))
+        q = (p.groupby(["lat", "lon", "city", "region", "country"])["who"].nunique()
+               .rename("visitors").reset_index())
+        fig.add_trace(go.Scattergeo(
+            lat=q["lat"], lon=q["lon"], mode="markers",
+            marker=dict(size=(q["visitors"] ** 0.5) * 9 + 4, color="#E8862F",
+                        line=dict(width=1, color="#ffffff"), opacity=0.85),
+            customdata=q[["city", "region", "country", "visitors"]],
+            hovertemplate="<b>%{customdata[0]}</b>, %{customdata[1]} %{customdata[2]}"
+                          "<br>%{customdata[3]} visitors<extra></extra>", showlegend=False))
+    if not fig.data:
+        return _empty("No location info (needs Cloudflare headers)", height=420)
+    fig.update_geos(projection_type="natural earth", showcountries=True,
+                    countrycolor="#ffffff", showland=True, landcolor="#F1F2F7",
+                    showocean=False, showframe=False, showcoastlines=False)
+    fig = _style(fig, height=360)
+    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+    return fig
 
 
 def _fig_countries(df):
     c = df.dropna(subset=["country"]).drop_duplicates("who")["country"]
     if c.empty:
         return _empty("No country info (needs a CDN header)")
-    return _fig_counts(c, "Visitors", PALETTE[4])
+    return _fig_counts(c, "Visitors", BAR_BLUE)
 
 
 # Stage colours: one hue family per stage (blue / teal / violet / amber /
@@ -289,13 +383,41 @@ def _chip(label, value):
                     className="adm-chip")
 
 
-def _kpi(label, value, sub=None):
-    return dbc.Col(dbc.Card(dbc.CardBody([
+def _kpi(label, value, sub=None, tip=None, kid=None):
+    """KPI tile; `tip` (list of components) shows as a hover tooltip."""
+    card = dbc.Card(dbc.CardBody([
         html.Div(label, style={"fontSize": "0.8rem", "color": "#666",
                                "textTransform": "uppercase", "letterSpacing": "0.04em"}),
         html.Div(value, style={"fontSize": "1.8rem", "fontWeight": 700, "color": "#2E3A8C"}),
         html.Div(sub or "", style={"fontSize": "0.8rem", "color": "#888"}),
-    ]), className="h-100 shadow-sm"), xs=6, md=3, lg=True, className="mb-3")
+    ]), className="h-100 shadow-sm", style={"cursor": "help"} if tip else None,
+        **({"id": kid} if kid else {}))
+    kids = [card]
+    if tip:
+        kids.append(dbc.Tooltip(tip, target=kid, placement="bottom",
+                                style={"textAlign": "left", "maxWidth": 320}))
+    return dbc.Col(kids, xs=6, md=3, lg=True, className="mb-3")
+
+
+def _country_tip(df):
+    """(count, 'US 11 · DE 2', tooltip lines) -- unique visitors per country."""
+    c = (df.assign(country=df["country"].fillna("").replace("", "Unknown"))
+           .groupby("country")["who"].nunique().sort_values(ascending=False))
+    known = c.drop(labels=["Unknown", "XX", "T1"], errors="ignore")
+    top = " · ".join(f"{k} {v}" for k, v in known.head(3).items())
+    lines = []
+    for k, v in c.items():
+        name = _iso3(k)[1] if k not in ("Unknown", "XX", "T1") else None
+        tools = (df[df["country"].fillna("Unknown").replace("", "Unknown") == k]
+                 .groupby("tool")["who"].nunique().sort_values(ascending=False).head(3))
+        lines.append(html.Div([html.B(f"{name or k} ({k})" if name else k), f" — {v} visitors",
+                               html.Br(),
+                               html.Span(", ".join(f"{t} {n}" for t, n in tools.items()),
+                                         style={"opacity": 0.8, "fontSize": "0.75rem"})],
+                              style={"marginBottom": "4px"}))
+    if len(lines) > 12:
+        lines = lines[:12] + [html.Div(f"+{len(lines) - 12} more countries")]
+    return len(known), top, lines
 
 
 def _kpis(df):
@@ -305,9 +427,12 @@ def _kpis(df):
     acts = df[df["event"] == "action"]
     n_err = int(df["is_error"].sum())
     med = acts["ms"].median()
+    n_ctry, ctry_top, ctry_tip = _country_tip(df)
     return [
         _kpi("Visitors", f"{df['who'].nunique():,}",
              f"{int((days_per >= 2).sum()):,} returning"),
+        _kpi("Countries", f"{n_ctry:,}", ctry_top or "hover for details",
+             tip=ctry_tip, kid="adm-kpi-countries"),
         _kpi("Sessions", f"{df['session'].nunique():,}"),
         _kpi("Page views", f"{int((df['event'] == 'page_view').sum()):,}"),
         _kpi("Actions", f"{len(acts):,}"),
@@ -326,16 +451,53 @@ def _card(title, graph_id, md=6):
         dbc.CardHeader(title, style={"fontWeight": 600, "background": "#F6F5FC"}),
         dbc.CardBody(dcc.Loading(dcc.Graph(id=graph_id, config={"displaylogo": False})),
                      style={"padding": "6px"}),
-    ], className="shadow-sm h-100"), md=md, className="mb-4")
+    ], className="shadow-sm h-100"), md=md, className="mb-3")
 
 
+# One look for every table on the page: soft header, row dividers instead of a
+# grid, zebra rows, hover highlight, rounded frame.
 _TABLE_STYLE = dict(
-    style_table={"overflowX": "auto"},
-    style_cell={"fontFamily": "Arial", "fontSize": 13, "padding": "4px 8px",
-                "textAlign": "left", "maxWidth": 260, "overflow": "hidden",
-                "textOverflow": "ellipsis"},
-    style_header={"fontWeight": 700, "background": "#F6F5FC"},
+    style_table={"overflowX": "auto", "borderRadius": "12px",
+                 "border": "1px solid #E4E7F2"},
+    style_cell={"fontFamily": "Inter, Arial, sans-serif", "fontSize": 13,
+                "padding": "9px 12px", "textAlign": "left", "maxWidth": 260,
+                "overflow": "hidden", "textOverflow": "ellipsis",
+                "border": "none", "borderBottom": "1px solid #EEF0F6", "color": "#26304F"},
+    style_header={"fontWeight": 600, "background": "#F3F4FB", "color": "#3B4CC0",
+                  "border": "none", "borderBottom": "2px solid #DDE1F2",
+                  "fontSize": 12, "textTransform": "uppercase", "letterSpacing": "0.03em"},
+    style_filter={"background": "#FBFBFE", "border": "none",
+                  "borderBottom": "1px solid #EEF0F6"},
+    css=[{"selector": "tr:nth-child(even) td", "rule": "background-color: #FAFBFE;"},
+         {"selector": "tr:hover td", "rule": "background-color: #F0F3FD !important;"},
+         {"selector": "td.focused", "rule": "background-color: #E8ECFB !important;"},
+         {"selector": "td.cell--selected", "rule": "background-color: #E8ECFB !important;"},
+         {"selector": ".dash-spreadsheet-menu", "rule": "margin-bottom: 6px;"},
+         {"selector": ".previous-next-container", "rule": "margin-top: 6px;"}],
 )
+_ERR_ROW = {"color": "#D93025", "fontWeight": 600}
+
+
+_NUM_COLS = ["#", "upload_kb", "rows", "span_yr", "kept_%", "wall_s", "run_s",
+             "ai_code", "ai_diag", "ai_chat", "errors"]
+_CP_TABLE_STYLE = dict(
+    _TABLE_STYLE,
+    style_cell_conditional=[{"if": {"column_id": c}, "textAlign": "right"} for c in _NUM_COLS]
+        + [{"if": {"column_id": "status"}, "fontWeight": 600, "minWidth": 120}],
+    style_data_conditional=[
+        {"if": {"filter_query": '{status} contains "Completed"', "column_id": "status"},
+         "color": "#1E8E3E"},
+        {"if": {"filter_query": '{status} contains "Error"', "column_id": "status"},
+         "color": "#D93025"},
+        {"if": {"filter_query": '{status} contains "Incomplete"', "column_id": "status"},
+         "color": "#8A8FA3"},
+        {"if": {"filter_query": "{errors} > 0", "column_id": "errors"},
+         "color": "#D93025", "fontWeight": 700},
+        {"if": {"state": "selected"}, "background": "#E8ECFB", "border": "none"},
+        {"if": {"state": "active"}, "background": "#E8ECFB", "border": "none"},
+    ],
+)
+
 
 _login = dbc.Row(dbc.Col(dbc.Card(dbc.CardBody([
     html.H3("Admin · Usage dashboard"),
@@ -381,14 +543,15 @@ _dash = html.Div([
         {"label": "Exclude LBNL network", "value": "no_lbl"},
     ]),
     dbc.Row(id="adm-kpis", className="g-3"),
-    dbc.Row([_card("Daily unique visitors by tool", "adm-fig-daily", 8),
-              _card("Visitors per tool", "adm-fig-tools", 4)]),
+    # compact grid: two or three charts per row; only the tables span the full width
+    dbc.Row([_card("Visitor map", "adm-fig-map", 8),
+             _card("Countries", "adm-fig-country", 4)], className="g-3"),
+    dbc.Row([_card("Unique visitors by tool", "adm-fig-daily", 8),
+             _card("Visitors per tool", "adm-fig-tools", 4)], className="g-3"),
     dbc.Row([_card("Engagement per tool (unique visitors)", "adm-fig-funnel", 6),
-              _card("When people use the site", "adm-fig-heat", 6)]),
-    dbc.Row([_card("Most used controls", "adm-fig-actions", 12)]),
-    dbc.Row([_card("Where visitors come from (referrer)", "adm-fig-refs", 4),
-             _card("Countries", "adm-fig-country", 4),
-             _card("Devices / browsers", "adm-fig-ua", 4)]),
+             _card("Most used controls", "adm-fig-actions", 6)], className="g-3"),
+    dbc.Row([_card("Where visitors come from (referrer)", "adm-fig-refs", 6),
+             _card("Devices / browsers", "adm-fig-ua", 6)], className="g-3"),
     dbc.Card([
         dbc.CardHeader("PV-Copilot analyses — one row per analysis run",
                        style={"fontWeight": 600, "background": "#F6F5FC"}),
@@ -407,10 +570,15 @@ _dash = html.Div([
                                    n_clicks=0, className="w-100"), md=1),
             ], className="g-2 mb-2"),
             html.Div(id="adm-cp-count", className="text-muted small mb-2"),
+            html.Div([html.Span("● Completed", style={"color": "#1E8E3E"}),
+                      html.Span("● Error", style={"color": "#D93025"}),
+                      html.Span("● Incomplete (left before a result)", style={"color": "#8A8FA3"})],
+                     className="small mb-2", style={"display": "flex", "gap": "18px",
+                                                    "fontWeight": 600}),
             dash_table.DataTable(id="adm-cp-sessions", sort_action="native",
                                  filter_action="native", page_size=10,
                                  row_selectable="multi", selected_row_ids=[],
-                                 **_TABLE_STYLE),
+                                 **_CP_TABLE_STYLE),
             html.Div(id="adm-cp-detail", className="mt-3"),
         ]),
     ], className="shadow-sm mb-4"),
@@ -420,7 +588,8 @@ _dash = html.Div([
              className="shadow-sm mb-4"),
     dbc.Card([dbc.CardHeader("Errors (5xx crashes + errors shown to users)", style={"fontWeight": 600, "background": "#F6F5FC"}),
               dbc.CardBody(dash_table.DataTable(id="adm-errors", sort_action="native",
-                                                page_size=10, **_TABLE_STYLE))],
+                                                page_size=10, **dict(_TABLE_STYLE,
+                    style_data_conditional=[{"if": {"column_id": "err"}, **_ERR_ROW}])))],
              className="shadow-sm mb-4"),
     dbc.Card([
         dbc.CardHeader("Team / internal visitors", style={"fontWeight": 600, "background": "#F6F5FC"}),
@@ -450,7 +619,9 @@ _dash = html.Div([
                              style={"fontWeight": 600, "background": "#F6F5FC"}),
               dbc.CardBody(dash_table.DataTable(id="adm-events", sort_action="native",
                                                 filter_action="native", page_size=20,
-                                                **_TABLE_STYLE))],
+                                                **dict(_TABLE_STYLE, style_data_conditional=[
+                    {"if": {"filter_query": "{status} >= 500"}, **_ERR_ROW},
+                    {"if": {"filter_query": "{err} != ''", "column_id": "err"}, **_ERR_ROW}])))],
              className="shadow-sm mb-4"),
 ], id="adm-dash", style={"display": "none"})
 
@@ -518,7 +689,7 @@ def _gate(tok):
 @app.callback(
     Output("adm-kpis", "children"),
     Output("adm-fig-daily", "figure"), Output("adm-fig-tools", "figure"),
-    Output("adm-fig-funnel", "figure"), Output("adm-fig-heat", "figure"),
+    Output("adm-fig-funnel", "figure"), Output("adm-fig-map", "figure"),
     Output("adm-fig-actions", "figure"), Output("adm-fig-refs", "figure"),
     Output("adm-fig-country", "figure"),
     Output("adm-cp-all", "data"),
@@ -560,7 +731,7 @@ def _update(tok, days, tools, _r, flags, _v):
     ev = ev[ev_cols]
 
     def cols(d):
-        return [{"name": c, "id": c} for c in d.columns]
+        return [{"name": c.replace("_", " "), "id": c} for c in d.columns]
 
     opts = sorted(full["tool"].dropna().unique()) if not full.empty else []
     span = (f"{len(df):,} events" + (f" ({n_hidden:,} team/LBNL events hidden)" if n_hidden else "")
@@ -569,10 +740,10 @@ def _update(tok, days, tools, _r, flags, _v):
         span += f" · load error: {_cache['err']}"
 
     return (
-        _kpis(df), _fig_daily(df), _fig_tools(summary), _fig_funnel(df), _fig_heatmap(df),
+        _kpis(df), _fig_daily(df), _fig_tools(summary, df), _fig_funnel(df), _fig_map(df),
         _fig_actions(df), _fig_refs(df), _fig_countries(df),
         cp.assign(id=cp["run"]).to_dict("records"),
-        _fig_counts(df["ua"], "Events", PALETTE[3]),
+        _fig_counts(df["ua"], "Events", BAR_PURPLE),
         summary.round(1).to_dict("records"), cols(summary),
         err_t.to_dict("records"), cols(err_t),
         ev.astype(object).where(ev.notna(), None).to_dict("records"), cols(ev),
@@ -580,12 +751,22 @@ def _update(tok, days, tools, _r, flags, _v):
     )
 
 
-_CP_COLS = [("start (PT)", "start (PT)"), ("visitor", "visitor"), ("#", "#"),
+_CP_COLS = [("status", "status"), ("start (PT)", "start (PT)"), ("visitor", "visitor"), ("#", "#"),
             ("mode", "mode"), ("data", "data"), ("upload_kb", "upload KB"), ("rows", "rows"),
             ("span_yr", "span yr"), ("method", "method"), ("kept_%", "kept %"),
             ("reached", "reached"), ("wall_s", "time to result s"), ("run_s", "compute s"),
             ("ai_code", "AI coding"), ("ai_diag", "AI diagnostic"), ("ai_chat", "AI chat"),
             ("errors", "errors")]
+
+
+def _run_status(r):
+    """'● Completed' / '● Error' / '● Incomplete' for the runs table."""
+    reached = str(r.get("reached") or "")
+    if "✗" in reached or (r.get("errors") and not r.get("done")):
+        return "● Error"
+    if r.get("done"):
+        return "● Completed" + (" · err" if r.get("errors") else "")
+    return "● Incomplete"
 
 
 def _opts(rows, key, split=False):
@@ -635,7 +816,7 @@ def _cp_filter(rows, modes, datas, methods, status, visitors):
             flags = {"done" if r.get("done") else "open"} | ({"error"} if r.get("errors") else set())
             if not flags & set(status):
                 continue
-        out.append(r)
+        out.append(dict(r, status=_run_status(r)))
     msg = (f"{len(out)} of {len(rows)} analyses · select one for its timeline, "
            "two or more to compare run times")
     return (out, [{"name": n, "id": k} for k, n in _CP_COLS], [], msg,

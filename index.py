@@ -313,7 +313,7 @@ def display_page(pathname):
         header,
         navbar,
         html.Br(),
-        body,
+        html.Div(body, className="pvt-page-body"),   # bottom gap before the footer: assets/footer.css
         footer
     ]
 

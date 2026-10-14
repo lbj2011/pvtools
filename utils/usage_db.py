@@ -14,7 +14,11 @@ Tables (created on first use):
                   JSON-lines log -- see usage_log.py)
     usage_kv      small key/value documents, e.g. the internal-visitors list
 
-Import old log files (JSON lines, .jsonl or .jsonl.gz) -- safe to repeat:
+Old log files placed in usage_backfill/ (*.jsonl / *.jsonl.gz) are imported
+automatically when the app starts (import_backfill_dir). Each file is
+recorded in usage_kv once done, so later restarts skip it.
+
+Manual import (JSON lines, .jsonl or .jsonl.gz) -- safe to repeat:
     python -m utils.usage_db import usage_backfill/*.jsonl.gz
     heroku run -a pvtools python -m utils.usage_db import usage_backfill/x.jsonl.gz
 """
@@ -140,6 +144,33 @@ def _read_jsonl(path):
                     yield json.loads(line)
                 except ValueError:
                     pass
+
+
+def import_backfill_dir(folder=None):
+    """Import every usage_backfill/*.jsonl[.gz] file not imported yet.
+    Idempotent: rows are de-duplicated by hash and finished files are
+    remembered in usage_kv ("backfill_done"). Returns rows added."""
+    import glob
+    if folder is None:
+        folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "usage_backfill")
+    files = sorted(glob.glob(os.path.join(folder, "*.jsonl")) +
+                   glob.glob(os.path.join(folder, "*.jsonl.gz")))
+    if not files:
+        return 0
+    done = dict(kv_get("backfill_done", {}) or {})
+    total = 0
+    for path in files:
+        name = os.path.basename(path)
+        if name in done:
+            continue
+        recs = list(_read_jsonl(path))
+        added = insert(recs)
+        total += added
+        done[name] = {"read": len(recs), "added": added}
+        kv_set("backfill_done", done)
+        print(f"usage backfill: {name}: {len(recs)} read, {added} new", flush=True)
+    return total
 
 
 def _main(argv):

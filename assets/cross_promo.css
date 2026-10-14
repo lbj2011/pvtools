@@ -1,0 +1,37 @@
+/* Slim closable cross-tool bar (utils/cross_promo.py) */
+.pvx-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 8px 40px 8px 14px; position: relative;
+  border: 1px solid #e4e7f2; border-radius: 12px; background: #f6f7fc;
+  font-size: 14px; color: #4a5373;
+}
+.pvx-label { color: #7a829e; white-space: nowrap; }
+.pvx-links { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.pvx-link {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 4px 12px 4px 4px; border-radius: 10px; background: #fff;
+  border: 1px solid #e4e7f2; color: #26304f; text-decoration: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.pvx-link:hover { color: #26304f; text-decoration: none; border-color: #c7cdea;
+                  box-shadow: 0 2px 8px rgba(59, 76, 192, .10); }
+.pvx-thumb {
+  width: 72px; height: 40px; border-radius: 7px; object-fit: cover; object-position: center;
+  border: 1px solid #eceef6; background: #fff; flex: none;
+}
+.pvx-thumb-logo { object-fit: contain; padding: 4px 5px; }
+.pvx-text { display: flex; flex-direction: column; line-height: 1.2; }
+.pvx-text b { color: #3b4cc0; font-size: 14px; }
+.pvx-desc { color: #7a829e; font-size: 12.5px; }
+.pvx-arrow { color: #3b4cc0; transition: transform .15s; }
+.pvx-link:hover .pvx-arrow { transform: translateX(3px); }
+.pvx-close {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border: none; border-radius: 6px; background: transparent;
+  color: #8a8fa3; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.pvx-close:hover { background: #e8eaf4; color: #3b4466; }
+@media (max-width: 576px) {
+  .pvx-label, .pvx-desc { display: none; }
+  .pvx-thumb { width: 44px; height: 28px; }
+}

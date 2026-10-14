@@ -25,6 +25,10 @@ One JSON line per event:
     ua       device class + browser family, e.g. "desktop/chrome"
     ref      external referrer domain (visit events only), e.g. "google.com"
     country  only if a CDN in front of the site sends CF-IPCountry
+    city, region, lat, lon
+             approximate location, only if Cloudflare's "Add visitor location
+             headers" managed transform is on (CF-IPCity, CF-Region,
+             CF-IPLatitude/Longitude). Coordinates rounded to 0.1 deg (~10 km).
     net      "lbl" when the request came from an LBNL network (USAGE_LOG_LBL_NETS),
              "local" for localhost/private addresses (development); else omitted.
              Lets the dashboard separate lab/team traffic without storing IPs.
@@ -118,6 +122,15 @@ class _Sink:
         self._s3 = None
         threading.Thread(target=self._loop, name="usage-log-flush", daemon=True).start()
         atexit.register(self.flush, final=True)
+        if self.db:   # one-time import of usage_backfill/ files (skips files already done)
+            threading.Thread(target=self._backfill, name="usage-log-backfill", daemon=True).start()
+
+    @staticmethod
+    def _backfill():
+        try:
+            usage_db.import_backfill_dir()
+        except Exception as e:   # never block the app on this
+            print(f"usage backfill skipped: {type(e).__name__}: {e}", flush=True)
 
     def add(self, rec):
         line = json.dumps(rec, separators=(",", ":"), ensure_ascii=False)
@@ -188,6 +201,14 @@ class _Sink:
 def _client_ip():
     fwd = request.headers.get("X-Forwarded-For", "")
     return fwd.split(",", 1)[0].strip() or (request.remote_addr or "")
+
+
+def _coord(v):
+    """Header value -> float rounded to 0.1 degree (~10 km), else None."""
+    try:
+        return round(float(v), 1) if v not in (None, "") else None
+    except ValueError:
+        return None
 
 
 def _hash_ip(ip, salt):
@@ -428,6 +449,10 @@ def init_usage_logging(server, routes):
             "ua": _ua_class(ua),
             "ref": ref,
             "country": request.headers.get("CF-IPCountry"),
+            "city": request.headers.get("CF-IPCity") or None,
+            "region": request.headers.get("CF-Region") or None,
+            "lat": _coord(request.headers.get("CF-IPLatitude")),
+            "lon": _coord(request.headers.get("CF-IPLongitude")),
             "net": _net_tag(ip),
             "err": getattr(g, "_usage_err", None),
             "x": getattr(g, "_usage_x", None) or None,

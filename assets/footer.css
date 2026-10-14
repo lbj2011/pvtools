@@ -2,7 +2,7 @@
 .pvt-footer {
     position: relative;
     overflow: hidden;
-    margin-top: 64px;
+    margin-top: 0;
     color: #c9cfe6;
     background: linear-gradient(160deg, #0b0f24 0%, #121838 55%, #1c1748 100%);
     font-size: 14px;
@@ -111,3 +111,8 @@
     color: #7f88ad;
 }
 .pvt-footer-copy { margin: 0; font-size: 12.5px; font-weight: 600; color: #aeb5d6; letter-spacing: 0.02em; }
+
+/* Space between page content and the footer. Pages that paint their own
+   full-width background down to the footer (PV-Copilot) opt out. */
+.pvt-page-body { padding-bottom: 56px; }
+.pvt-page-body:has(.pvcopilot-root) { padding-bottom: 0; }

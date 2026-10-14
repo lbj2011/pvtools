@@ -25,4 +25,4 @@ notebooks
 _backup_*
 loadtest
 *.tmp
-# usage_backfill: keep in the image until the one-time import has run, then add it here
+# usage_backfill/ must stay in the image: it is auto-imported into Postgres at startup

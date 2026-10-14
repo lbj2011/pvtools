@@ -25,6 +25,7 @@ import pandas as pd
 import flask
 import io
 from utils import pvtoolslib
+from utils.cross_promo import promo_bar
 
 from app import app
 
@@ -41,6 +42,7 @@ def get_layout():
     return layout
 
 layout = dbc.Container([
+    promo_bar("string-length"),   # closable links to other tools (utils/cross_promo.py)
     html.Hr(),
     html.Div([
         html.H1("Solar Photovoltaic String Length Calculator"),
