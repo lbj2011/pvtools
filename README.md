@@ -33,6 +33,15 @@ If you use **PVTOOLS** in your research, please cite:
 
 B. Li, T. Karin, X. Chen, and A. Jain, pvtools: Toolkit for Photovoltaic Data Analysis and Modeling, Zenodo, Jun. 2022. DOI: https://doi.org/10.5281/zenodo.15654456
 
+If you use a specific tool, please also cite the related paper:
+
+**PV-Copilot**
+- B. Li and A. Jain, "PV Copilot: A Large Language Model–Enabled Tool for End-to-End PV Degradation Analysis," *2026 IEEE Photovoltaic Specialists Conference (PVSC)*, 2026.
+
+**PV Image Analysis Using LLMs**
+- B. Li and A. Jain, "A Unified Large Language Model–based Framework for Heterogeneous PV Image Diagnosis," *Solar Energy*, vol. 315, 2026. DOI: [10.1016/j.solener.2026.114801](https://doi.org/10.1016/j.solener.2026.114801)
+- B. Li, X. Chen, and A. Jain, "Exploring Capability of Multimodal Foundation Model for Image-based Fault Detection of Photovoltaic Modules," *2025 IEEE 53rd Photovoltaic Specialists Conference (PVSC)*, 2025. DOI: [10.1109/PVSC59419.2025.11133222](https://doi.org/10.1109/PVSC59419.2025.11133222)
+
 # Applications
 
 ## PV-Copilot
@@ -49,6 +58,10 @@ Features:
 - Data loading, filtering, degradation-rate analysis, and PVPRO single-diode parameter extraction
 - Simple mode (one click) and Advanced mode (step by step)
 - AI code generation, AI diagnostics, and an AI help chat
+
+Paper: B. Li and A. Jain, "PV Copilot: A Large Language Model–Enabled Tool for End-to-End PV Degradation Analysis," *2026 IEEE Photovoltaic Specialists Conference (PVSC)*, 2026.
+
+Offline Python package: [github.com/lbj2011/PVCopilot](https://github.com/lbj2011/PVCopilot) · [PyPI: pvcopilot](https://pypi.org/project/pvcopilot/)
 
 ---
 
@@ -75,6 +88,11 @@ Features:
 - AI-assisted PV defect detection
 - Multi-image modality support
 - LLM-assisted interpretation
+
+Papers:
+
+- B. Li and A. Jain, "A Unified Large Language Model–based Framework for Heterogeneous PV Image Diagnosis," *Solar Energy*, vol. 315, 2026. DOI: [10.1016/j.solener.2026.114801](https://doi.org/10.1016/j.solener.2026.114801)
+- B. Li, X. Chen, and A. Jain, "Exploring Capability of Multimodal Foundation Model for Image-based Fault Detection of Photovoltaic Modules," *2025 IEEE 53rd Photovoltaic Specialists Conference (PVSC)*, 2025. DOI: [10.1109/PVSC59419.2025.11133222](https://doi.org/10.1109/PVSC59419.2025.11133222)
 
 ---
 
