@@ -1,0 +1,112 @@
+/* Tools dropdown in the top navbar (index.py: TOOL_MENU) */
+.pvt-tools-menu .dropdown-menu {
+    position: absolute;
+    padding: 8px;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(46, 58, 140, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+    min-width: 300px;
+}
+
+/* public tools: bold, accent bar + soft gradient on hover */
+.pvt-tools-menu .dropdown-item.pvt-tool-item {
+    font-weight: 700;
+    font-size: 1.02rem;
+    color: #1f2a5c;
+    padding: 9px 16px;
+    border-radius: 8px;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease,
+                padding-left 0.18s ease;
+}
+.pvt-tools-menu .dropdown-item.pvt-tool-item:hover,
+.pvt-tools-menu .dropdown-item.pvt-tool-item:focus {
+    background: linear-gradient(90deg, rgba(59, 76, 192, 0.11), rgba(123, 97, 201, 0.04));
+    color: #3B4CC0;
+    box-shadow: inset 4px 0 0 #5B4FC6;
+    padding-left: 22px;
+}
+
+/* hover preview: cover picture + short description, shown beside the menu.
+   The menu opens near the right edge of the navbar, so the card sits on its left. */
+.pvt-tools-menu .pvt-preview {
+    position: absolute;
+    top: 0;
+    right: calc(100% + 12px);
+    width: 320px;
+    padding: 12px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(46, 58, 140, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(8px);
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+    pointer-events: none;
+}
+.pvt-tools-menu .dropdown-item.pvt-tool-item:hover .pvt-preview,
+.pvt-tools-menu .dropdown-item.pvt-tool-item:focus .pvt-preview {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+}
+.pvt-tools-menu .pvt-preview-img {
+    display: block;
+    width: 100%;
+    height: 170px;
+    object-fit: contain;
+    border-radius: 8px;
+    background: #f1f2f7;
+}
+.pvt-tools-menu .pvt-preview-title {
+    margin-top: 10px;
+    font-weight: 700;
+    font-size: 1rem;
+    color: #2E3A8C;
+}
+.pvt-tools-menu .pvt-preview-desc {
+    margin-top: 4px;
+    font-weight: 400;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: #555b6e;
+}
+
+/* internal / admin entries: quiet light gray */
+.pvt-tools-menu .dropdown-item.pvt-internal-item {
+    font-weight: 400;
+    font-size: 0.88rem;
+    color: #a3a8b3;
+    padding: 6px 16px;
+    border-radius: 8px;
+}
+.pvt-tools-menu .dropdown-item.pvt-internal-item:hover,
+.pvt-tools-menu .dropdown-item.pvt-internal-item:focus {
+    background: #f4f5f7;
+    color: #6c7280;
+}
+.pvt-tools-menu .dropdown-divider {
+    margin: 6px 8px;
+    border-top-color: #e6e8ee;
+}
+
+/* collapsed (mobile) navbar: no side card, there is no room for it */
+@media (max-width: 991.98px) {
+    .pvt-tools-menu .pvt-preview { display: none; }
+}
+
+/* Navbar brand: same wordmark as the footer logo, in solid white */
+.pvt-brand-logo {
+    margin-right: 14px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: #ffffff;
+    text-decoration: none;
+    transition: letter-spacing 0.25s ease, text-shadow 0.25s ease, color 0.25s ease;
+}
+.pvt-brand-logo:hover, .pvt-brand-logo:focus {
+    color: #ffffff;
+    text-decoration: none;
+    letter-spacing: 0.18em;
+    text-shadow: 0 0 12px rgba(185, 176, 255, 0.85), 0 0 2px rgba(255, 255, 255, 0.6);
+}

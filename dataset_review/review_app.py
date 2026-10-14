@@ -18,6 +18,7 @@ public_mode, password, s3_bucket, s3_log_key. The app then mounts on the host se
 serves no PDFs, and keeps the review log in S3 (downloaded at start-up, uploaded after every write).
 """
 import datetime as dt
+import functools
 import hashlib
 import json
 import math
@@ -30,7 +31,7 @@ from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
-from dash import ALL, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
+from dash import ALL, MATCH, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
 from flask import abort, send_from_directory
 
 # ---------------------------------------------------------------- config
@@ -45,8 +46,8 @@ DICT_CSV = ROOT / "data_dictionary.csv"
 PDF_DIR = ROOT / "source_pdfs"
 LOG = HERE / "review_log.sqlite"
 PUBLIC_MODE = False            # True -> PDFs are not served; reviewers pick a local folder or open the DOI
-LOGIN_PASSWORD = "duramat"
-USERS = ["Baojie", "Martin", "Dirk", "Anubhav", "Dax"]
+LOGIN_PASSWORD = "pvllm"
+USERS = ["Baojie", "Martin", "Dirk", "Anubhav", "Dax", "Habibur"]
 HOST, PORT = "127.0.0.1", 8060          # override: python app.py --port 8070  (or env PORT=...)
 EMBED = sys.modules.get("pv_review_host")  # set by a host app (pvtools) -> embedded mode
 BASE = "/"
@@ -142,24 +143,28 @@ EXTRA_OF = {
 # the rest, collapsed by category (raw-text fields live in the hover cards, not here)
 GROUPS = [
     ("Degradation rate", [
-        "degradation_metric", "rate_provenance", "rate_stated_by_author", "rate_comparability_flag",
+        "annual_power_deg_rate_in_percent", "degradation_metric", "rate_provenance", "rate_stated_by_author", "rate_comparability_flag",
         "total_power_loss_loss_in_percent", "rate_is_range", "rate_range_low", "rate_range_high",
         "total_power_loss_type_of_power_loss", "total_power_loss_explanation", "annual_power_deg_location_of_info",
         "annual_power_deg_confidence_level", "annual_power_deg_explanation", "annual_degradation_rate_of_other_params",
         "voltage_decrease_reported", "current_decrease_reported", "vi_decrease_summary"]),
     ("Technology & system", [
-        "pv_tech_detail", "pv_tech_mix", "pv_tech_mix_known", "pv_module_name", "bifacial", "materials_and_construction",
+        "pv_tech", "system_capacity_watts", "number_of_pv_modules", "pv_module_nominal_power_watts",
+        "mounting_detail", "scope_of_study", "pv_tech_detail", "pv_tech_mix", "pv_tech_mix_known", "pv_module_name", "bifacial", "materials_and_construction",
         "capacity_basis", "capacity_other_basis_watts", "mounting", "tilt_degrees", "grid_connected", "nature_of_study"]),
     ("Exposure, location & climate", [
-        "start_year", "end_year", "location_latitude", "location_longitude", "location_provenance", "location_site_count",
+        "duration_in_years", "start_year", "end_year", "country", "koppen_zone", "location_latitude", "location_longitude", "location_provenance", "location_site_count",
         "PV zone", "pvcz_label", "climate_stressors", "extreme_weather_events", "extreme_weather_impact"]),
-    ("Faults & reversible losses", ["fault_causality_stated", "soiling_handling"]),
+    ("Faults, stressors & reversible losses", [
+        "faults", "faults_major", "faults_dominant", "faults_suspected", "faults_checked_absent", "fault_causality_stated",
+        "stressors_causal", "stressors_suspected", "stressors_context",
+        "reversible_losses", "reversible_affecting_rate", "reversible_rate_flag", "soiling_handling"]),
     ("Measurement & analysis", [
-        "measurement_approach", "measurement_correction", "calibration_reported", "source_of_initial_power_value",
+        "analysis_method", "measurement_approach", "measurement_correction", "calibration_reported", "source_of_initial_power_value",
         "other_examination_techs", "sample_size_for_rate", "measurement_count",
         "number_of_measurements_for_degradation_analysis", "uncertainty_reported", "goodness_of_fit_reported",
         "data_preprocessing_reported", "preprocessing_steps", "study_limitations_stated"]),
-    ("Study quality", ["quality_design_n", "quality_reporting_n", "quality_flags_met", "quality_flags_missing"]),
+    ("Study quality", ["quality_score", "quality_design_n", "quality_reporting_n", "quality_flags_met", "quality_flags_missing"]),
     ("Notes", ["n_data_points_in_paper", "note", "other_studies"]),
 ]
 UNITS = {"duration_in_years": "yr", "tilt_degrees": "°", "pv_module_nominal_power_watts": "W",
@@ -219,7 +224,8 @@ def pretty(s):
 
 def nfmt(v, d=3):
     try:
-        return f"{float(v):,.{d}f}".rstrip("0").rstrip(".")
+        s = f"{float(v):,.{d}f}"
+        return s.rstrip("0").rstrip(".") if "." in s else s     # 300 must stay 300 (not 3)
     except Exception:
         return str(v)
 
@@ -241,7 +247,28 @@ def first_author(s):
 
 
 # ---------------------------------------------------------------- data
-raw = pd.read_pickle(DATA)
+def _load(path):
+    """.pkl / .pkl.xz (pandas pickle), or .json.gz written by pvtools/dataset_review/prepare_and_upload.py
+    (plain JSON: readable with any numpy / pandas version; list and dict cells are JSON strings, which
+    plain() decodes)"""
+    p = str(path)
+    if p.endswith((".json", ".json.gz")):
+        d = pd.read_json(p, orient="split", dtype=False, convert_dates=False)
+        def dec(v):                                     # decode list / dict cells once, not on every render
+            if isinstance(v, str) and v[:1] in "[{":
+                try:
+                    return json.loads(v)
+                except Exception:
+                    return v
+            return v
+        for c in d.columns:
+            if d[c].dtype == object:
+                d[c] = d[c].map(dec)
+        return d
+    return pd.read_pickle(p)
+
+
+raw = _load(DATA)
 if "validation_status" in raw.columns:
     raw = raw[raw["validation_status"].notna()]
 if "validation_row_verdict" in raw.columns:
@@ -430,7 +457,7 @@ def log_event(eid, rk, field="", status="", comment="", reviewer=""):
 
 
 def row_status(lg):
-    s = lg[(lg.status != "") & lg.rk.notna()]
+    s = lg[(lg.status != "") & lg.rk.notna() & (lg.field == "")]       # data-point marks (field marks are separate)
     return s.groupby("rk").last()[["status", "reviewer"]] if len(s) else pd.DataFrame(columns=["status", "reviewer"])
 
 
@@ -444,7 +471,7 @@ def cap_name(u):
 
 
 # fixed colour per reviewer (the first four keep the colours they had); others fall back to a hash
-USER_COLOR = {"Baojie": "#b0603a", "Martin": "#4f86a0", "Dirk": "#a07c2c", "Anubhav": "#8e5a8f", "Dax": "#3f8a6b"}
+USER_COLOR = {"Baojie": "#b0603a", "Martin": "#4f86a0", "Dirk": "#a07c2c", "Anubhav": "#8e5a8f", "Dax": "#3f8a6b", "Habibur": "#6b6fb5"}
 
 
 def ucolor(u):
@@ -457,12 +484,18 @@ def pill(u):
 
 
 # ---------------------------------------------------------------- field rendering
+@functools.lru_cache(maxsize=512)
+def _evidence(rk):
+    """per-field evidence of one data point (the data never change while the app runs)"""
+    return plain(df.at[rk, "validation_field_evidence"]) if "validation_field_evidence" in df.columns else None
+
+
 def cell(rk, f):
     """(value, evidence) for one field of one data point"""
     if f not in df.columns:
         return None, {}
     v = plain(df.at[rk, f])
-    ev = plain(df.at[rk, "validation_field_evidence"]) if "validation_field_evidence" in df.columns else None
+    ev = _evidence(rk)
     e = (ev or {}).get(f) if isinstance(ev, dict) else None
     e = e if isinstance(e, dict) and e.get("verdict") != "rejected" else {}
     # a field the validation CHANGED keeps its quote / reason in validation_changes, not always in
@@ -633,9 +666,13 @@ def item_rows(f, rk):
     return out
 
 
-def tip_card(f, label, v, e, rk):
+def tip_card(f, label, v, e, rk, st=None):
     """hidden detail block; the page JS shows it in a floating card on hover"""
-    parts = [html.Button("×", className="tclose", title="close"), html.Div(label, className="tt"), html.Div(f, className="tf")]
+    fsbar = html.Div([html.Button(lbl, className=f"fsbtn {k}" + (" on" if st and st[0] == k else ""),
+                                  title=f"mark this field {k}", **{"data-fs": k, "data-field": f})
+                      for k, lbl in (("good", "Good ✓"), ("bad", "Bad ✕"), ("checked", "Checked"), ("unsure", "Unsure ?"))],
+                     className="fsbar")
+    parts = [html.Button("×", className="tclose", title="close"), fsbar, html.Div(label, className="tt"), html.Div(f, className="tf")]
     if FIELD_DESC.get(f):
         parts.append(html.Div(FIELD_DESC[f], className="tdesc"))
     parts.append(html.Div([html.Div("Value:", className="th"), render_value(f, v, rk)], className="tsec"))
@@ -694,19 +731,56 @@ def tip_card(f, label, v, e, rk):
     return html.Div(parts, className="tipsrc")
 
 
-def field_box(rk, f, label, ncomments, main=False):
+_VOID = {"br", "hr", "img", "input"}
+
+
+def _css_name(a):
+    return re.sub(r"(?<!^)([A-Z])", r"-\1", a).lower()
+
+
+def to_html(c):
+    """Dash html component tree -> HTML string. The hover cards are only ever shown by the page JS
+    (copied into the floating #tip), so they travel as one string attribute instead of dozens of Dash
+    components per field: much less for the browser to build when a paper is opened."""
+    import html as _h
+    if c is None or c is False:
+        return ""
+    if isinstance(c, (list, tuple)):
+        return "".join(to_html(x) for x in c)
+    if isinstance(c, (str, int, float)):
+        return _h.escape(str(c))
+    tag = type(c).__name__.lower()
+    p = c.to_plotly_json()["props"]
+    attrs = []
+    for k, v in p.items():
+        if k in ("children", "id") or v is None:
+            continue
+        if k == "className":
+            k = "class"
+        elif k == "style":
+            v = ";".join(_css_name(a) + ":" + str(b) for a, b in v.items())
+        elif not (k.startswith("data-") or k in ("title", "href", "target", "src", "colSpan")):
+            continue
+        attrs.append(f' {k}="{_h.escape(str(v), quote=True)}"')
+    inner = to_html(p.get("children"))
+    return f"<{tag}{''.join(attrs)}>" + ("" if tag in _VOID else f"{inner}</{tag}>")
+
+
+def field_box(rk, f, label, ncomments, main=False, fst=None):
     v, e = cell(rk, f)
     long = isinstance(v, str) and len(v) > 60
+    st = (fst or {}).get(f)
     badge = [html.Span(f"💬{ncomments}", className="cbadge", title=f"{ncomments} comment(s) on this field")] if ncomments else []
+    dot = [html.Span(className=f"sdot {st[0]}", title=f"{st[0]} · {cap_name(st[1])}")] if st else []
     return html.Div([
-        html.Div([label] + badge, className="k"),
+        html.Div(dot + [label] + badge, className="k"),
         html.Div(render_value(f, v, rk, big=main and f == "annual_power_deg_rate_in_percent"), className="v"),
-        tip_card(f, label, v, e, rk),
+        html.Div(className="tipsrc", **{"data-html": to_html(tip_card(f, label, v, e, rk, st).children)}),
     ], className=("card" if main else "f") + (" empty" if isnil(v) else "") + (" long" if long else "")
        + (" rate" if main and f == "annual_power_deg_rate_in_percent" and not isnil(v) else ""), **{"data-field": f})
 
 
-def render_record(eid, rk, lg):
+def render_record(eid, rk, lg, open_groups=()):
     p = PAPERS.loc[eid]
     rows = df[df.eid == eid]
     st = row_status(lg)
@@ -739,19 +813,42 @@ def render_record(eid, rk, lg):
                                     id={"type": "dp", "rk": int(r.rk)}, n_clicks=0,
                                     className="tab" + (" active" if r.rk == rk else ""),
                                     title=plain(df.at[r.rk, "data_point_label"]) or ""))
-    hero = html.Div([field_box(rk, f, lbl, fc.get(f, 0), main=True) for f, lbl in MAIN
+    fsv = lg[(lg.status != "") & (lg.field != "") & (lg.rk == rk)]
+    fst = {f: (g.status.iloc[-1], g.reviewer.iloc[-1]) for f, g in fsv.groupby("field")} if len(fsv) else {}
+    hero = html.Div([field_box(rk, f, lbl, fc.get(f, 0), main=True, fst=fst) for f, lbl in MAIN
                      if f in df.columns and f not in HOVER_FIELDS], className="hero")
     groups = []
-    for title, fs in GROUPS:
-        fs = [f for f in fs if f in df.columns and f not in RAW_FIELDS and f not in HOVER_FIELDS]
+    for k, (title, fs) in enumerate(GROUPS):
+        fs = group_fields(fs)
         filled = [f for f in fs if not isnil(cell(rk, f)[0])]
         if not fs:
             continue
+        is_open = k in (open_groups or ())
+        # a collapsed group ships only its title; its fields (and their hover cards) are built when it is opened
         groups.append(html.Details([
-            html.Summary([title, html.Span(f"{len(filled)} / {len(fs)} filled", className="cnt")]),
-            html.Div([field_box(rk, f, pretty(f), fc.get(f, 0)) for f in (filled + [f for f in fs if f not in filled])], className="fields"),
-        ], className="grp"))
+            html.Summary([title, html.Span(f"{len(filled)} / {len(fs)} filled", className="cnt")],
+                         id={"type": "grpsum", "k": k}, n_clicks=0),
+            html.Div(group_body(rk, fs, fc, fst) if is_open else None, id={"type": "grpbody", "k": k}),
+        ], open=is_open, className="grp"))
     return [head, dp_head] + ([html.Div(tabs, className="tabs")] if tabs else []), hero, groups
+
+
+def group_fields(fs):
+    return [f for f in fs if f in df.columns and f not in RAW_FIELDS]      # every field, key ones included
+
+
+def group_body(rk, fs, fc, fst):
+    filled = [f for f in fs if not isnil(cell(rk, f)[0])]
+    return html.Div([field_box(rk, f, pretty(f), fc.get(f, 0), fst=fst) for f in (filled + [f for f in fs if f not in filled])],
+                    className="fields")
+
+
+def field_marks(eid, rk, lg):
+    """(comment count per field, latest status per field) of one data point"""
+    fc = lg[(lg.comment != "") & (lg.eid == eid) & (lg.rk == rk) & (lg.field != "")].groupby("field").size().to_dict()
+    fsv = lg[(lg.status != "") & (lg.field != "") & (lg.rk == rk)]
+    fst = {f: (g.status.iloc[-1], g.reviewer.iloc[-1]) for f, g in fsv.groupby("field")} if len(fsv) else {}
+    return fc, fst
 
 
 def render_thread(eid, rk, lg):
@@ -985,7 +1082,7 @@ main = html.Div([
         html.Div(className="divider", title="drag to resize · double-click to reset"),
         html.Div(id="pdf", className="right"),
     ], className="panels", id="panels"),
-    dcc.Store(id="cur"), dcc.Store(id="pdf_eid"), dcc.Store(id="order"),
+    dcc.Store(id="cur"), dcc.Store(id="pdf_eid"), dcc.Store(id="order"), dcc.Store(id="fs_evt"), dcc.Store(id="grp_open", data=[]),
 ], className="root", id="main", style={"display": "none"})
 
 login = html.Div([html.Div([
@@ -998,7 +1095,6 @@ login = html.Div([html.Div([
     html.Div([dcc.Input(id="login_pw", type="password", placeholder="password", debounce=True, className="txt"),
               html.Button("Show", id="pw_toggle", n_clicks=0, className="btn pwbtn", title="show / hide the password")],
              className="pwrow"),
-    html.Div("Hint: which consortium are we all part of? (not case-sensitive)", className="hint small"),
     html.Button("Log in", id="login_btn", n_clicks=0, className="btn primary"),
     html.Div(id="login_msg", className="err"),
 ], className="logincard")], id="login", className="loginwrap")
@@ -1125,7 +1221,7 @@ def apply_filters(_n, text, _msg, *vals):
     nrev = rstat[rstat != ""].groupby(df["eid"]).size()
     tab = P[["eid", "year", "author", "title", "n", "rate", "pdf"]].copy()
     # per paper, per reviewer: that reviewer's latest status on each data point -> one dot each
-    sv = lg[(lg.status != "") & lg.rk.notna()].copy()
+    sv = lg[(lg.status != "") & lg.rk.notna() & (lg.field == "")].copy()
     dots = {}
     if len(sv):
         sv["who"] = sv.reviewer.map(cap_name)
@@ -1179,13 +1275,15 @@ def pick(active, _p, _n, _dp, vdata, cur):
 
 @app.callback(Output("rec_head", "children"), Output("rec_hero", "children"), Output("rec_groups", "children"),
               Output("sel_label", "children"), Output("thread", "children"), Output("c_field", "options"), Output("c_field", "value"),
-              Input("cur", "data"), Input("save_msg", "children"), State("c_field", "value"))
-def show(cur, _msg, cfield):
+              Input("cur", "data"), Input("save_msg", "children"), State("c_field", "value"),
+              State("grp_open", "data"))
+def show(cur, _msg, cfield, grp_open):
     if not cur:
         return html.Div("Pick a paper on the left.", className="hint"), "", "", "", "", [], "__row__"
     eid, rk = cur["eid"], cur["rk"]
     lg = read_log()
-    head, hero, groups = render_record(eid, rk, lg)
+    open_groups = set(grp_open or [])                                         # keep open groups open
+    head, hero, groups = render_record(eid, rk, lg, open_groups)
     st = row_status(lg)
     s = st.loc[rk] if len(st) and rk in st.index else None
     label = [html.Span(eid, className="eidlbl")] + ([" · ", html.B(s.status, className=f"stxt {s.status}"), " ", pill(s.reviewer)] if s is not None else [html.Span(" · not reviewed", className="nil")])
@@ -1233,6 +1331,37 @@ def mark(_g, _b, _c, _u, _a, _s, cur, comment, cfield, user):
     status = t.replace("mk_", "")
     log_event(cur["eid"], cur["rk"], status=status, reviewer=user or "")
     return f"marked {status} · {now}", no_update
+
+
+@app.callback(Output("grp_open", "data"), Input({"type": "grpsum", "k": ALL}, "n_clicks"),
+              State("grp_open", "data"), prevent_initial_call=True)
+def toggle_group(_n, grp_open):
+    t = ctx.triggered_id
+    if not isinstance(t, dict) or not ctx.triggered[0]["value"]:
+        return no_update                                  # re-rendered, not clicked
+    s = set(grp_open or [])
+    s ^= {t["k"]}
+    return sorted(s)
+
+
+@app.callback(Output({"type": "grpbody", "k": MATCH}, "children"), Input({"type": "grpsum", "k": MATCH}, "n_clicks"),
+              State({"type": "grpsum", "k": MATCH}, "id"), State({"type": "grpbody", "k": MATCH}, "children"),
+              State("cur", "data"), prevent_initial_call=True)
+def fill_group(n, gid, body, cur):
+    if not n or body or not cur:
+        return no_update                                  # already built (closing keeps it)
+    fs = group_fields(GROUPS[gid["k"]][1])
+    fc, fst = field_marks(cur["eid"], cur["rk"], read_log())
+    return group_body(cur["rk"], fs, fc, fst)
+
+
+@app.callback(Output("save_msg", "children", allow_duplicate=True), Input("fs_evt", "data"),
+              State("cur", "data"), State("user", "data"), prevent_initial_call=True)
+def mark_field(evt, cur, user):
+    if not evt or not cur or not evt.get("field") or evt.get("status") not in STATUSES:
+        return no_update
+    log_event(cur["eid"], cur["rk"], field=evt["field"], status=evt["status"], reviewer=user or "")
+    return f"{pretty(evt['field'])} marked {evt['status']} · {dt.datetime.now():%H:%M:%S}"
 
 
 # ---------------------------------------------------------------- review log panel
@@ -1376,6 +1505,12 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 #tip .tsec{margin-top:8px} #tip .th{font-size:11px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px} #tip .th.inline{display:inline}
 #tip .tclose{position:sticky;top:0;float:right;margin:-4px -4px 0 8px;width:24px;height:24px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink-2);font-size:16px;line-height:20px;cursor:pointer;padding:0}
 #tip .tclose:hover{background:var(--surface-2);color:var(--ink)}
+#tip .fsbar{float:right;display:flex;gap:4px;margin:-2px 6px 0 0}
+#tip .fsbtn{font:600 10.5px system-ui;padding:2px 7px;border:1px solid var(--line);border-radius:5px;background:var(--surface);cursor:pointer}
+#tip .fsbtn.good{color:var(--good)} #tip .fsbtn.bad{color:var(--bad)} #tip .fsbtn.checked{color:var(--chk)} #tip .fsbtn.unsure{color:var(--uns)}
+#tip .fsbtn.on.good{background:var(--good);color:#fff;border-color:var(--good)} #tip .fsbtn.on.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+#tip .fsbtn.on.checked{background:var(--chk);color:#fff;border-color:var(--chk)} #tip .fsbtn.on.unsure{background:var(--uns);color:#fff;border-color:var(--uns)}
+.k .sdot{margin-right:5px}
 #tip .warn{color:#9a6a12;background:#fbf3e0;border-radius:5px;padding:3px 7px;font-size:11.5px;margin:2px 0 4px}
 #tip .copybtn{float:right;font:600 10.5px system-ui;text-transform:none;letter-spacing:0;padding:1px 8px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--accent);cursor:pointer}
 #tip .copybtn:hover{background:var(--accent-soft)} #tip .copybtn.done{color:var(--good);border-color:var(--good)}
@@ -1414,7 +1549,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
     var x=r.right+8; if(x+w>innerWidth-10) x=Math.max(10,r.left-w-8);
     var y=Math.min(Math.max(10,r.top), innerHeight-h-10); tip.style.left=x+'px'; tip.style.top=Math.max(10,y)+'px'; }
   function show(el){ var s=el.querySelector('.tipsrc'); if(!s)return; cur=el;
-    tip.innerHTML=s.innerHTML+'<div class="hintp">'+(pinned?'pinned · click the field again or Esc to release':'click the field to pin')+'</div>';
+    tip.innerHTML=(s.dataset.html||s.innerHTML)+'<div class="hintp">'+(pinned?'pinned · click the field again or Esc to release':'click the field to pin')+'</div>';
     tip.style.display='block'; place(el); }
   function hide(){ if(pinned)return; tip.style.display='none'; cur=null; }
   function later(){ clearTimeout(hideT); hideT=setTimeout(hide,220); }
@@ -1425,6 +1560,10 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
     if(el){ clearTimeout(hideT); if(!pinned && el!==cur) show(el); } else later(); });
   document.addEventListener('click',function(e){ if(!e.target.closest)return;
     if(e.target.closest('#tip .tclose')){ if(pinned){pinned.classList.remove('pinned');pinned=null;} tip.classList.remove('pinned'); tip.style.display='none'; cur=null; return; }
+    var fb=e.target.closest('#tip .fsbtn');
+    if(fb){ if(window.dash_clientside&&window.dash_clientside.set_props){
+        window.dash_clientside.set_props('fs_evt',{data:{field:fb.dataset.field,status:fb.dataset.fs,t:Date.now()}}); }
+      tip.querySelectorAll('.fsbtn').forEach(function(b){b.classList.toggle('on',b===fb);}); return; }
     var cb=e.target.closest('#tip .copybtn');
     if(cb){ var sec=cb.closest('.tsec'), box=sec&&sec.querySelector('.'+cb.dataset.copy);
       var txt=box?(box.dataset.text||box.textContent):''; copyText(txt); cb.textContent='Copied ✓'; cb.classList.add('done');
@@ -1444,7 +1583,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
   var files={}, names=[], lastEid=null;
   document.getElementById('pdfdir').addEventListener('change',function(e){
     for(var i=0;i<e.target.files.length;i++){var f=e.target.files[i]; if(/\.pdf$/i.test(f.name)){files[f.name.toLowerCase()]=f;}}
-    names=Object.keys(files); document.getElementById('pdfcount').textContent=names.length+' PDFs loaded'; lastEid=null; show(); });
+    names=Object.keys(files); document.getElementById('pdfcount').textContent=names.length+' local PDFs linked (opened in your browser, not uploaded)'; lastEid=null; show(); });
   function show(){ var lbl=document.querySelector('#sel_label .eidlbl'), fr=document.getElementById('localpdf'); if(!lbl||!fr||!names.length)return;
     var eid=lbl.textContent.trim().toLowerCase(); if(eid===lastEid&&fr.src)return;
     var n=names.find(function(x){return x.indexOf(eid)>=0;}), msg=document.getElementById('localmsg');

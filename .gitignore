@@ -3,7 +3,7 @@
 # =========================
 figures/
 out.csv
-.pptx
+*.pptx
 
 # old / test folders
 test*
@@ -69,7 +69,27 @@ htmlcov/
 *.log
 
 # ppt files
-.pptx
+*.pptx
 
 # internal dataset review: data comes from S3, never committed
 dataset_review/data/
+
+# unpublished full dataset: shipped with the Docker image only, never committed
+data/data_2609_w_rate.parquet
+pvcopilot_pkg/
+
+# local usage logs (utils/usage_log.py)
+usage_logs/
+
+# =========================
+# Local-only (never commit)
+# =========================
+usage_backfill/
+loadtest/results/
+loadtest/upload_files/
+loadtest/*.tgz
+_backup_*/
+_to_delete*/
+Claude outputs/
+*.tmp
+*.csstemp

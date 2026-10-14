@@ -13,6 +13,8 @@ Only the columns the review app uses are kept (keeps the dyno's memory low). Nee
 with write access to the bucket (same as the other pvtools S3 files).
 """
 import argparse
+import json
+import math
 import pathlib
 import shutil
 
@@ -20,6 +22,26 @@ import pandas as pd
 
 HERE = pathlib.Path(__file__).resolve().parent
 BUCKET, PREFIX = "pvtools", "dataset_review/"
+
+
+def _cell(v):
+    """list / dict / array cells -> JSON text (the review app decodes them); NaN -> None"""
+    if hasattr(v, "tolist") and not isinstance(v, str):
+        v = v.tolist()
+    if isinstance(v, (list, tuple, dict)):
+        return json.dumps(v, ensure_ascii=False, default=str)
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return v
+
+
+def to_json(df, out):
+    """plain JSON (gzip): readable with any numpy / pandas version, unlike a pickle"""
+    d = df.copy()
+    for c in d.columns:
+        if d[c].dtype == object:
+            d[c] = d[c].map(_cell)
+    d.to_json(out, orient="split", date_format="iso", default_handler=str, compression="gzip")
 
 
 def main():
@@ -40,8 +62,8 @@ def main():
     keep = [c for c in df.columns if f'"{c}"' in code or f"'{c}'" in code]
     out_dir = HERE / "data"
     out_dir.mkdir(exist_ok=True)
-    out = out_dir / "dataset_review.pkl.xz"
-    df[keep].to_pickle(out)
+    out = out_dir / "dataset_review.json.gz"
+    to_json(df[keep], out)
     shutil.copy(a.dict_csv, out_dir / "data_dictionary.csv")
     print(f"{len(df)} rows, {len(keep)}/{len(df.columns)} columns -> {out} ({out.stat().st_size / 1e6:.1f} MB)")
     if a.local:

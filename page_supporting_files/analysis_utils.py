@@ -2658,6 +2658,122 @@ def estimate_pvpro_params(df, mapped_variables_dict, cells_in_series=60):
     return out
 
 
+# Candidate window lengths (days) tried by estimate_pvpro_windows, shortest
+# first: a shorter window resolves the trend better, so the first one that
+# yields enough points per fit wins.
+_PVPRO_WINDOW_CANDIDATES = (7, 10, 14, 21, 30, 45, 60, 90, 120)
+
+
+def estimate_pvpro_windows(df, mapped_variables_dict,
+                           irradiance_threshold=200.0, min_points_per_window=20,
+                           target_points_per_window=60, max_windows=120):
+    """Recommend PVPRO's Days per run and Iterations per year FROM THE DATA.
+
+    compute_pvpro fits one single-diode model per window of `days_per_run`
+    days and skips any window with fewer than `min_points_per_window` rows;
+    it then needs at least 4 fitted windows. How many rows a window holds
+    depends on the sampling cadence (1-min vs hourly vs a block-averaged
+    3-hour series) and on how much Step 2 filtered away, so a fixed 14 days
+    can be generous on one dataset and hopeless on another.
+
+    This keeps exactly the rows compute_pvpro will keep (V, I, G, T all
+    present, G > irradiance_threshold, V > 0, I > 0), then for each candidate
+    window length runs the SAME window loop compute_pvpro runs and counts
+    rows per window. The shortest length whose median window holds
+    `target_points_per_window` rows (3x the hard minimum, so a cloudy
+    fortnight doesn't drop out) AND where at least 70% of windows clear the
+    hard minimum is chosen. Iterations per year is then set so windows tile
+    the year without gaps (step ~= window), capped so the whole record needs
+    at most `max_windows` fits (runtime scales with that count).
+
+    Returns {"days_per_run": {"value", "basis"}, "iterations_per_year":
+    {"value", "basis"}, "warning": str|None} or {} when the columns PVPRO
+    needs aren't there.
+    """
+    m = mapped_variables_dict or {}
+    keys = [m.get(k) for k in ("DC Voltage", "DC Current", "Irradiance", "Module temperature")]
+    if not all(k and k in df.columns for k in keys):
+        return {}
+    v_key, i_key, g_key, t_key = keys
+    d = df[keys].apply(pd.to_numeric, errors="coerce")
+    d.index = pd.to_datetime(d.index)
+    d = d.dropna()
+    d = d[(d[g_key] > irradiance_threshold) & (d[v_key] > 0) & (d[i_key] > 0)]
+    if len(d) < 100:
+        return {"warning": (f"only {len(d)} usable points above {irradiance_threshold:.0f} W/m\u00b2 "
+                            "with V, I and temperature present \u2014 too few for PVPRO at any "
+                            "window length; loosen the Step 2 filters.")}
+    idx = d.index.sort_values()
+    t0, t1 = idx[0], idx[-1]
+    span_days = max((t1 - t0).days, 1)
+    years = span_days / 365.25
+    ns = idx.asi8
+
+    def _window_counts(days, step_days):
+        counts, cur = [], t0
+        w = pd.Timedelta(days=days)
+        while cur + w <= t1 + pd.Timedelta(days=1):
+            lo = np.searchsorted(ns, cur.value, side="left")
+            hi = np.searchsorted(ns, (cur + w).value, side="left")
+            counts.append(hi - lo)
+            cur = cur + pd.Timedelta(days=step_days)
+        return np.array(counts)
+
+    # Evaluate every candidate that still fits >= 4 windows.
+    cand = []
+    for days in _PVPRO_WINDOW_CANDIDATES:
+        if days * 4 > span_days:          # fewer than 4 windows fit at all
+            break
+        c = _window_counts(days, days)
+        if len(c) < 4:
+            break
+        n_ok = int((c >= min_points_per_window).sum())
+        cand.append((days, float(np.median(c)), n_ok / len(c), n_ok))
+    if not cand:
+        return {"warning": (f"the usable record spans only {span_days} days \u2014 "
+                            "too short for 4 PVPRO windows.")}
+    # 1st choice: shortest window with a comfortable margin (median >= target,
+    # >= 70% of windows fittable). 2nd: shortest where nearly every window is
+    # fittable (>= 90%, median >= 1.5x the minimum) — fine, just less margin.
+    # Otherwise the candidate with the most fittable windows, with a warning.
+    warning = None
+    chosen = next((c for c in cand if c[1] >= target_points_per_window and c[2] >= 0.7), None)
+    if chosen is None:
+        chosen = next((c for c in cand if c[2] >= 0.9 and c[1] >= 1.5 * min_points_per_window), None)
+    if chosen is None:
+        chosen = max(cand, key=lambda c: (c[3] >= 4, c[2], -c[0]))
+        warning = (f"with {chosen[0]}-day windows only {chosen[3]} of "
+                   f"{int(round(chosen[3] / max(chosen[2], 1e-9)))} windows reach the "
+                   f"{min_points_per_window} usable points a fit needs (median "
+                   f"{chosen[1]:.0f}) \u2014 PVPRO may fail or be noisy; loosen the Step 2 "
+                   "filters or use a finer-resolution file.")
+    days, med_pts, ok_frac, _n_ok = chosen
+
+    iters = int(np.clip(round(365.25 / days), 4, 24))
+    n_windows = iters * years
+    capped = False
+    if n_windows > max_windows:
+        iters = max(4, int(max_windows // max(years, 1e-9)))
+        capped = True
+    cadence_min = float(np.median(np.diff(ns)) / 6e10) if len(ns) > 1 else float("nan")
+    per_day = len(d) / max(len(pd.Index(idx.normalize()).unique()), 1)
+
+    return {
+        "days_per_run": {
+            "value": int(days),
+            "basis": (f"{int(days)}-day windows hold a median of {med_pts:.0f} usable points "
+                      f"(~{per_day:.1f} per day with data), {ok_frac:.0%} of windows \u2265 "
+                      f"{min_points_per_window}")},
+        "iterations_per_year": {
+            "value": int(iters),
+            "basis": (f"{iters}/yr over {years:.1f} yr \u2248 {int(round(iters * years))} fits"
+                      + (f" (capped at {max_windows} for runtime)" if capped
+                         else " (windows tile the year back to back)"))},
+        "warning": warning,
+        "cadence_min": cadence_min,
+    }
+
+
 # =============================================================================
 # PVPRO  (single-diode-model based degradation) -- PUBLIC ENTRY POINT
 # =============================================================================

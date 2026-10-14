@@ -51,9 +51,16 @@ from pvlib.singlediode import bishop88_mpp, bishop88_v_from_i, bishop88_i_from_v
 from scipy.optimize import minimize as _scipy_minimize
 
 # --- Tier 1: rdtools --------------------------------------------------------
-import rdtools
+try:
+    import rdtools
+except ImportError as _e:   # pragma: no cover
+    raise ImportError(
+        "PV-Copilot's analysis backend needs rdtools, which is NOT in requirements.txt "
+        "(its xgboost dependency is 190+ MB). Install it with:\n"
+        "    pip install -r requirements_pkg.txt\n"
+        "    pip install --no-deps rdtools==2.1.8") from _e
 from rdtools.normalization import pvwatts_dc_power
-from rdtools.filtering import poa_filter, tcell_filter, normalized_filter
+from rdtools.filtering import poa_filter, tcell_filter, normalized_filter, quantile_clip_filter
 from rdtools.aggregation import aggregation_insol
 from rdtools.degradation import (degradation_year_on_year,
                                  degradation_ols,
@@ -66,6 +73,9 @@ try:
     _HAS_PVANALYTICS = True
 except ImportError:          # pragma: no cover
     _HAS_PVANALYTICS = False
+    warnings.warn("pvanalytics is not installed: the IQR outlier filter falls back to a "
+                  "pandas implementation and orientation inference is disabled. "
+                  "Install it with `pip install -r requirements_pkg.txt`.", RuntimeWarning)
 try:
     from pvanalytics.quality.time import shifts_ruptures as _pva_shifts_ruptures
     import ruptures  # noqa: F401  (optional dependency of shifts_ruptures)
@@ -357,6 +367,87 @@ def compute_csd(series, period=12, confidence_level=68.2, return_ci=False):
 # =============================================================================
 # TIER 2 -- pvanalytics-backed outlier & time-shift detection (optional)
 # =============================================================================
+def align_to_solar_day(df, irradiance_key, target_hour=12.5, tolerance_h=1.75):
+    """Shift timestamps by whole hours so the daily irradiance peak falls near
+    local noon — i.e. put the record on (approximately) local standard time.
+
+    Daily aggregation and clear-day scoring cut the record at midnight, so a
+    "day" must be a solar day. Loggers record in UTC, in local standard time
+    or in local time with DST, and the file rarely says which. Rather than
+    assume one (the page used to force UTC -> US/Pacific, which moved noon to
+    4-6 am for every example here, all of which are already local), this
+    measures it: the median clock time of each day's irradiance maximum. If
+    that is within `tolerance_h` of `target_hour` nothing changes; otherwise
+    the index is shifted by the whole number of hours that brings it there.
+    A tz-aware index is made naive first (its wall-clock values are kept).
+
+    Returns (df, shift_hours, peak_hour_before)."""
+    idx = pd.DatetimeIndex(pd.to_datetime(df.index))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    g = _numeric(df[irradiance_key]) if irradiance_key in df.columns else None
+    peak = np.nan
+    if g is not None:
+        # Irradiance-weighted centre of each day, not the time of the maximum:
+        # on block-averaged data (3-h steps) the maximum can only land on a
+        # few clock times and its median drifts 1-2 h off noon, while the
+        # weighted centre of a roughly symmetric day IS solar noon at any
+        # resolution. Days are cut at the record's own midnight, which is
+        # fine unless the offset is huge — and then the shift fixes it.
+        s = pd.Series(np.asarray(g, float), index=idx).clip(lower=0)
+        s = s[s > 50]
+        if len(s) > 20:
+            hrs = s.index.hour + s.index.minute / 60.0
+            day = s.index.normalize()
+            w = pd.DataFrame({"h": hrs * s.values, "g": s.values, "n": 1}, index=s.index)
+            agg = w.groupby(day).sum()
+            agg = agg[agg["n"] >= 3]
+            if len(agg) >= 10:
+                peak = float(np.median(agg["h"] / agg["g"]))
+    shift = 0
+    if np.isfinite(peak) and abs(peak - target_hour) > tolerance_h:
+        shift = int(np.clip(round(target_hour - peak), -12, 12))
+    out = df.copy()
+    out.index = idx + pd.Timedelta(hours=shift) if shift else idx
+    return out, shift, peak
+
+
+def clipping_filter(df, power_key, spread_max=0.04, flat_top_min=0.03, quantile=0.99):
+    """Remove inverter-clipped points, but only when the record is clipped.
+
+    rdtools' quantile clip filter always removes the top ~2% of points, clipped
+    or not, and its logic filter needs sub-15-min data (on hourly means it
+    finds nothing). So clipping is first DETECTED from the shape of the top of
+    the power distribution — a clipped array has a flat ceiling:
+      * (q99.9 - q99) / q99.9 < `spread_max`   (an unclipped tail is >= ~5%)
+      * > `flat_top_min` of the top-5% points sit within +-0.5% of q99.9
+    Both must hold. Measured on the examples at the resolution the pipeline
+    sees them (after auto-downsizing): NREL STF 3.2% / 4.8% (hourly: 0.8% /
+    15%); every unclipped example >= 5.5% / <= 1.4%. Only then is ``rdtools.filtering.quantile_clip_filter``
+    applied at `quantile`, which drops the points at the ceiling.
+
+    Returns (normal_indices, clipped_indices, info) where info has
+    "clipped" (bool), "spread", "flat_top" and "ceiling"."""
+    p = _numeric(df[power_key]) if power_key in df.columns else None
+    info = {"clipped": False, "spread": np.nan, "flat_top": np.nan, "ceiling": np.nan}
+    if p is None:
+        return df.index, df.index[:0], info
+    pos = p[p > 0].dropna()
+    if len(pos) < 200:
+        return df.index, df.index[:0], info
+    q999, q99, q95 = pos.quantile([0.999, 0.99, 0.95])
+    top = pos[pos >= q95]
+    spread = float((q999 - q99) / q999) if q999 > 0 else np.nan
+    flat = float(((top >= 0.995 * q999) & (top <= 1.005 * q999)).mean())
+    info.update(spread=spread, flat_top=flat, ceiling=float(q999))
+    if not (spread < spread_max and flat > flat_top_min):
+        return df.index, df.index[:0], info
+    info["clipped"] = True
+    keep = quantile_clip_filter(p.fillna(0.0), quantile=quantile).reindex(df.index).fillna(True)
+    keep = keep | ~(p > 0)          # never drop night / zero rows here
+    return df.index[keep.to_numpy()], df.index[~keep.to_numpy()], info
+
+
 def identify_outliers_iqr(df, power_key, iqr_multiplier=1.5):
     """Tukey/IQR outliers via ``pvanalytics.quality.outliers.tukey``.
 
@@ -730,8 +821,16 @@ def compute_pvpro(df, mapped_variables_dict,
                 p0_warm = dict(p0_global)
 
     if len(rows) < 4:
-        raise ValueError(f"PVPRO produced only {len(rows)} successful window fits. "
-                         "Need at least 4. Try a longer dataset or fewer/looser filters.")
+        _npts = [int(((df_p.index >= c) & (df_p.index < c + pd.Timedelta(days=days_per_run))).sum())
+                 for c in window_starts]
+        _n_ok = sum(n >= min_points_per_window for n in _npts)
+        _med = int(np.median(_npts)) if _npts else 0
+        raise ValueError(
+            f"PVPRO produced only {len(rows)} successful window fits (need at least 4). "
+            f"With {days_per_run}-day windows, {_n_ok} of {len(_npts)} windows have the "
+            f"{min_points_per_window} points a fit needs (median {_med} per window). "
+            "Click \u201cEstimate from data\u201d to size Days per run for this data's "
+            "density, or loosen the Step 2 filters.")
     pfit = pd.DataFrame(rows).set_index("t_mid").sort_index()
 
     # ---- trend extraction (unchanged from the lite version) ----------------
@@ -1061,7 +1160,13 @@ def empirical_clear_sky_envelope(irradiance, window_days=30, quantile=0.90):
     flat.index = (flat.index.get_level_values(0)
                   + pd.to_timedelta(flat.index.get_level_values(1), unit="m"))
     flat = flat[~flat.index.duplicated()]
-    return flat.reindex(s.index)
+    # Look each sample up by its SNAPPED slot (date + rounded time-of-day), not
+    # by its raw timestamp: a record whose stamps sit off the slot grid (:30
+    # readings, or the shifted stamps a block-mean downsize produces) would
+    # otherwise match nothing and come back all-NaN -- which silently turned
+    # the clear-sky filter off ("no clear days detected") on such files.
+    key = pd.DatetimeIndex(frame["d"]) + pd.to_timedelta(frame["t"], unit="m")
+    return pd.Series(flat.reindex(key).to_numpy(), index=s.index)
 
 
 def _peak_hour_offset(measured, reference, min_days=20):

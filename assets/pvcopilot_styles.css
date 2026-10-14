@@ -61,7 +61,8 @@ html, body { background: #ffffff !important; }
 .pvcopilot-root button { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
 .pvcopilot-root input:focus-visible, .pvcopilot-root button:focus-visible { outline: 2px solid #4f8bff; outline-offset: 2px; }
 
-.pvcopilot-shell { position: relative; z-index: 1; max-width: 1320px; margin: 0 auto; padding: 26px 16px 30px;
+/* no side padding: the parent .container already gives the same inset as the header */
+.pvcopilot-shell { position: relative; z-index: 1; max-width: 1320px; margin: 0 auto; padding: 26px 0 30px;
   min-height: calc(100vh - 210px); display: flex; flex-direction: column; justify-content: center; }
 
 /* glass surfaces */
@@ -2302,3 +2303,125 @@ html, body { background: #ffffff !important; }
   margin: 0;
 }
 .pvcopilot-root input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+
+/* PV-Copilot — Step 4 / Python script card (code view, structure panel, verify output). */
+/* ---- Step 4 / Python script card: code with line numbers + structure ---- */
+.pvcopilot-root .pvc-code-layout {
+  display:grid; grid-template-columns:230px minmax(0,1fr); gap:12px; align-items:stretch;
+}
+.pvcopilot-root .pvc-code-outline {
+  max-height:440px; overflow:auto; padding:10px 8px; border-radius:14px;
+  background:#f8fafc; border:1px solid #e2e8f0;
+  font-family:Archivo,system-ui,sans-serif; font-size:12.5px; color:#334155;
+}
+.pvcopilot-root .pvc-code-outline-head {
+  font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:#64748b; padding:0 6px 6px;
+}
+.pvcopilot-root .pvc-code-outline-item,
+.pvcopilot-root .pvc-code-outline-sub {
+  display:flex; justify-content:space-between; gap:8px; cursor:pointer;
+  border-radius:8px; padding:4px 6px;
+}
+.pvcopilot-root .pvc-code-outline-item { font-weight:700; color:#0f172a; margin-top:4px; }
+.pvcopilot-root .pvc-code-outline-sub { padding-left:18px; color:#475569;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11.5px; }
+.pvcopilot-root .pvc-code-outline-item:hover,
+.pvcopilot-root .pvc-code-outline-sub:hover { background:#e8f0ff; }
+.pvcopilot-root .pvc-code-outline-range { color:#94a3b8; font-weight:500; white-space:nowrap;
+  font-variant-numeric:tabular-nums; }
+.pvcopilot-root .pvc-code-box {
+  max-height:440px; overflow:auto; border-radius:16px; padding:14px 0;
+  background:linear-gradient(135deg,#303640,#20242b); color:#e8e4dc;
+}
+.pvcopilot-root .pvc-code-gutter {
+  position:sticky; left:0; flex:0 0 auto; text-align:right; padding:0 12px 0 14px;
+  color:#7b8494; background:#2a2f37; user-select:none; border-right:1px solid #3a404a;
+}
+.pvcopilot-root .pvc-code-text { padding:0 18px 0 14px; }
+.pvcopilot-root .pvc-code-flash { background:rgba(75,139,255,.28); }
+.pvcopilot-root .pvc-optional-tag { font-weight:500; opacity:.8; margin-left:4px; font-size:13px; }
+
+/* ---- Verify: test run output ---- */
+.pvcopilot-root .pvc-run-details { margin-top:10px; }
+.pvcopilot-root .pvc-run-summary { font-size:12.5px; color:#64748b; cursor:pointer; }
+.pvcopilot-root .pvc-run-body {
+  margin-top:8px; padding:12px; border:1px solid #e2e8f0; border-radius:14px; background:#fbfcfe;
+}
+.pvcopilot-root .pvc-run-note { font-size:11.5px; color:#94a3b8; margin-bottom:8px; }
+.pvcopilot-root .pvc-run-label {
+  font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:#64748b; margin:0 8px 4px 0;
+}
+.pvcopilot-root .pvc-run-results { display:flex; align-items:center; flex-wrap:wrap; gap:6px;
+  margin-bottom:10px; }
+.pvcopilot-root .pvc-run-chip {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px;
+  background:#eef4ff; color:#1e3a8a; border:1px solid #c7d7fe; border-radius:999px; padding:2px 10px;
+}
+.pvcopilot-root .pvc-run-chip-key { font-weight:700; margin-right:6px; }
+.pvcopilot-root .pvc-run-log {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11.5px;
+  line-height:1.6; color:#334155; background:#f1f5f9; border-radius:10px; padding:8px 12px;
+  max-height:180px; overflow:auto; margin-bottom:10px;
+}
+.pvcopilot-root .pvc-run-log-line::before { content:"› "; color:#94a3b8; }
+.pvcopilot-root .pvc-run-figs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.pvcopilot-root .pvc-run-fig { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+  padding:4px; overflow:hidden; }
+.pvcopilot-root .pvc-run-fig-wide { grid-column:1 / -1; }
+@media (max-width: 900px) {
+  .pvcopilot-root .pvc-code-layout { grid-template-columns:1fr; }
+  .pvcopilot-root .pvc-code-outline { max-height:180px; }
+  .pvcopilot-root .pvc-run-figs { grid-template-columns:1fr; }
+}
+
+
+/* ---- Simple result card: compact summary with Metric / Duration / Filter bullets ---- */
+.pvcopilot-root .pvc-yoy-summary-compact { padding:24px 24px 18px; }
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-yoy-rate { margin-top:12px; }
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-yoy-rate-value {
+  font-size:clamp(34px,3.2vw,44px); letter-spacing:-.04em;
+}
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-yoy-rate-unit { font-size:16px; margin-left:6px; }
+.pvcopilot-root .pvc-facts { list-style:none; margin:14px 0 0; padding:0; }
+.pvcopilot-root .pvc-fact {
+  position:relative; display:flex; align-items:baseline; gap:6px;
+  padding:5px 0 5px 16px; font-size:13.5px; line-height:1.35; color:#344568;
+}
+.pvcopilot-root .pvc-fact::before {
+  content:""; position:absolute; left:2px; top:12px; width:6px; height:6px;
+  border-radius:50%; background:#5b8def;
+}
+.pvcopilot-root .pvc-fact-label { color:#71809e; font-weight:600; }
+.pvcopilot-root .pvc-fact-label::after { content:":"; }
+.pvcopilot-root .pvc-fact-value { font-weight:750; color:#1f2d4d; }
+.pvcopilot-root .pvc-fact-has-tip { cursor:help; border-bottom:1px dotted #8aa3cf; }
+.pvcopilot-root .pvc-fact-tip {
+  display:none; position:absolute; z-index:30; left:16px; top:calc(100% + 2px);
+  min-width:240px; max-width:320px; padding:10px 12px; border-radius:12px;
+  background:#1f2937; color:#e5e7eb; font-size:12px; font-weight:500; line-height:1.5;
+  box-shadow:0 10px 28px rgba(15,23,42,.25);
+}
+.pvcopilot-root .pvc-fact-tip b { color:#fff; font-weight:700; }
+.pvcopilot-root .pvc-fact:hover .pvc-fact-tip { display:block; }
+.pvcopilot-root .pvc-fact-tip-row { display:flex; justify-content:space-between; gap:14px;
+  font-variant-numeric:tabular-nums; }
+.pvcopilot-root .pvc-fact-tip-key { color:#cbd5e1; }
+.pvcopilot-root .pvc-fact-tip-note { margin-top:6px; color:#9ca3af; font-size:11px; }
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist { padding-top:10px; }
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist-graph,
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist-graph .js-plotly-plot,
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist-graph .plot-container,
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist-graph .svg-container { height:118px !important; }
+.pvcopilot-root .pvc-yoy-summary-compact .pvc-dist-caption { margin-top:2px; }
+
+/* "Uploading data..." — blinking dots (window.pvcLoadingLabel in pvcopilot_dmc_funcs.js) */
+.pvc-loading-label { display: inline-flex; align-items: baseline; }
+.pvc-dots { display: inline-block; margin-left: 1px; }
+.pvc-dot { display: inline-block; opacity: 0.15; animation: pvcDotBlink 1.2s infinite ease-in-out; }
+.pvc-dot:nth-child(2) { animation-delay: 0.2s; }
+.pvc-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pvcDotBlink { 0%, 80%, 100% { opacity: 0.15; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pvc-dot { animation: none; opacity: 1; } }

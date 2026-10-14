@@ -28,6 +28,7 @@ df_raw = safe_get_df()
 # df_raw = pd.read_pickle('data_250924.pkl')
 
 df = df_raw[(df_raw['duration'] < 100) & (df_raw['rate'] <= 3)]
+_BY_KEY = df.set_index("row_key", drop=False) if "row_key" in df.columns else df.iloc[0:0]
 
 # ─────────────────────────────────────────────────────────────────────
 # BASEMAP CONFIGURATION
@@ -202,7 +203,7 @@ def _chart_tile(title, graph, *, subtitle=None):
     )
 
 
-types = ['mono-c-Si', 'multi-c-Si', 'a-Si', 'CIGS', 'CdTe', 'HIT','other']
+types = ['mono-c-Si', 'multi-c-Si', 'c-Si', 'a-Si', 'CIGS', 'CdTe', 'HIT', 'other']   # c-Si = crystalline, mono/multi not stated
 filter_text_style = {
     'fontFamily': 'Arial',
     'fontSize': '17px',  # Default size, can be overridden per element
@@ -255,6 +256,7 @@ def _load_shap_data():
     except (OSError, ValueError):
         return None
 
+SHOW_SHAP = False      # SHAP figures were computed on the previous dataset; hidden until redone
 SHAP_DATA = _load_shap_data()
 
 # map a ranking-bar label ("PV technology") to its factor key ("pv_tech")
@@ -347,7 +349,7 @@ def build_dataset_knowledge(_df):
             for f, cnt in c.most_common(12):
                 lines.append(f"  - {f}: {cnt}")
 
-    if SHAP_DATA and SHAP_DATA.get("ranking"):
+    if SHOW_SHAP and SHAP_DATA and SHAP_DATA.get("ranking"):
         lines.append("\nSHAP factor importance (mean |SHAP|; higher = stronger "
                      "influence on the modeled degradation rate):")
         for rk in SHAP_DATA["ranking"]:
@@ -633,6 +635,22 @@ MAP_DETAIL_STYLE = {
     "userSelect": "text",
 }
 MAP_DETAIL_HIDDEN = {"display": "none"}
+
+# the only columns the filtered-data table shows (column -> header)
+TABLE_KEYS = {"title": "Title", "publish year": "Year", "country": "Country", "PV zone": "Climate zone",
+              "koppen_zone": "Köppen", "pv tech": "PV tech", "rate": "Rate (%/yr)",
+              "degradation_metric": "Metric", "analysis_method": "Method", "duration": "Duration (yr)",
+              "start_year": "Start", "end_year": "End", "scope_of_study": "Scope",
+              "system capacity": "Capacity (W)", "number_of_pv_modules": "# modules",
+              "mounting_detail": "Mounting", "faults": "Faults",
+              "reversible_affecting_rate": "Reversible losses in rate", "doi": "DOI"}
+# table cell -> which hover detail it shows (same content as the map detail panel)
+TABLE_TIP = {"rate": "rate", "degradation_metric": "rate", "analysis_method": "rate", "pv tech": "tech",
+             "duration": "duration", "start_year": "duration", "end_year": "duration", "country": "location",
+             "PV zone": "climate", "koppen_zone": "climate", "system capacity": "capacity",
+             "number_of_pv_modules": "capacity", "mounting_detail": "mounting", "faults": "faults",
+             "reversible_affecting_rate": "affecting"}
+TABLE_PAGE = 10
 
 
 # Layout
@@ -1021,9 +1039,10 @@ layout = html.Div([
         html.Hr(style={"border": "none", "borderTop": "1px solid #eef0f2",
                        "margin": "24px 0 20px 0"}),
 
-        # ── Part 2: SHAP Analysis (content added later) ──
+        # ── Part 2: SHAP Analysis — hidden until the analysis is redone on the new dataset ──
         html.Div(
-            [
+            style={"display": "none"} if not SHOW_SHAP else {},
+            children=[
                 html.Div("Impact of Factors on Degradation (using SHAP)",
                          style={"fontFamily": _CHART_FONT, "fontSize": "21px",
                                 "fontWeight": "700", "color": "#1f2937",
@@ -1183,7 +1202,7 @@ layout = html.Div([
     ], style={"padding": "16px", "borderRadius": "18px"}),
 
     html.P(''),
-    dcc.Markdown("""Dataset version: 2025/9/24
+    dcc.Markdown("""Dataset version: 2026/10/7
                  
                 """.replace('    ', ''), style={'color': 'lightgray'}
     ),
@@ -1471,10 +1490,29 @@ def handle_chat(submit_clicks, reset_clicks, enter_submit, question):
                 ], className="field-chat-box-metric-row")
             ])
 
+            key_cols = [c for c in TABLE_KEYS if c in df_filtered.columns]
+            df_show = df_filtered[key_cols + (["row_key"] if "row_key" in df_filtered.columns else [])].copy()
+            for c in key_cols:
+                if df_show[c].dtype == object:
+                    df_show[c] = df_show[c].map(lambda v: _list_txt(v) if isinstance(v, (list, tuple)) or
+                                                (isinstance(v, str) and v.startswith("[")) else v)
+            rows = df_show.to_dict("records")
             table = dash_table.DataTable(
-                data=df_filtered.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in df_filtered.columns],
-                page_size=10,
+                id="chat-table",
+                data=rows,
+                columns=[{"name": TABLE_KEYS[c], "id": c} for c in key_cols],
+                page_size=TABLE_PAGE,
+                page_current=0,
+                tooltip_data=_table_tips(rows, 0),
+                tooltip_delay=150,
+                tooltip_duration=None,
+                css=[{"selector": ".dash-table-tooltip",
+                      "rule": "max-width:460px; width:460px; font-size:12px; line-height:1.45; white-space:normal;"},
+                     {"selector": ".dash-table-tooltip blockquote",
+                      "rule": "margin:4px 0; padding:4px 8px; background:#f5f6f8; border-left:3px solid #cbd5e1;"}],
+                style_cell_conditional=[{"if": {"column_id": c}, "maxWidth": w, "overflow": "hidden",
+                                         "textOverflow": "ellipsis"}
+                                        for c, w in (("title", "260px"), ("country", "160px"))],
                 style_table={
                     "overflowX": "auto",
                     "width": "100%",
@@ -1666,7 +1704,8 @@ def update_map_and_histogram(
         hover_data={"rate": True, "publish year": True, 
                     "country": True, "paper id": True,
                     "duration": True, "confidence level": True,
-                    "PV zone": True}
+                    "PV zone": True},
+        custom_data=["row_key"] if "row_key" in filtered_df.columns else None,
     )
 
     fig.update_traces(
@@ -1832,8 +1871,131 @@ def update_map_and_histogram(
 # Floating detail panel — slides in over the map on click, hides on close
 # or when any filter changes. Styled to match the PV Pathway explorer.
 # ─────────────────────────────────────────────────────────────────────
-def _detail_row(label, value, *, is_link=False, href=None):
-    """One label/value line inside the glass detail panel."""
+@app.callback(Output("chat-table", "tooltip_data"), Input("chat-table", "page_current"),
+              State("chat-table", "data"), prevent_initial_call=True)
+def chat_table_tips(page, rows):
+    return _table_tips(rows or [], page or 0)
+
+
+def _nil(v):
+    return v is None or (isinstance(v, float) and math.isnan(v)) or (isinstance(v, str) and v.strip() in ("", "nan", "None"))
+
+
+def _as_list(v):
+    """list cells are stored as JSON text in the parquet"""
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    if hasattr(v, "tolist") and not isinstance(v, str):
+        return list(v.tolist())
+    if isinstance(v, str) and v.startswith("["):
+        try:
+            return json.loads(v)
+        except Exception:
+            return [v]
+    return [] if _nil(v) else [v]
+
+
+def _list_txt(v):
+    lst = _as_list(v)
+    return ", ".join(str(x) for x in lst) if lst else "none"
+
+
+def _fmt(v):
+    if _nil(v):
+        return "N/A"
+    try:
+        f = float(v)
+        return f"{f:g}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+# hover detail per key field: (label, column) lines, then the verbatim text from the paper
+_DETAIL = {
+    "rate": ([("Metric", "degradation_metric"), ("Rate source", "rate_provenance"), ("Method", "analysis_method"),
+              ("Explanation", "annual_power_deg_explanation")], "annual_power_deg_raw_text"),
+    "location": ([("How located", "location_provenance"), ("Latitude", "latitude"), ("Longitude", "longitude")],
+                 "location_raw_text"),
+    "climate": ([("Köppen", "koppen_zone"), ("PVCZ", "pvcz_label")], None),
+    "tech": ([("Detail", "pv_tech_detail"), ("Module", "pv_module_name")], "pv_tech_raw_text"),
+    "duration": ([("Start", "start_year"), ("End", "end_year")], "duration_raw_text"),
+    "capacity": ([("Basis", "capacity_basis"), ("# modules", "number_of_pv_modules"),
+                  ("Module power (W)", "pv_module_nominal_power_watts")], "system_capacity_raw_text"),
+    "mounting": ([("Tilt (°)", "tilt_degrees")], "mounting_raw_text"),
+    "faults": ([("Suspected (hedged)", "faults_suspected"), ("Looked for, not found", "faults_checked_absent")],
+               "faults_raw_text"),
+    "faults_major": ([("Dominant", "faults_dominant")], "faults_major_raw_text"),
+    "stressors": ([("Suspected (hedged)", "stressors_suspected"), ("Context", "stressors_context")], "stressors_raw_text"),
+    "reversible": ([("Soiling handling", "soiling_handling")], "reversible_losses_raw_text"),
+    "affecting": ([], "reversible_rate_explanation"),
+}
+
+
+def _detail(kind, sel):
+    lines, raw = _DETAIL[kind]
+    out = []
+    for lbl, col in lines:
+        v = sel.get(col)
+        if isinstance(v, str) and v.startswith("["):
+            v = _list_txt(v) if _as_list(v) else None
+        if not _nil(v):
+            out.append(html.Div([html.B(f"{lbl}: "), _fmt(v) if col not in ("annual_power_deg_explanation",) else str(v)]))
+    r = sel.get(raw) if raw else None
+    if not _nil(r):
+        out.append(html.Div(html.B(_RAW_LABEL.get(kind, "Raw text") + ":"), className="fd-rawh"))
+        out.append(html.Div(str(r).replace(" | ", "\n"), className="fd-raw"))
+    return out or None
+
+
+_RAW_LABEL = {"affecting": "Why"}
+
+
+def _detail_md(kind, sel):
+    """the same detail as markdown, for the table tooltips"""
+    lines, raw = _DETAIL[kind]
+    out = []
+    for lbl, col in lines:
+        v = sel.get(col)
+        if isinstance(v, str) and v.startswith("["):
+            v = _list_txt(v) if _as_list(v) else None
+        if not _nil(v):
+            out.append(f"**{lbl}:** {v if col == 'annual_power_deg_explanation' else _fmt(v)}")
+    r = sel.get(raw) if raw else None
+    if not _nil(r):
+        quoted = "\n".join("> " + x for x in str(r).replace(" | ", "\n").split("\n"))
+        out.append(f"**{_RAW_LABEL.get(kind, 'Raw text')}:**\n\n{quoted}")
+    return "  \n".join(out) if out else None
+
+
+def _table_tips(rows, page=0):
+    """tooltips for the rows of one table page (the others stay empty: keeps the payload small)"""
+    tips = [{} for _ in rows]
+    for i in range(page * TABLE_PAGE, min(len(rows), (page + 1) * TABLE_PAGE)):
+        rk = rows[i].get("row_key")
+        if rk is None or rk not in _BY_KEY.index:
+            continue
+        sel = _BY_KEY.loc[rk]
+        t = {}
+        for col, kind in TABLE_TIP.items():
+            md = _detail_md(kind, sel)
+            if md:
+                t[col] = {"type": "markdown", "value": md}
+        if not _nil(sel.get("title")):
+            t["title"] = {"type": "markdown", "value": f"**{sel.get('title')}**" +
+                          (f"  \n{sel.get('source_title')}" if not _nil(sel.get("source_title")) else "")}
+        tips[i] = t
+    return tips
+
+
+def _detail_row(label, value, *, is_link=False, href=None, detail=None):
+    """One label/value line inside the glass detail panel; with `detail`, hovering the row shows it."""
+    if detail:
+        row = _detail_row(label, value, is_link=is_link, href=href)
+        row.children[0].children = [label, html.Span(" ⓘ", style={"color": "#9ca3af", "fontWeight": "400"})]
+        row.children = list(row.children) + [html.Div(detail, className="fd-tip")]
+        row.className = "fd-row has-tip"
+        row.style = dict(row.style, flexWrap="wrap")
+        return row
     if is_link and href:
         value_el = html.A(value, href=href, target="_blank",
                           style={"color": "#0a539c", "wordBreak": "break-all"})
@@ -1883,8 +2045,12 @@ def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
 
     # show info for the clicked point (match on lat/lon as before)
     point = clickData['points'][0]
-    match = df[(df['longitude'] == point['lon']) &
-               (df['latitude'] == point['lat'])]
+    cd = point.get('customdata')
+    if cd and 'row_key' in df.columns:
+        match = df[df['row_key'] == cd[0]]
+    else:
+        match = df[(df['longitude'] == point['lon']) &
+                   (df['latitude'] == point['lat'])]
     if match.empty:
         return placeholder, MAP_DETAIL_HIDDEN
     sel = match.iloc[0]
@@ -1934,23 +2100,27 @@ def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
         # headline metric
         html.Div(
             [
-                html.Span("Degradation rate", style={
+                html.Span(["Degradation rate"] + ([html.Span(" ⓘ", style={"color": "#9ca3af", "fontWeight": "400"})]
+                                                   if _detail("rate", sel) else []), style={
                     "fontSize": "12px", "color": "#5b6b7a", "fontWeight": "600"}),
                 html.Span(f'{sel["rate"]:.2f} %/year', style={
                     "fontSize": "20px", "fontWeight": "700", "color": "#0a539c"}),
-            ],
+            ] + ([html.Div(_detail("rate", sel), className="fd-tip")] if _detail("rate", sel) else []),
+            className="fd-row has-tip" if _detail("rate", sel) else None,
             style={"display": "flex", "flexDirection": "column", "gap": "1px",
                    "padding": "10px 12px", "marginBottom": "8px",
                    "background": "rgba(255,255,255,0.55)", "borderRadius": "10px"},
         ),
-        # details
+        # key fields; hover a row for its detail (raw text from the paper etc.)
+        html.Div("hover a field marked ⓘ for details", style={"fontSize": "11px", "color": "#9ca3af", "margin": "2px 0 2px"}),
         _detail_row("Year", year_display),
         _detail_row("Type", sel.get("document type", "N/A")),
-        _detail_row("Country", sel.get("country", "N/A")),
-        _detail_row("Climate zone", sel.get("PV zone", "N/A")),
-        _detail_row("PV tech", sel.get("pv tech", "N/A")),
-        _detail_row("Duration", f'{sel.get("duration", "N/A")} years'),
-        _detail_row("System capacity", cap_kw),
+        _detail_row("Country", sel.get("country", "N/A"), detail=_detail("location", sel)),
+        _detail_row("Climate zone", sel.get("PV zone", "N/A"), detail=_detail("climate", sel)),
+        _detail_row("PV tech", sel.get("pv tech", "N/A"), detail=_detail("tech", sel)),
+        _detail_row("Duration", f'{_fmt(sel.get("duration"))} years', detail=_detail("duration", sel)),
+        _detail_row("System capacity", cap_kw, detail=_detail("capacity", sel)),
+        _detail_row("Mounting", _fmt(sel.get("mounting_detail") or sel.get("mounting")), detail=_detail("mounting", sel)),
         _detail_row("DOI", doi, is_link=True, href=f"https://doi.org/{doi}"),
         _detail_row("Note", sel.get("note", "N/A")),
     ]
@@ -1966,6 +2136,7 @@ def display_click_data(clickData, close_clicks, tech_filter, climate_filter,
      Input('radius-input', 'value')]
 )
 def make_map(lat, lon, radius_miles):
+    df = globals()["df"].dropna(subset=["latitude", "longitude"])   # radius search needs coordinates
     # --- Step 1: Boolean mask for points inside the radius ---
     inside_mask = df.apply(
         lambda row: distance(
@@ -2055,6 +2226,7 @@ def make_map(lat, lon, radius_miles):
      Input('radius-input', 'value')]
 )
 def update_pie_charts(lat, lon, radius_miles):
+    df = globals()["df"].dropna(subset=["latitude", "longitude"])   # radius search needs coordinates
     if lat is None or lon is None or radius_miles is None:
         return html.P("No location selected.", style={'fontStyle': 'italic'})
 

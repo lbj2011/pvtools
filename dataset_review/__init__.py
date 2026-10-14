@@ -2,10 +2,11 @@
 Internal review tool for the PV field-degradation dataset, mounted inside pvtools at /dataset-review/.
 
 Deliberately NOT linked from any page or the navbar (internal testing only): reviewers get the URL
-directly. The page sends noindex; login is required (password: env DATASET_REVIEW_PASSWORD).
+directly. The page sends noindex; login is required (password: env DATASET_REVIEW_PASSWORD, default pvllm).
 
 Data and the review log live in the private S3 bucket (never in git):
-    s3://pvtools/dataset_review/dataset_review.pkl.xz     the dataset shown (slimmed, see prepare_and_upload.py)
+    s3://pvtools/dataset_review/dataset_review.json.gz    the dataset shown (slimmed, plain JSON: no numpy/pandas
+                                                          version lock; see prepare_and_upload.py)
     s3://pvtools/dataset_review/data_dictionary.csv       field descriptions for the hover cards
     s3://pvtools/dataset_review/review_log.sqlite         marks + comments; pulled at start-up, pushed after each write
 For local development put the first two in dataset_review/data/ (git-ignored) and no S3 access is needed
@@ -24,7 +25,7 @@ BUCKET = os.environ.get("DATASET_REVIEW_BUCKET", "pvtools")
 PREFIX = "dataset_review/"
 HERE = pathlib.Path(__file__).resolve().parent
 CACHE = pathlib.Path(os.environ.get("DATASET_REVIEW_CACHE", "/tmp/dataset_review"))
-FILES = {"data": "dataset_review.pkl.xz", "dict_csv": "data_dictionary.csv"}
+FILES = {"data": "dataset_review.json.gz", "dict_csv": "data_dictionary.csv"}
 
 
 def _fetch(name):
@@ -51,7 +52,7 @@ def mount(server):
     sys.modules["pv_review_host"] = types.SimpleNamespace(
         server=server, base=BASE, data=str(paths["data"]), dict_csv=str(paths["dict_csv"]),
         log=str(CACHE / "review_log.sqlite"), public_mode=True,
-        password=os.environ.get("DATASET_REVIEW_PASSWORD", "duramat"),
+        password=os.environ.get("DATASET_REVIEW_PASSWORD", "pvllm"),
         s3_bucket=None if os.environ.get("DATASET_REVIEW_NO_S3") else BUCKET, s3_log_key=PREFIX + "review_log.sqlite")
     from . import review_app  # noqa: F401  (builds the Dash app and its callbacks)
     from flask import redirect

@@ -14,4 +14,15 @@ venv
 node_modules
 
 # ppt files
-.pptx
+*.pptx
+
+# local-only folders (not needed in the image)
+usage_logs
+_to_delete*
+Claude outputs
+pages_old
+notebooks
+_backup_*
+loadtest
+*.tmp
+# usage_backfill: keep in the image until the one-time import has run, then add it here

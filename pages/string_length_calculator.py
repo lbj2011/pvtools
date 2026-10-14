@@ -28,6 +28,9 @@ from utils import pvtoolslib
 
 from app import app
 
+# Same vector basemap as field_degradation.py (keyless CARTO positron).
+BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+
 # Keep the complete CEC catalog on the server.  Sending every option as part
 # of the page layout made each visit roughly 2 MB before the user did anything.
 CEC_MODULE_OPTIONS = pvtoolslib.cec_module_dropdown_list
@@ -1318,18 +1321,20 @@ def update_output_div(n_clicks, lat, lon):
 #      Input('lat', 'value'),
 #      Input('lon', 'value')])
 @app.callback(
-    [Output('map', 'figure', allow_duplicate=True),
-     Output('map', 'config', allow_duplicate=True)
+    [Output('map', 'figure'),
+     Output('map', 'config')
      ],
     [Input('get-weather', 'n_clicks')],
     [State('lat', 'value'),
      State('lon', 'value')],
-     prevent_initial_call=True
      )
 def update_map_callback(n_clicks, lat, lon):
-    # Dynamic layouts can cause Dash to invoke a callback even when
-    # prevent_initial_call=True.  Keep the side-effect guard in the function.
-    if not n_clicks:
+    # Runs on page load too (no prevent_initial_call) so the map is drawn
+    # immediately at the default location instead of an empty plot.
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
         raise PreventUpdate
 
     # print('Updating the map')
@@ -1345,7 +1350,7 @@ def update_map_callback(n_clicks, lat, lon):
     closest_lon = np.array(filedata_closest['lon'])[0]
     map_figure = {
         'data': [
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=filedata['lat'],
                 lon=filedata['lon'],
                 mode='markers',
@@ -1355,7 +1360,7 @@ def update_map_callback(n_clicks, lat, lon):
                 text=[''],
                 name='Database location'
             ),
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=[float(lat)],
                 lon=[float(lon)],
                 mode='markers',
@@ -1365,7 +1370,7 @@ def update_map_callback(n_clicks, lat, lon):
                 text=['Target location'],
                 name='Target location'
             ),
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=[closest_lat],
                 lon=[closest_lon],
                 mode='markers',
@@ -1383,8 +1388,9 @@ def update_map_callback(n_clicks, lat, lon):
             # height=600,
             margin={'l': 10, 'b': 10, 't': 0, 'r': 0},
             hovermode='closest',
-            mapbox=dict(
-                accesstoken='pk.eyJ1IjoidG9kZGthcmluIiwiYSI6Ik1aSndibmcifQ.hwkbjcZevafx2ApulodXaw',
+            # MapLibre API (layout.map). The legacy layout.mapbox +
+            # Mapbox token renders a blank plot under plotly>=6.
+            map=dict(
                 bearing=0,
                 center=dict(
                     lat=float(lat),
@@ -1392,7 +1398,7 @@ def update_map_callback(n_clicks, lat, lon):
                 ),
                 pitch=0,
                 zoom=5,
-                style='light'
+                style=BASEMAP_STYLE
             ),
             legend=dict(
                 x=0,

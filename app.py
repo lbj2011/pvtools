@@ -1,3 +1,4 @@
+import hashlib
 import os
 import threading
 import time
@@ -120,7 +121,7 @@ def block_bots():
         if len(events) >= RELOAD_LIMIT:
             print(
                 "WARNING: blocked repeated String Length Calculator reloads "
-                f"client={client_key[:24]} count={len(events)}"
+                f"client={hashlib.sha256(client_key.encode()).hexdigest()[:12]} count={len(events)}"
             )
             return (
                 "Too many repeated page reloads. Please retry in 30 seconds.",
@@ -166,7 +167,11 @@ ga_script = f"""
   window.dataLayer = window.dataLayer || [];
   function gtag(){{dataLayer.push(arguments);}}
   gtag('js', new Date());
-  gtag('config', '{GA_ID}');
+  // Browsers that signed in to /admin carry pvtools_internal=1: their hits are
+  // tagged traffic_type=internal so GA4's "Internal traffic" data filter drops them.
+  var pvtGaOpts = /(?:^|; )pvtools_internal=1/.test(document.cookie)
+      ? {{traffic_type: 'internal'}} : {{}};
+  gtag('config', '{GA_ID}', pvtGaOpts);
 </script>
 
 <script>
@@ -174,14 +179,14 @@ ga_script = f"""
     const oldPushState = history.pushState;
     history.pushState = function() {{
       oldPushState.apply(history, arguments);
-      gtag('config', '{GA_ID}', {{
+      gtag('config', '{GA_ID}', Object.assign({{
         page_path: window.location.pathname
-      }});
+      }}, pvtGaOpts));
     }};
     window.addEventListener('popstate', function() {{
-      gtag('config', '{GA_ID}', {{
+      gtag('config', '{GA_ID}', Object.assign({{
         page_path: window.location.pathname
-      }});
+      }}, pvtGaOpts));
     }});
   }});
 </script>

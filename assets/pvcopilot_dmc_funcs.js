@@ -465,3 +465,82 @@ document.addEventListener("click", function (event) {
     }
     if (document.body) start(); else document.addEventListener("DOMContentLoaded", start, {once: true});
 })();
+
+// Step 4 / Python script card: clicking an entry of the "Structure" panel
+// scrolls the code box to that line and briefly highlights it.
+(function () {
+  document.addEventListener("click", function (e) {
+    var item = e.target.closest ? e.target.closest("[data-code-line]") : null;
+    if (!item) { return; }
+    var box = document.getElementById(item.getAttribute("data-code-target"));
+    if (!box) { return; }
+    var line = parseInt(item.getAttribute("data-code-line"), 10) || 1;
+    var pre = box.querySelector(".pvc-code-text");
+    var lh = pre ? parseFloat(getComputedStyle(pre).lineHeight) || 19 : 19;
+    box.scrollTo({ top: Math.max(0, (line - 1) * lh - 6), behavior: "smooth" });
+    // highlight band over the target line
+    var inner = box.firstElementChild;
+    if (!inner) { return; }
+    inner.style.position = "relative";
+    var band = document.createElement("div");
+    band.className = "pvc-code-flash";
+    band.style.cssText = "position:absolute;left:0;right:0;height:" + lh + "px;top:" +
+      ((line - 1) * lh) + "px;pointer-events:none;transition:opacity 1.2s;";
+    inner.appendChild(band);
+    setTimeout(function () { band.style.opacity = "0"; }, 700);
+    setTimeout(function () { band.remove(); }, 2000);
+  });
+})();
+
+// "Uploading data..." label with three blinking dots, returned by clientside
+// callbacks as a Dash component tree (pages/pvcopilot.py).
+window.pvcLoadingLabel = function (text) {
+    function span(children, cls) {
+        return {type: "Span", namespace: "dash_html_components",
+                props: {children: children, className: cls}};
+    }
+    return span([text, span([span(".", "pvc-dot"), span(".", "pvc-dot"), span(".", "pvc-dot")],
+                            "pvc-dots")], "pvc-loading-label");
+};
+
+// Show "Uploading data..." on the Run buttons the instant a file is picked or
+// dropped, i.e. BEFORE dcc.Upload has finished reading the file in the browser
+// (several seconds for a large CSV). set_props updates the Dash components
+// properly; the server callbacks restore the real label once the file is in.
+(function () {
+    function markUploading() {
+        var dc = window.dash_clientside;
+        if (!dc || !dc.set_props) { return; }
+        var label = window.pvcLoadingLabel("Uploading data");
+        try { dc.set_props("simple-analyze-btn", {disabled: true, children: label}); } catch (e) {}
+        try { dc.set_props("analyze-btn", {disabled: true, children: window.pvcLoadingLabel("Uploading data")}); } catch (e) {}
+    }
+    document.addEventListener("change", function (e) {
+        var t = e.target;
+        if (t && t.type === "file" && t.closest && t.closest("#upload-data") &&
+            t.files && t.files.length) { markUploading(); }
+    }, true);
+    document.addEventListener("drop", function (e) {
+        var t = e.target;
+        if (t && t.closest && t.closest("#upload-data") &&
+            e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { markUploading(); }
+    }, true);
+})();
+
+// Navigation windows (What's new / Team / How to cite / Methods / Data
+// requirements): close when the user clicks the dimmed area outside the
+// window, or presses Escape. Reuses the window's own ✕ button so the Dash
+// state (pvc-main-modal-view) is updated exactly as for a normal close.
+(function () {
+    function closeModal() {
+        var btn = document.querySelector(".pvc-modal-overlay .pvc-modal-close");
+        if (btn) { btn.click(); }
+    }
+    document.addEventListener("click", function (e) {
+        var t = e.target;
+        if (t && t.classList && t.classList.contains("pvc-modal-overlay")) { closeModal(); }
+    });
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { closeModal(); }
+    });
+})();

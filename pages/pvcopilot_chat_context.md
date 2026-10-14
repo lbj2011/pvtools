@@ -70,7 +70,7 @@ The first five are **statistical / trend methods** that operate on aggregated da
 Output: an **annual degradation rate** in %/year (negative means the system is losing power over time — typical real-world values are −0.3 to −1.0 %/year). The tool also shows the measurement window and a figure of the time series with the fitted trend.
 
 ### Step 4 — Code Agent
-The user clicks **"Generate Full Python Code"**. The tool emits a single `.py` script containing every step exactly as they configured it (their data path, mapped variables, chosen filters and parameters, selected metric). The script is downloadable and runs standalone.
+The user clicks **"Generate code with AI"** (Advanced Step 4, or the "Python script" card under a Simple-mode result). PV-Copilot assembles the run from its own functions (their mapped variables, filter settings and parameters, degradation method) and an AI model rewrites it into one clean, commented script, which is shown with a download link (roughly 10–40 s). A separate **"Verify code"** button under the script then runs it on the same data in a sandbox and checks it reproduces the degradation rate shown in the app (within 0.01 %/yr), reporting "Verified" or what did not match. The script runs standalone.
 
 ---
 

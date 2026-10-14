@@ -1,0 +1,5 @@
+/* Admin usage dashboard: PV-Copilot session detail chips (pages/admin_usage.py) */
+.adm-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.adm-chip { background: #F6F5FC; border: 1px solid #E4E1F5; border-radius: 10px; padding: 8px 12px; }
+.adm-chip-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #7a7f9a; }
+.adm-chip-value { font-size: 0.98rem; font-weight: 700; color: #2E3A8C; word-break: break-word; }

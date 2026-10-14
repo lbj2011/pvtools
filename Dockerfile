@@ -3,7 +3,7 @@
 # Compile and install all Python dependencies (NumPy/SciPy/rdtools)
 # We keep build tools only in this stage to reduce final image size
 # ===============================================================
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 # Prevent .pyc files and enable stdout logging
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -22,11 +22,17 @@ RUN apt-get update && \
 WORKDIR /install
 
 # Copy dependency file
-COPY requirements.txt .
+COPY requirements.txt requirements_pkg.txt ./
 
 # Install Python packages
 # --no-cache-dir avoids pip cache which can add hundreds of MB
-RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+# Both files in ONE resolve, so the extra packages cannot pull a newer numpy / scipy over the
+# pins in requirements.txt (two separate `--prefix` installs do not see each other and mixed
+# scipy builds end in "cannot import name '_promote'").
+# requirements_pkg.txt = PV-Copilot package-backed analysis (analysis_utils_pkg.py); rdtools 2.1.8
+# goes in with --no-deps so it does not pull the 190 MB xgboost wheel (xgboost-cpu instead).
+RUN pip install --prefix=/install --no-cache-dir -r requirements.txt -r requirements_pkg.txt && \
+    pip install --prefix=/install --no-cache-dir --no-deps rdtools==2.1.8
 
 
 # ===============================================================
@@ -34,18 +40,19 @@ RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 # Minimal runtime image
 # Only copy installed packages and app code
 # ===============================================================
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-RUN echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20250301T000000Z bookworm main" > /etc/apt/sources.list && \
-    apt-get update -o Acquire::Retries=5 && \
-    apt-get install -y --no-install-recommends \
-        build-essential \
-        git \
+# Runtime needs only the shared libraries, not compilers or -dev headers
+# (those live in the builder stage). Default Debian mirror with retries:
+# the old snapshot.debian.org source was slow / rate-limited and broke builds,
+# and its bookworm packages no longer matched the newer (trixie) base image.
+RUN apt-get update -o Acquire::Retries=5 && \
+    apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
         libgomp1 \
-        libopenblas-dev \
-        liblapack-dev && \
+        libopenblas0 \
+        liblapack3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder
@@ -68,10 +75,11 @@ EXPOSE 8000
 # stuck at "phase=fitting" forever because the worker thread never gets a
 # chance to write its "done" update.
 #
-# 1 worker + 4 gthread threads is the recommended Dash topology on a
-# small dyno:
+# 1 worker + 16 gthread threads on a small dyno (was 4: a load test with
+# 10 concurrent users showed requests queueing behind slow LLM calls, which
+# hold a thread while they wait on the network but use no CPU):
 #   - One Python process keeps memory usage well under 512 MB.
-#   - 4 threads handle concurrent HTTP requests (Dash callbacks return
+#   - 16 threads handle concurrent HTTP requests (Dash callbacks return
 #     quickly except for PVPRO, which runs in its own background thread).
 #   - With diskcache (PVPRO_DISKCACHE_DIR set), the background-job state
 #     persists across requests even with the single-worker setup.
@@ -86,10 +94,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1
 
-CMD gunicorn index:server \
-    -k gthread \
-    --workers 1 \
-    --threads 4 \
-    --timeout 600 \
-    --bind 0.0.0.0:${PORT:-8000}
-    
+# Exec form (JSON) so gunicorn is PID 1 and receives Heroku's SIGTERM directly
+# (lets usage_log flush its last events on shutdown). sh -c expands $PORT.
+# Shared on-disk store for background-job state (PVPRO, code export, analyze
+# status), so a poll that lands on the other worker process still finds the
+# job. Required for --workers > 1 (see the note at the top of pvcopilot.py).
+ENV PVPRO_DISKCACHE_DIR=/tmp/pvpro-jobs
+
+# 2 worker processes x 8 threads: two CPU-bound analyses (filtering, YoY,
+# PVPRO) can run truly in parallel (one Python process is limited to ~1 core
+# by the GIL); Performance-M's 2.5 GB RAM holds both comfortably.
+CMD ["sh", "-c", "exec gunicorn index:server -k gthread --workers 2 --threads 8 --timeout 600 --bind 0.0.0.0:${PORT:-8000}"]
