@@ -147,7 +147,17 @@ def get_s3_csv(filename):
 if os.path.exists('2017DesignConditions_s.xlsx.csv'):
     ashrae = pd.read_csv('2017DesignConditions_s.xlsx.csv')
 else:
-    ashrae = get_s3_csv(filename='2017DesignConditions_s.xlsx.csv')
+    try:
+        ashrae = get_s3_csv(filename='2017DesignConditions_s.xlsx.csv')
+    except Exception as e:
+        # This file lives in a private S3 bucket and needs AWS credentials.
+        # If it can't be fetched (e.g. local dev without credentials), fall
+        # back to an empty frame so the site still boots. The String Length
+        # Calculator's ASHRAE temperature lookup is unavailable until the
+        # file is provided locally next to this app.
+        print(f"WARNING: could not load ASHRAE design conditions ({e}). "
+              f"String Length Calculator temperature lookup disabled.")
+        ashrae = pd.DataFrame()
 # print('Done.')
 
 

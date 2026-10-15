@@ -93,3 +93,8 @@ _to_delete*/
 Claude outputs/
 *.tmp
 *.csstemp
+
+# Generated PVcopilot pipeline reports (from bugFixes)
+reports/
+.llm_id_cache.json
+.pretty_backup/

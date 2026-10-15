@@ -191,6 +191,15 @@ python index.py              # then open http://127.0.0.1:8050
 
 API keys for the LLM features (e.g. `OPENAI_API_KEY`) are read from environment variables or a local `.env` file, which is not committed.
 
+The pinned dependencies (notably `numpy==1.26.4` and `pvlib==0.9.5`) require **Python 3.11**; they are not compatible with Python 3.13 / NumPy 2.x (e.g. ``AttributeError: `np.Inf` was removed in the NumPy 2.0 release``). With conda:
+
+```bash
+conda create -n pvtools python=3.11
+conda activate pvtools
+pip install -r requirements.txt
+pip install -r requirements-dev.txt   # optional: pytest for the test suite
+```
+
 # Deployment
 
 pvtools.lbl.gov runs on Heroku as a Docker container:
