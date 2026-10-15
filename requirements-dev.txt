@@ -2,3 +2,5 @@
 # Install into the pvtools env:  pip install -r requirements-dev.txt
 -r requirements.txt
 pytest>=8.0
+tqdm>=4.66        # progress bars in pvcopilot_pipeline_report.py / prototype_energy_ratio.py
+ruff>=0.6         # lint (same check CI runs)
