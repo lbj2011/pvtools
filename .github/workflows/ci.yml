@@ -1,0 +1,49 @@
+# Continuous integration for pvtools.
+# Runs on every push to master and on every pull request:
+#   1. install the same dependencies as the production Dockerfile
+#   2. lint for syntax errors / undefined names
+#   3. run the pytest suite in tests/ (analysis regression + app smoke tests)
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Dummy keys: modules build LLM clients at import time; tests never call them.
+      OPENAI_API_KEY: ci-dummy
+      cborg_api_key: ci-dummy
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # pinned numpy 1.26 / pvlib 0.9.5 need 3.11 (matches Dockerfile)
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements_pkg.txt
+            requirements-dev.txt
+
+      - name: Install dependencies (same as Dockerfile)
+        run: |
+          python -m pip install --upgrade pip "setuptools<70"
+          pip install -r requirements.txt -r requirements_pkg.txt -r requirements-dev.txt
+          pip install --no-deps rdtools==2.1.8
+
+      - name: Lint (syntax errors and undefined names only)
+        run: |
+          ruff check --select E9,F63,F7,F82 --exclude notebooks --output-format github .
+
+      - name: Run tests
+        run: pytest -v
