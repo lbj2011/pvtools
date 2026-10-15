@@ -33,6 +33,9 @@ import pvcz
 
 from app import app
 
+# Same vector basemap as field_degradation.py (keyless CARTO positron).
+BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+
 # app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # session_id = str(uuid.uuid4())
@@ -210,7 +213,7 @@ def update_pvcz_map(param):
 
     figure = {
         'data': [
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=pvtoolslib.pvcz_df['lat'],
                 lon=pvtoolslib.pvcz_df['lon'],
                 mode='markers',
@@ -246,8 +249,8 @@ def update_pvcz_map(param):
             # height=700,
             margin={'l': 10, 'b': 10, 't': 0, 'r': 0},
             hovermode='closest',
-            mapbox=dict(
-                accesstoken='pk.eyJ1IjoidG9kZGthcmluIiwiYSI6Ik1aSndibmcifQ.hwkbjcZevafx2ApulodXaw',
+            # MapLibre API (layout.map); legacy layout.mapbox renders blank under plotly>=6.
+            map=dict(
                 bearing=0,
                 center=dict(
                     lat=float(40),
@@ -255,7 +258,7 @@ def update_pvcz_map(param):
                 ),
                 pitch=0,
                 zoom=2,
-                style='light'
+                style=BASEMAP_STYLE
             ),
             legend=dict(
                 x=0,

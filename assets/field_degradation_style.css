@@ -165,19 +165,20 @@ input[type="checkbox"] {
 /* ================= LLM PANEL ================= */
 
 .llm-card {
-    background: linear-gradient(45deg, #FFE7F9, #E2F4FF);
+    background: linear-gradient(45deg, #CDEEDD, #D2ECFB);
     padding: 18px;
     border-radius: 12px;
-    border: 1px solid #eee;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    border: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    margin-top: 12px;
 }
 
 
 /* ================= FILTER PANEL ================= */
 
 .filter-card {
-    background-color: #fafafa;
-    padding: 18px;
+    background-color: #ffffff;
+    padding: 14px 16px;
     border-radius: 12px;
     border: 1px solid #eee;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
@@ -189,13 +190,15 @@ input[type="checkbox"] {
 /* Two-column layout: label + controls */
 .filter-grid-row {
     display: grid;
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 290px 1fr;
     align-items: center;
     margin-bottom: 8px;
 }
 
 .filter-label {
-    font-weight: 500;
+    font-weight: 700;
+    font-size: 15px;
+    color: #1f2937;
 }
 
 /* Container for inputs / checkboxes */
@@ -203,6 +206,13 @@ input[type="checkbox"] {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Min / Max and checkbox labels: match the dropdown-box text */
+.filter-controls label {
+    font-size: 14px;
+    color: #374151;
+    font-weight: 400;
 }
 
 /* Allow wrapping for longer controls */
@@ -219,10 +229,12 @@ input[type="checkbox"] {
     border: 1px solid #ddd;
     padding: 4px 6px;
     outline: none;
+    font-size: 14px;
+    color: #374151;
 }
 
 .filter-input:focus {
-    border-color: #FFC9FF;
+    border-color: #A8E6C5;
 }
 
 
@@ -242,13 +254,59 @@ input[type="checkbox"] {
 
 .advanced-summary {
     cursor: pointer;
-    font-weight: 600;
-    font-size: 15px;
+    font-weight: 400;
+    font-size: 13px;
+    color: #6b7280;
     margin-bottom: 10px;
 }
 
 .advanced-panel {
     margin-top: 12px;
+}
+
+/* Data-scope toggle (Filtered data / All data) beside a section title */
+.scope-radio {
+    display: inline-flex;
+    gap: 6px;
+    background: #f3f4f6;
+    padding: 4px;
+    border-radius: 999px;
+}
+.scope-radio label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: #4b5563;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.scope-radio label:hover {
+    color: #1f2937;
+}
+.scope-radio input {
+    accent-color: #0070C0;
+    cursor: pointer;
+}
+
+/* Smooth reveal when Advanced Filters is expanded. (Native <details> can't
+   animate the close, so collapsing is instant.) */
+details[open] .advanced-panel {
+    animation: advPanelReveal 0.30s ease;
+}
+@keyframes advPanelReveal {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Marker rotates as the section opens/closes */
+.advanced-summary {
+    transition: color 0.15s ease;
+}
+details[open] > .advanced-summary {
+    color: #4b5563;
 }
 
 
@@ -257,7 +315,7 @@ input[type="checkbox"] {
 .chat-input-style{
     height: 42px;
     border-radius: 12px;
-    border: 2px solid #FFC9FF !important;
+    border: 2px solid #A8E6C5 !important;
     background-color: #FFFFFF !important;
     padding: 0 14px !important;
     font-size: 16px !important;
@@ -270,13 +328,19 @@ input[type="checkbox"] {
     font-weight: 700 !important;
 }
 
+/* Default 'Ask a question…' placeholder in black */
+.chat-input-style::placeholder {
+    color: #1a191a !important;
+    opacity: 1 !important;
+}
+
 
 .send-button {
     height: 42px;
     padding: 0 18px;
     border-radius: 10px;
     border: 1px solid #d9edf8;
-    background: linear-gradient(135deg, #F0BEED, #00B0F0);
+    background: linear-gradient(135deg, #7FD1A4, #00B0F0);
     color: white;
     font-weight: 600;
     font-size: 16px;
@@ -291,7 +355,7 @@ input[type="checkbox"] {
 }
 
 .send-button:disabled {
-    background: linear-gradient(135deg, #FFE7F9, #A4DEF4);
+    background: linear-gradient(135deg, #DFF5E8, #A4DEF4);
     color: #ffffff;
     cursor: not-allowed;
 }
@@ -339,3 +403,291 @@ input[type="checkbox"] {
     margin-bottom: 15px;
     font-size: 15px;
 }
+/* ================= FULL-WIDTH MAP â€” floating panels ================= */
+
+/* Detail panel slides in when a point is clicked (mirrors PV Pathway) */
+#field-map-detail {
+    animation: mapDetailIn 0.28s ease-out;
+}
+
+@keyframes mapDetailIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Links inside the detail panel */
+#field-map-detail a {
+    text-decoration: none;
+}
+#field-map-detail a:hover {
+    text-decoration: underline;
+}
+
+/* Close button hover */
+#field-map-detail #field-map-close-btn:hover {
+    background: rgba(255,255,255,0.95) !important;
+    color: #1f2937 !important;
+}
+
+/* Summary badge gentle fade-in */
+#field-map-summary {
+    animation: mapSummaryIn 0.4s ease-out;
+}
+@keyframes mapSummaryIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ================= AI TOGGLE BUTTON ================= */
+.ai-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(90deg, #C9F2D8, #BFE6F5);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 22px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a1a1a;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    box-shadow: 0 2px 8px rgba(150,200,210,0.30);
+}
+.ai-toggle-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(150,200,210,0.45);
+    filter: saturate(1.08);
+}
+.ai-toggle-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(150,200,210,0.30);
+}
+.ai-toggle-btn .badge {
+    background-color: rgba(0,0,0,0.10) !important;
+    color: #1a1a1a !important;
+}
+
+/* ================= FILTER DROPDOWN PILLS ================= */
+/* Make the multi-select look like the reference: clean rounded box,
+   light-gray rounded value pills, soft focus ring. */
+.filter-dropdown .Select-control,
+.filter-dropdown .is-focused:not(.is-open) > .Select-control {
+    border-radius: 10px;
+    border: 1px solid #e3e6ea;
+    min-height: 44px;
+    box-shadow: none;
+}
+.filter-dropdown .Select-control:hover {
+    border-color: #cdd3da;
+}
+.filter-dropdown.is-focused .Select-control {
+    border-color: #82b9ea;
+    box-shadow: 0 0 0 3px rgba(130,185,234,0.18);
+}
+
+/* selected value pills */
+.filter-dropdown .Select--multi .Select-value {
+    background-color: #eef1f5;
+    border: 1px solid #e0e4ea;
+    color: #374151;
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 3px 4px 0 0;
+}
+.filter-dropdown .Select--multi .Select-value-icon {
+    border-right: 1px solid #d7dce3;
+    color: #9aa3af;
+    padding: 1px 6px;
+}
+.filter-dropdown .Select--multi .Select-value-icon:hover {
+    background-color: #e2e6ec;
+    color: #ef4444;
+}
+.filter-dropdown .Select-value-label {
+    padding: 2px 8px;
+}
+.filter-dropdown .Select-placeholder {
+    color: #9ca3af;
+}
+
+/* dropdown menu options */
+.filter-dropdown .Select-menu-outer {
+    border-radius: 10px;
+    border: 1px solid #e3e6ea;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+    overflow: hidden;
+    margin-top: 4px;
+}
+.filter-dropdown .VirtualizedSelectOption,
+.filter-dropdown .Select-option {
+    font-size: 14px;
+}
+.filter-dropdown .Select-option.is-focused {
+    background-color: #eaf3fb;
+}
+/* ================= AI RUN / LOADING STATE ================= */
+/* Full-cover frosted overlay shown while the LLM call runs. Sits on top of
+   the interactive area (its wrapper is position:relative) so it can be shown
+   the instant a query is sent and cleared instantly by the Stop button. */
+.ai-loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.13);
+    white-space: nowrap;
+    z-index: 20;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+/* Stop button — inline within the compact indicator */
+.ai-stop-btn {
+    border: none;
+    background: #f3f4f6;
+    color: #6b7280;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.ai-stop-btn:hover {
+    background: #e9edf2;
+    color: #4b5563;
+}
+.ai-stop-btn:active {
+    transform: translateY(1px);
+}
+
+.ai-run-spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid rgba(0, 176, 240, 0.20);
+    border-top-color: #00B0F0;
+    border-radius: 50%;
+    animation: ai-run-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes ai-run-spin {
+    to { transform: rotate(360deg); }
+}
+
+.ai-run-msg {
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+}
+
+/* ================= SHAP FACTOR SELECTOR PILLS ================= */
+.shap-pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+.shap-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 13px;
+    border-radius: 999px;
+    background: #e8f1fb;
+    color: #5b6b7a;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    outline: none;
+    transition: all 0.15s ease;
+}
+.shap-pill:hover {
+    background: #d7e8f8;
+    color: #1f2937;
+}
+.shap-pill-active,
+.shap-pill.shap-pill-active {
+    background: #0868ac !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(8, 104, 172, 0.28);
+}
+.shap-pill-active:hover {
+    background: #075a94 !important;
+    color: #ffffff !important;
+}
+
+/* ranking bars: hand cursor + hover highlight so they read as clickable */
+#shap-ranking-graph,
+#shap-ranking-graph .draglayer,
+#shap-ranking-graph .barlayer .point path {
+    cursor: pointer;
+}
+#shap-ranking-graph .barlayer .point path {
+    transition: opacity 0.12s ease;
+}
+#shap-ranking-graph .barlayer .point path:hover {
+    opacity: 0.72;
+}
+
+
+/* ================= INTRO "Details & resources" TOGGLE ================= */
+.intro-details-btn {
+    border: 1px solid #d7dce3;
+    background: #f3f4f6;
+    color: #4b5563;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 4px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    outline: none;
+    transition: all 0.15s ease;
+}
+.intro-details-btn:hover {
+    background: #e6eef7;
+    border-color: #82b9ea;
+    color: #1f2937;
+}
+
+/* ============ AI CHAT: markdown-rendered analytical answer ============ */
+.field-chat-answer-md {
+    font-size: 15px;
+    color: #374151;
+    line-height: 1.55;
+    font-weight: 500;
+}
+.field-chat-answer-md p { margin: 0 0 8px 0; }
+.field-chat-answer-md p:last-child { margin-bottom: 0; }
+.field-chat-answer-md strong { font-weight: 700; color: #0868ac; }
+.field-chat-answer-md ul { margin: 4px 0 8px 0; padding-left: 20px; }
+.field-chat-answer-md li { margin-bottom: 2px; }
+/* field-map detail panel: hover a key row to see its detail (raw text from the paper etc.) */
+.fd-row.has-tip { cursor: default; }
+.fd-row .fd-tip { display: none; flex-basis: 100%; margin-top: 6px; padding: 8px 10px; font-size: 12px;
+  line-height: 1.45; color: #374151; background: rgba(255,255,255,0.8); border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.06); }
+.fd-row.has-tip:hover .fd-tip { display: block; }
+.fd-row.has-tip:hover { background: rgba(10,83,156,0.04); }
+.fd-tip > div { margin: 1px 0; }
+.fd-tip .fd-raw, .fd-rate-detail .fd-raw { white-space: pre-wrap; margin-top: 5px; padding: 6px 8px;
+  background: #f5f6f8; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11.5px; color: #1f2937; }
+.fd-rate-detail { font-size: 12px; line-height: 1.45; color: #374151; margin: -2px 0 8px; padding: 0 2px; }
+.fd-rawh { margin-top: 4px; }   /* "Raw text:" styled like the other bold labels */
+.fd-rawh + .fd-raw { margin-top: 2px; }

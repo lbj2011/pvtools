@@ -16,6 +16,54 @@ from page_supporting_files.pv_pathway_layout import allc, FAULT_BUTTONS
 
 allc = ['#8A257F','#D476EC','#3BB1FF', '#1E51BB']
 
+# =============================================================================
+# BASEMAP CONFIGURATION
+#
+# CARTO started requiring an API key for its RASTER basemap endpoint in
+# August 2026; unauthenticated raster tiles are served with a repeated
+# "API key required" watermark. Plotly's built-in "carto-positron" style
+# points at that raster endpoint, which is why the watermark appeared.
+#
+# The VECTOR basemaps are not watermarked and need no key today, and the
+# positron vector style is the same cartography — sharper at high zoom and
+# on retina displays, since labels and geometry are rendered client-side.
+#
+# This requires the MapLibre API (px.scatter_map / go.Scattermap /
+# layout.map). The legacy Mapbox GL JS v1 API (px.scatter_mapbox /
+# go.Scattermapbox / layout.mapbox) cannot parse this style JSON and renders
+# a blank canvas — traces only, no basemap. Do not mix the two.
+#
+# Caveat: CARTO has said it may extend the key requirement to vector at some
+# point. If the watermark ever comes back, request a free key at
+# https://carto.com/basemaps/apikey and append "?key=..." to the URL below —
+# that is the only line that needs to change.
+#
+# Alternatives, should CARTO ever be unusable:
+#   OpenFreeMap (keyless, self-hostable, positron look-alike):
+#     BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron"
+#   Plotly built-in OSM raster (heavier colours, worse for dense scatter):
+#     BASEMAP_STYLE = "open-street-map"
+# =============================================================================
+BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+BASEMAP_LAYERS = []
+
+
+def apply_basemap(fig, **map_kwargs):
+    """Apply the shared basemap to a MapLibre map figure.
+
+    Every map in this module goes through here, so switching tile providers
+    is a one-line change in the configuration block above.
+
+    Note: layout-level properties such as `uirevision` are NOT set here —
+    set them on the figure separately.
+    """
+    fig.update_layout(
+        map=dict(style=BASEMAP_STYLE, layers=BASEMAP_LAYERS, **map_kwargs),
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+    )
+    return fig
+
+
 CATEGORY_COLORS = {
     "stressor": allc[0],
     "mechanism": allc[1],
@@ -519,10 +567,10 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
             df = df[df["pathway_faults"].apply(match_mechanisms)]
 
         if component_values == [] or mechanism_values == []:
-            return px.scatter_mapbox(lat=[], lon=[]).update_layout(
-                mapbox_style="carto-positron",
-                mapbox=dict(zoom=2, center={"lat": 20, "lon": 0}),
-                margin={"l": 0, "r": 0, "t": 0, "b": 0}
+            return apply_basemap(
+                px.scatter_map(lat=[], lon=[]),
+                zoom=2,
+                center={"lat": 20, "lon": 0},
             )
 
         df = df.copy()
@@ -539,7 +587,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
             "other":       "#bec0c0",
         }
 
-        fig = px.scatter_mapbox(
+        fig = px.scatter_map(
             df_exploded,
             lat="latitude",
             lon="longitude",
@@ -573,7 +621,7 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
 
         if selected_idx is not None and selected_idx in df.index:
             row = df.loc[selected_idx]
-            fig.add_scattermapbox(
+            fig.add_scattermap(
                 lat=[row["latitude"]],
                 lon=[row["longitude"]],
                 mode="markers",
@@ -581,18 +629,18 @@ def register_callbacks(app, DATA, INDEX_MAP, DF, file_list):
                 name="selected"
             )
 
-        fig.update_layout(
-            mapbox_style="carto-positron",
-            margin={"l": 0, "r": 0, "t": 0, "b": 0},
-            mapbox=dict(
-                zoom=2,
-                center={"lat": 20, "lon": 0},
-                bounds=dict(west=-360, east=360, south=-60, north=70),
-                # minZoom=1.5,
-                # maxZoom=10,
-            ),
-            uirevision="constant"
+        apply_basemap(
+            fig,
+            zoom=2,
+            center={"lat": 20, "lon": 0},
+            # `bounds` behaves differently under MapLibre than it did under
+            # Mapbox GL v1 — a span wider than 360° of longitude can be
+            # rejected outright, which blanks the map. Left off until it is
+            # verified locally; to restore the old pan limits, try:
+            #   bounds=dict(west=-180, east=180, south=-60, north=70),
+            # and confirm the basemap still draws before pushing.
         )
+        fig.update_layout(uirevision="constant")
 
         return fig
 

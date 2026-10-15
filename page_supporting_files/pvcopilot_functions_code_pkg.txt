@@ -1,0 +1,97 @@
+# ==========================================================================
+# PV-Copilot analysis functions -- package-backed version
+#   pip install rdtools pvanalytics
+# Filtering, normalisation, aggregation and degradation rates are delegated
+# to rdtools (NREL) and pvanalytics; only the glue code lives here.
+# ==========================================================================
+from rdtools.normalization import pvwatts_dc_power
+from rdtools.filtering import poa_filter, tcell_filter, normalized_filter
+from rdtools.aggregation import aggregation_insol
+from rdtools.degradation import (degradation_year_on_year, degradation_ols,
+                                 degradation_classical_decomposition)
+from pvanalytics.quality.outliers import tukey
+
+
+# ================================
+# BASIC VALUE FILTER (rdtools)
+# ================================
+def basic_value_filter(df, mapped_variables_dict,
+                       irr_min=0.0, irr_max=1500.0,
+                       temp_min=-40.0, temp_max=100.0, power_min=-1.0):
+    eps = 1e-9   # rdtools bounds are strict; keep them inclusive
+    mask = pd.Series(True, index=df.index)
+    irr_key = mapped_variables_dict.get('Irradiance')
+    temp_key = mapped_variables_dict.get('Module temperature')
+    power_key = mapped_variables_dict.get('DC Power')
+    if irr_key:
+        mask &= poa_filter(df[irr_key], irr_min - eps, irr_max + eps).fillna(False)
+    if temp_key and temp_key in df.columns:
+        mask &= tcell_filter(df[temp_key], temp_min - eps, temp_max + eps).fillna(False)
+    if power_key:
+        mask &= (df[power_key] >= power_min).fillna(False)
+    return df.index[mask], df.index[~mask]
+
+
+# ================================
+# NORMALIZATION (rdtools PVWatts)
+# ================================
+def normalize(df, mapped_variables_dict, gamma=-0.004):
+    irr_key = mapped_variables_dict['Irradiance']
+    power_key = mapped_variables_dict['DC Power']
+    temp_key = mapped_variables_dict.get('Module temperature')
+    temp = df[temp_key] if temp_key and temp_key in df.columns else None
+    # power_dc_rated=1 -> P_expected = G/1000 * (1 + gamma*(T-25))
+    p_expected = pvwatts_dc_power(df[irr_key], 1.0, temperature_cell=temp, gamma_pdc=gamma)
+    df['norm'] = df[power_key] / p_expected
+    df.loc[df[irr_key] < 50, 'norm'] = np.nan
+    return df
+
+
+# ================================
+# LOW IRRADIANCE / POWER FILTER (rdtools)
+# ================================
+def low_irra_power_filter(df, mapped_variables_dict,
+                          irr_thresh=300, power_ratio=0.02,
+                          norm_lower=0.01, norm_upper_pct=99):
+    irr = df[mapped_variables_dict['Irradiance']]
+    power = df[mapped_variables_dict['DC Power']]
+    mask = poa_filter(irr, irr_thresh, np.inf).fillna(False)
+    mask &= (power > power_ratio * irr).fillna(False)
+    upper = df['norm'].quantile(norm_upper_pct / 100)
+    mask &= normalized_filter(df['norm'], norm_lower, upper).fillna(False)
+    return df.index[mask], df.index[~mask]
+
+
+# ================================
+# OUTLIERS (pvanalytics Tukey / IQR)
+# ================================
+def identify_outliers_iqr(df, power_key, iqr_multiplier=1.5):
+    is_outlier = tukey(df[power_key], k=iqr_multiplier).fillna(False)
+    return df.index[~is_outlier], df.index[is_outlier]
+
+
+# ================================
+# DAILY AGGREGATION (rdtools, insolation-weighted)
+# ================================
+def aggregate_daily(df_f, irradiance_col):
+    sub = df_f[['norm', irradiance_col]].dropna()
+    daily = aggregation_insol(sub['norm'], sub[irradiance_col], frequency='D').dropna()
+    return daily
+
+
+# ================================
+# DEGRADATION RATES (rdtools)  -> (rate %/yr, confidence interval)
+# ================================
+def compute_yoy(series):
+    rd, ci, info = degradation_year_on_year(series.dropna())
+    return rd, ci
+
+def compute_lr(series):
+    rd, ci, info = degradation_ols(series.dropna())
+    return rd, ci
+
+def compute_csd(series):
+    # rdtools needs a complete daily series: fill gaps by interpolation
+    full = series.dropna().asfreq('D').interpolate(limit_direction='both').asfreq('D')
+    rd, ci, info = degradation_classical_decomposition(full)
+    return rd, ci

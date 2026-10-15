@@ -45,13 +45,20 @@ pvcz>=0.3.0
 vocmax>=0.0.21
 ivcorrection>=0.1.1
 openai>=1.62.0
-diskcache>=5.6   # PVPRO background-job store (multi-worker safe)
+diskcache>=5.6   # background-job store shared by workers in one container
+redis>=5.0       # cross-container background-job store when REDIS_URL is configured
+psycopg2-binary>=2.9.9   # usage log in Heroku Postgres (utils/usage_db.py)
 geopy>=2.4.1
-# rdtools>=2.1.8
-# xgboost==1.7.6
-pyarrow>=15.0.2
+# PV-Copilot analysis backend (analysis_utils_pkg.py): xgboost-cpu, pvanalytics,
+# ruptures come from requirements_pkg.txt. rdtools itself must ALSO be installed,
+# separately and with --no-deps (its xgboost pin is a 190+ MB wheel):
+#     pip install --no-deps rdtools==2.1.8
+-r requirements_pkg.txt
+pyarrow>=15.0.2,<26   # 26.0 requires numpy>=2; we pin numpy==1.26.4
 python-dotenv>=1.2.2
 scikit-learn>=1.7.2
 statsmodels>=0.14.6
-dash_model_viewer >=0.0.1
+dash_model_viewer==0.0.1   # 1.0.0 dropped DashModelViewer (used by pv_pathway)
 networkx >= 3.4.2
+dash-mantine-components==2.8.0
+pycountry>=23.12.11

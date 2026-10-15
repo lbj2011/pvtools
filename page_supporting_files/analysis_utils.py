@@ -28,43 +28,34 @@ load_dotenv(override=True)
 cborg_API_KEY = os.getenv("cborg_api_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Provider toggle: set LLM_PROVIDER in .env to "cborg" (LBL gateway) or "openai".
-# Switching providers also swaps the model name (CBORG prefixes it with "openai/").
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "cborg").lower()
+# --- Configuration (from your prompt) ---
+# client = openai.OpenAI(
+#     api_key=cborg_API_KEY,
+#     base_url="https://api.cborg.lbl.gov"
+# )
 
-# Bound every LLM HTTP call. Without an explicit timeout the SDK waits
-# indefinitely, and a single hung request blocks the worker thread it runs on
-# forever (the step-timeout wrapper can't kill a thread) -- a few of those
-# saturate the thread pool and make EVERY later call time out. max_retries is
-# also capped: the default (2) silently triples latency on a flaky gateway,
-# which is exactly how a 3-4s call balloons past the step timeout.
-LLM_TIMEOUT_S = 12.0
-LLM_MAX_RETRIES = 1
+# client_gpt = openai.OpenAI(
+#     api_key= OPENAI_API_KEY
+# )
 
-if LLM_PROVIDER == "openai":
-    client = openai.OpenAI(api_key=OPENAI_API_KEY,
-                           timeout=LLM_TIMEOUT_S, max_retries=LLM_MAX_RETRIES)
-    LLM_MODEL = "gpt-5.4-nano"
-else:  # cborg
-    client = openai.OpenAI(
-        api_key=cborg_API_KEY,
-        base_url="https://api.cborg.lbl.gov",
-        timeout=LLM_TIMEOUT_S,
-        max_retries=LLM_MAX_RETRIES,
-    )
-    LLM_MODEL = "openai/gpt-5.4-nano"
+client = openai.OpenAI(
+    api_key= OPENAI_API_KEY
+)
+
+# Model used for column identification. (Kept as a constant so parse_contents
+# and any future caller reference one place.)
+LLM_MODEL = "gpt-5.4-mini"
 
 # ---------------------------------------------------------------------------
 # Deterministic LLM column-identification cache.
 #
-# The LLM (even at temperature=0 / seed=0, via the gateway) does NOT return the
-# same candidate lists every call, so the SAME file could map to different
-# columns run-to-run -- which silently changed filtering results and which
-# datasets got BLOCKED. The prompt depends only on the column NAMES (not the
-# data), so we hash it and cache the result on disk: the first run for a given
-# column-signature calls the LLM; every run after that reuses it. Same file ->
-# same mapping -> same filtering -> same status, always. Delete the cache file
-# to force fresh identification.
+# The LLM (even at temperature=0 / seed=0) does NOT return the same candidate
+# lists every call, so the SAME file could map to different columns run-to-run.
+# The prompt depends only on the column NAMES (not the data), so we hash it and
+# cache the result on disk: the first run for a given column-signature calls the
+# LLM; every run after that reuses it. Delete the cache file to force a refresh.
+# (The mapping is only committed once the caller confirms a good run — see
+# commit_llm_cache — so a wrong mapping from a bad dataset is never locked in.)
 # ---------------------------------------------------------------------------
 _LLM_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                ".llm_id_cache.json")
@@ -89,8 +80,8 @@ def _llm_cache_get(key):
 
 
 def _llm_cache_put(key, value):
-    # Load-modify-write under a lock, with an atomic replace, so the parallel
-    # workers in the pipeline can't corrupt the file.
+    # Load-modify-write under a lock, with an atomic replace, so parallel
+    # workers can't corrupt the file.
     with _LLM_CACHE_LOCK:
         cache = _llm_cache_load()
         cache[key] = value
@@ -107,9 +98,7 @@ def commit_llm_cache(df):
     """Save the column-mapping the LLM produced for this dataframe to the cache,
     but ONLY when the caller has decided the run was GOOD. parse_contents stashes
     the freshly-identified mapping as 'pending' on df.attrs; nothing is written
-    until this is called, so a wrong mapping from a failed/unreliable dataset is
-    never locked in. A no-op if the result was a cache hit or there's nothing
-    pending."""
+    until this is called. A no-op on a cache hit or when nothing is pending."""
     pending = getattr(df, "attrs", {}).get("_llm_cache_pending") if df is not None else None
     if pending:
         key, value = pending
@@ -120,16 +109,11 @@ def _time_to_years(index):
     return (index - index[0]).days / 365.25
 
 
-# Column usability is judged by how much REAL data it carries -- both an absolute
-# count and the missingness rate:
-#   non-null < MIN_VALID_POINTS  -> drop (essentially empty; e.g. a few stray cells)
-#   missing  > MAX_MISSING_FRAC  -> drop (a near-dead sensor, e.g. 94% missing)
-#   FLAG_MISSING_FRAC..MAX       -> keep but flag ("treat carefully")
-#   < FLAG_MISSING_FRAC          -> keep and fill the few gaps
-# The ceiling is deliberately high: a column that is, say, 64% missing but still
-# has >1000 real values (a DC channel logged less often than the AC meter) is
-# perfectly usable and must NOT be discarded in favor of a worse fallback. Only
-# genuinely dead/near-empty columns are dropped.
+# Column usability is judged by how much REAL data it carries -- both an
+# absolute count and the missingness rate. The ceiling is deliberately high: a
+# column that is, say, 64% missing but still has >1000 real values is usable and
+# must NOT be discarded in favor of a worse fallback. Only genuinely dead /
+# near-empty columns are dropped.
 MAX_MISSING_FRAC = 0.9      # drop only near-dead columns (>90% missing)
 FLAG_MISSING_FRAC = 0.05    # flag columns 5-90% missing as gappy
 MIN_VALID_POINTS = 10       # absolute floor: fewer real values than this -> drop
@@ -139,9 +123,8 @@ MIN_IRRADIANCE_PEAK = 50.0
 
 
 # A per-device channel names a specific inverter / mppt / string / combiner /
-# meter / zone by NUMBER (inv1, mppt_2, string3, meter_1, ...). A system-level
-# column has no such device index. For whole-system degradation the system total
-# is the right signal, so it is preferred over any single device's channel.
+# meter / zone by NUMBER (inv1, mppt_2, ...). A system-level column has no such
+# device index; for whole-system degradation the system total is preferred.
 _DEVICE_LEVEL_RE = re.compile(
     r'(?:inv|inverter|mppt|string|combiner|cb|ch|meter|zone|block|array)[\s_]*\d',
     re.I)
@@ -150,6 +133,35 @@ _DEVICE_LEVEL_RE = re.compile(
 def _is_device_level(col):
     """True if a column name targets one numbered device (inv1, mppt_2, ...)."""
     return bool(_DEVICE_LEVEL_RE.search(str(col)))
+
+
+# Friendly, concrete labels for a numbered device channel, so the mapping pill
+# reads "one inverter" (for inv1_dc_power) instead of the vaguer "per-device".
+# Matched only when _is_device_level() is already true; order matters only in
+# that the first hit wins. Keep these device words in sync with _DEVICE_LEVEL_RE.
+_DEVICE_NOUNS = [
+    (re.compile(r'(?:inv|inverter)[\s_]*\d', re.I), "one inverter"),
+    (re.compile(r'mppt[\s_]*\d',             re.I), "one MPPT"),
+    (re.compile(r'string[\s_]*\d',           re.I), "one string"),
+    (re.compile(r'(?:combiner|cb)[\s_]*\d',  re.I), "one combiner"),
+    (re.compile(r'meter[\s_]*\d',            re.I), "one meter"),
+    (re.compile(r'zone[\s_]*\d',             re.I), "one zone"),
+    (re.compile(r'block[\s_]*\d',            re.I), "one block"),
+    (re.compile(r'array[\s_]*\d',            re.I), "one array"),
+    (re.compile(r'ch[\s_]*\d',               re.I), "one channel"),
+]
+
+
+def _device_scope_label(col):
+    """A concrete 'one <device>' note for a numbered device channel (e.g.
+    'one inverter' for inv1_dc_power). Falls back to 'one device' if the device
+    word isn't one we specifically name. This is CONTEXT, not a data defect —
+    it tells the user the column is a single device, not the system total."""
+    s = str(col)
+    for rx, noun in _DEVICE_NOUNS:
+        if rx.search(s):
+            return noun
+    return "one device"
 
 
 def _missing_frac(df, col):
@@ -164,9 +176,8 @@ def _best_by_data(df, cols):
 
     A candidate is usable only if it is at most MAX_MISSING_FRAC missing, has at
     least MIN_VALID_POINTS real values, and isn't all-zero/constant (nunique<=1).
-    A name match is NOT enough -- an empty/near-empty/mostly-missing column is
-    never selectable. Among the usable ones, returns the column with the most
-    non-null values (tie-break: highest variance, then original order).
+    A name match is NOT enough. Among the usable ones, prefer system-level over
+    per-device, then most non-null values, then highest variance, then order.
 
     Returns (best_col_or_None, viable_cols).
     """
@@ -183,19 +194,12 @@ def _best_by_data(df, cols):
         if non_null < MIN_VALID_POINTS:         # absolute floor for tiny frames
             continue
         nunique = int(s.nunique(dropna=True))
-        if nunique <= 1:            # all-NaN handled above; this drops constant / all-zero
+        if nunique <= 1:            # drops constant / all-zero (all-NaN handled above)
             continue
         viable.append(c)
         stats[c] = (non_null, float(s.var(skipna=True) or 0.0))
     if not viable:
         return None, []
-    # Deterministic ranking (independent of the LLM's candidate order, which is
-    # unreliable). In priority order:
-    #   1. SYSTEM-LEVEL over per-device: a system 'dc_power' beats 'inv1_dc_power'
-    #      -- a single inverter undercounts and can wipe out the irradiance-power
-    #      filter, blocking a dataset that should work.
-    #   2. MOST real data (non-null count).
-    #   3. Highest variance, then original order -- stable final tie-breaks.
     order = {c: i for i, c in enumerate(cols)}
     best = min(viable, key=lambda c: (
         _is_device_level(c),        # False(0) = system-level sorts first
@@ -204,6 +208,134 @@ def _best_by_data(df, cols):
         order.get(c, 1 << 30),      # then the candidate's listed order
     ))
     return best, viable
+
+
+# Deterministic power-column name scan — a safety net for when the (small,
+# non-deterministic) LLM omits an obvious power column from its candidates.
+# Mirrors the irradiance name-scan below. A name matches "power" if it contains
+# 'power'/'pwr' or a p-symbol token (pdc, p_dc, pmp, ppv, p_array, ...); it's AC
+# if it carries an AC/output/grid marker, otherwise DC.
+_POWER_NAME_RE = re.compile(
+    r'power|pwr|(?:^|[^a-z])p_?(?:dc|ac|mpp?|pv|out|in|array|string)(?:[^a-z]|$)',
+    re.I)
+_AC_MARKER_RE = re.compile(r'(?:^|[^a-z])ac(?:[^a-z]|$)|out|grid|phase', re.I)
+# Unambiguous DC-side markers: a "dc" token, or the inverter INPUT side
+# (input / in_ / _in). Deliberately conservative — it excludes softer hints
+# like "pv"/"mp" that also appear on system-level columns — so it only ever
+# fires when a name is clearly the DC side. Mirrors _AC_MARKER_RE and is used
+# only to reject a candidate from the OPPOSITE electrical role.
+_DC_MARKER_RE = re.compile(
+    r'(?:^|[^a-z])dc(?:[^a-z]|$)|input|(?:^|[^a-z])in_|_in(?:[^a-z]|$)', re.I)
+
+
+def _name_side(col):
+    """'ac' | 'dc' | None from unambiguous electrical-side markers in the NAME.
+
+    Returns None when the name carries neither marker OR carries both (an
+    ambiguous name like `ac_dc_*`); in those cases we defer to the LLM / data
+    and never filter. Only a clean one-sided name yields 'ac' or 'dc'."""
+    s = str(col)
+    ac = bool(_AC_MARKER_RE.search(s))
+    dc = bool(_DC_MARKER_RE.search(s))
+    if ac and not dc:
+        return "ac"
+    if dc and not ac:
+        return "dc"
+    return None
+
+
+def _drop_wrong_side(cols, want):
+    """Drop candidates whose NAME unambiguously marks the opposite electrical
+    side of `want` ('dc' or 'ac'). This is a deterministic guard against the
+    (non-deterministic) LLM occasionally listing an obviously-AC column such as
+    `ac_power` under a DC role — such a column must never be selected for, or
+    offered as an alternative under, the wrong side. Names with no clear side
+    marker (or an ambiguous one) are always kept."""
+    opp = "ac" if want == "dc" else "dc"
+    return [c for c in (cols or []) if _name_side(c) != opp]
+
+
+def _scan_power_names(df):
+    """Return (dc_power_cols, ac_power_cols) found purely by column name."""
+    dc, ac = [], []
+    for c in df.columns:
+        if not _POWER_NAME_RE.search(str(c)):
+            continue
+        (ac if _AC_MARKER_RE.search(str(c)) else dc).append(c)
+    return dc, ac
+
+
+def _least_bad(df, cols):
+    """Fallback for when NO candidate passes the strict quality gates in
+    _best_by_data, but the role still has a proposed column present in the data.
+
+    The strict gates are there to CHOOSE among several candidates — but when a
+    role has only a poor column (or a single low-quality one), dropping it
+    leaves the role unmapped and the user sees nothing. Instead we keep the
+    least-bad candidate (most data, then most distinct values, then variance),
+    so it's still shown, and return a reason the caller surfaces as a data-
+    quality warning. Requires at least one real numeric value (a fully dead /
+    all-text column is still unusable). Returns (col_or_None, reason)."""
+    present = []
+    for c in cols or []:
+        if c not in df.columns:
+            continue
+        if int(pd.to_numeric(df[c], errors="coerce").notna().sum()) < 1:
+            continue                     # totally dead / non-numeric — unusable
+        present.append(c)
+    if not present:
+        return None, None
+
+    def _key(c):
+        s = pd.to_numeric(df[c], errors="coerce")
+        return (_is_device_level(c), -int(s.notna().sum()),
+                -int(s.nunique(dropna=True)), -float(s.var(skipna=True) or 0.0))
+
+    best = min(present, key=_key)
+    s = pd.to_numeric(df[best], errors="coerce")
+    non_null = int(s.notna().sum())
+    nunique = int(s.nunique(dropna=True))
+    mf = _missing_frac(df, best)
+    if nunique <= 1:
+        reason = "is constant / all-zero"
+    elif non_null < MIN_VALID_POINTS:
+        reason = f"has only {non_null} valid values"
+    elif mf > MAX_MISSING_FRAC:
+        reason = f"is {mf:.0%} missing"
+    else:
+        reason = "is low quality"
+    return best, reason
+
+
+def _quality_tag(df, col, role=None):
+    """A short parenthetical quality/context label for a candidate column, shown
+    after its name in the mapping dropdown (e.g. 'all-zero', '94% missing',
+    'per-device', 'wrong units'). Returns None for a clean, system-level column
+    that needs no annotation."""
+    if not col or col == "__index__" or col not in df.columns:
+        return None
+    s = pd.to_numeric(df[col], errors="coerce")
+    non_null = int(s.notna().sum())
+    if non_null == 0:
+        return "no numeric data"
+    # Irradiance must be in W/m^2 — flag a mis-scaled channel.
+    if role == "Irradiance":
+        peak = s.quantile(0.95)
+        if not (np.isfinite(peak) and peak >= MIN_IRRADIANCE_PEAK):
+            return "wrong units"
+    nunique = int(s.nunique(dropna=True))
+    if nunique <= 1:
+        return "all-zero" if float(s.max()) == 0 else "constant"
+    if non_null < MIN_VALID_POINTS:
+        return f"only {non_null} pts"
+    mf = _missing_frac(df, col)
+    if mf > MAX_MISSING_FRAC:
+        return f"{mf:.0%} missing"
+    if mf > FLAG_MISSING_FRAC:
+        return f"{mf:.0%} missing"
+    if _is_device_level(col):
+        return _device_scope_label(col)
+    return None
 
 
 _TIME_NAME_RE = re.compile(
@@ -215,19 +347,17 @@ _IRR_NAME_RE = re.compile(
 
 
 def _name_looks_like_time(name):
-    """True if a column NAME reads like a timestamp (time/date/timestamp/...),
-    matched as whole tokens so 'update'/'runtime' don't false-positive."""
+    """True if a column NAME reads like a timestamp, matched as whole tokens so
+    'update'/'runtime' don't false-positive."""
     return bool(_TIME_NAME_RE.search(str(name)))
 
 
 def _looks_like_time(series, sample=20, min_frac=0.8):
-    """True if a column's values look like timestamps: sample the first non-null
-    values, try to parse them as datetimes, and require most to parse AND the
-    values not to be all identical (a constant isn't a usable time axis).
+    """True if a column's VALUES look like timestamps: sample the first non-null
+    values, parse as datetimes, require most to parse AND not all identical.
 
-    Numeric columns are rejected outright -- pd.to_datetime would happily read
-    integers as nanoseconds-since-epoch, so a plain power/voltage column would
-    otherwise masquerade as time. A datetime-typed column passes immediately.
+    Numeric columns are rejected outright -- pd.to_datetime would read integers
+    as nanoseconds-since-epoch. A datetime-typed column passes immediately.
     """
     if pd.api.types.is_numeric_dtype(series):
         return False
@@ -243,6 +373,57 @@ def _looks_like_time(series, sample=20, min_frac=0.8):
 # ================================
 # Read data
 # ================================
+
+def downsize_block_mean(df, factor):
+    """
+    Downsize df by averaging blocks of `factor` sequential rows.
+
+    Works for any factor > 1, including decimals: row i is assigned to block
+    floor(i / factor), so a 2.5x downsize alternates between 2-row and 3-row
+    blocks and still lands within one row of len(df)/2.5 overall. Numeric
+    columns take the block mean; non-numeric columns keep the block's first
+    value; a DatetimeIndex is averaged too, so each output timestamp sits at
+    the center of its block.
+
+    Returns the downsized DataFrame (a new object; input untouched). Raises
+    ValueError for factor <= 1 or a non-finite factor.
+    """
+    factor = float(factor)
+    if not np.isfinite(factor) or factor <= 1:
+        raise ValueError(f"Downsize factor must be a finite number > 1 (got {factor}).")
+
+    blocks = np.floor(np.arange(len(df)) / factor).astype(np.int64)
+
+    out = {}
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_numeric_dtype(s):
+            out[col] = s.groupby(blocks).mean()
+        else:
+            out[col] = s.groupby(blocks).first()
+    df_out = pd.DataFrame(out)
+
+    if isinstance(df.index, pd.DatetimeIndex):
+        tz = df.index.tz
+        base_index = df.index.tz_localize(None) if tz is not None else df.index
+        # Normalize to int64 NANOSECONDS explicitly. pandas >= 2 may carry a
+        # datetime64[us] (or [s]) index, whose raw .astype("int64") is in that
+        # unit — feeding it to pd.to_datetime (which assumes ns) silently lands
+        # every timestamp in 1970. Casting to datetime64[ns] first makes the
+        # unit unambiguous on both pandas 2.x and 3.x.
+        ns = pd.Series(base_index.astype("datetime64[ns]").astype("int64"))
+        mean_ns = ns.groupby(blocks).mean().astype("int64")
+        new_index = pd.DatetimeIndex(pd.to_datetime(mean_ns.values, unit="ns"))
+        if tz is not None:
+            new_index = new_index.tz_localize(tz)
+        new_index.name = df.index.name
+        df_out.index = new_index
+    else:
+        df_out.index.name = df.index.name
+
+    df_out.attrs = dict(getattr(df, "attrs", {}))
+    return df_out
+
 
 def parse_contents(contents=None, filename=None, df=None, progress=None):
     """
@@ -278,7 +459,16 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
 
         try:
             if 'csv' in filename:
-                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                # Read straight from the raw bytes with an encoding fallback.
+                # Some loggers (e.g. European PV monitoring exports) save CSVs
+                # as Latin-1 / CP1252 rather than UTF-8, so a header like
+                # "Tamb (°C)" contains byte 0xB0 that UTF-8 can't decode. Try
+                # UTF-8 first, then fall back to Latin-1 (which maps every byte
+                # and decodes 0xB0 -> "°" correctly).
+                try:
+                    df = pd.read_csv(io.BytesIO(decoded), encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(io.BytesIO(decoded), encoding='latin-1')
                 code_read = f"df = pd.read_csv('{filename}')"
 
             elif 'xls' in filename or 'xlsx' in filename:
@@ -432,6 +622,12 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         p_dc, pdc, dc_power, P_DC, Pdc, p_mp, pmp, pmpp, p_pv, ppv,
         p_array, p_string, inv1_input_power, inv1_dc_power,
         inverter1_dc_power, mppt_power, panel_power, string_power.
+
+    IMPORTANT — DO NOT MISS POWER. A column whose name contains "power" (or
+    "pwr", or a p-symbol like pdc/p_dc/pmp/ppv) is a POWER column and MUST be
+    listed under DC Power (or AC Power if it carries an AC/output/grid marker).
+    Never leave DC Power empty when such a column exists. This is the single
+    most important quantity — err toward including a plausible power column.
 
     AC columns (output / grid / inverter output) belong under the AC roles
     (AC Power / AC Voltage / AC Current) -- list them there, NOT under the DC
@@ -639,18 +835,38 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         # back DC -> AC for the electrical quantities, and warn on ambiguity.
         # ----------------------------------
         def _resolve_dc_ac(dc_role, ac_role, label):
-            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC."""
-            best, viable = _best_by_data(df, _cands(dc_role))
+            """Return (chosen_col_or_None, 'dc'|'ac'|None) preferring DC.
+
+            Candidates whose NAME clearly marks the wrong electrical side are
+            dropped first (see _drop_wrong_side) so an AC-named column can never
+            be chosen for — or offered as an alternative under — a DC role, and
+            vice versa."""
+            dc_cands = _drop_wrong_side(_cands(dc_role), "dc")
+            ac_cands = _drop_wrong_side(_cands(ac_role), "ac")
+            best, viable = _best_by_data(df, dc_cands)
             if best:
                 _ambiguity_note(dc_role, best, viable)
                 return best, "dc"
-            best, viable = _best_by_data(df, _cands(ac_role))
+            best, viable = _best_by_data(df, ac_cands)
             if best:
                 mapping_notes.append(
                     f"No usable DC {label} column — using AC {label} '{best}' "
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note(ac_role, best, viable, ac=True)
                 return best, "ac"
+            # Lenient fallback: nothing passed the quality gates, but if a
+            # candidate column exists, keep the least-bad one (shown + warned)
+            # rather than leaving the role unmapped.
+            lb, reason = _least_bad(df, dc_cands)
+            side = "dc"
+            if lb is None:
+                lb, reason = _least_bad(df, ac_cands)
+                side = "ac"
+            if lb is not None:
+                mapping_notes.append(
+                    f"{label.capitalize()} column '{lb}' {reason} — kept anyway "
+                    f"so you can review it; results may be affected.")
+                return lb, side
             return None, None
 
         # Voltage / Current (needed for PVPRO and for V*I power).
@@ -668,31 +884,74 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             if p:
                 v_col, v_side = p, i_side
 
-        # Power: DC direct -> DC V*I -> AC direct -> AC V*I.
-        best_dc_p, viable_dc_p = _best_by_data(df, _cands("DC Power"))
+        # Power resolution priority (DC preferred; real/good preferred over
+        # computed or low-quality; role never left empty when a column exists):
+        #   1 strict DC  ->  2 DC V×I  ->  3 lenient DC (low-quality, shown+warned)
+        #   -> 4 strict AC  ->  5 AC V×I  ->  6 lenient AC.
+        # Supplement the LLM's candidates with a deterministic name scan so an
+        # obvious column like 'dc_power' is caught even when the LLM omits it.
+        scan_dc_p, scan_ac_p = _scan_power_names(df)
+        # Guard each side against wrong-side names before combining with the
+        # deterministic scan (which is already side-correct). This is what stops
+        # an LLM-listed `ac_power` from surfacing under DC Power (selected or as
+        # an "also detected" alternative), and vice versa.
+        dc_p_cands = list(dict.fromkeys(
+            _drop_wrong_side(_cands("DC Power"), "dc") + scan_dc_p))
+        ac_p_cands = list(dict.fromkeys(
+            _drop_wrong_side(_cands("AC Power"), "ac") + scan_ac_p))
+
+        def _compute_power(side):
+            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
+                                       * pd.to_numeric(df[i_col], errors="coerce"))
+            return "computed_dc_power", side
+
         p_col, p_side = None, None
+
+        # 1) strict DC direct
+        best_dc_p, viable_dc_p = _best_by_data(df, dc_p_cands)
         if best_dc_p:
             p_col, p_side = best_dc_p, "dc"
             _ambiguity_note("DC Power", best_dc_p, viable_dc_p)
-        elif v_col and i_col and v_side == "dc" and i_side == "dc":
-            df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
-                                       * pd.to_numeric(df[i_col], errors="coerce"))
-            p_col, p_side = "computed_dc_power", "dc"
+
+        # 2) computed DC (V×I) from good V/I
+        if p_col is None and v_col and i_col and v_side == "dc" and i_side == "dc":
+            p_col, p_side = _compute_power("dc")
             mapping_notes.append("DC Power computed as Voltage × Current (no direct power column).")
-        else:
-            best_ac_p, viable_ac_p = _best_by_data(df, _cands("AC Power"))
+
+        # 3) lenient DC: a single low-quality DC power column is still shown + warned
+        if p_col is None:
+            lb, reason = _least_bad(df, dc_p_cands)
+            if lb is not None:
+                p_col, p_side = lb, "dc"
+                mapping_notes.append(
+                    f"DC Power column '{lb}' {reason} — kept anyway so you can "
+                    f"review it; results may be affected.")
+
+        # 4) strict AC direct
+        if p_col is None:
+            best_ac_p, viable_ac_p = _best_by_data(df, ac_p_cands)
             if best_ac_p:
                 p_col, p_side = best_ac_p, "ac"
                 mapping_notes.append(
                     f"No usable DC power column — using AC power '{best_ac_p}' "
                     f"(includes inverter effects, so it's an approximation).")
                 _ambiguity_note("AC Power", best_ac_p, viable_ac_p, ac=True)
-            elif v_col and i_col:
-                df["computed_dc_power"] = (pd.to_numeric(df[v_col], errors="coerce")
-                                           * pd.to_numeric(df[i_col], errors="coerce"))
-                p_col, p_side = "computed_dc_power", "ac"
-                mapping_notes.append("Power computed as Voltage × Current on the AC side "
-                                     "(no DC power) — includes inverter effects, approximate.")
+
+        # 5) computed AC (V×I)
+        if p_col is None and v_col and i_col:
+            p_col, p_side = _compute_power("ac")
+            mapping_notes.append("Power computed as Voltage × Current on the AC side "
+                                 "(no DC power) — includes inverter effects, approximate.")
+
+        # 6) lenient AC: last resort, low-quality AC power column shown + warned
+        if p_col is None:
+            lb, reason = _least_bad(df, ac_p_cands)
+            if lb is not None:
+                p_col, p_side = lb, "ac"
+                mapping_notes.append(
+                    f"AC Power column '{lb}' {reason} — kept anyway so you can "
+                    f"review it; results may differ from DC-side values (AC also includes "
+                    f"inverter effects).")
 
         # Fill the third electrical quantity from the other two (P = V * I).
         # Exact on the DC side; on the AC side it's approximate (ignores power
@@ -764,6 +1023,13 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
                     "— ignoring irradiance and using raw power.")
         temp_col, temp_viable = _best_by_data(df, _cands("Module temperature"))
         _ambiguity_note("Module temperature", temp_col, temp_viable)
+        if temp_col is None:
+            lb, reason = _least_bad(df, _cands("Module temperature"))
+            if lb is not None:
+                temp_col = lb
+                mapping_notes.append(
+                    f"Module temperature column '{lb}' {reason} — kept anyway; "
+                    f"temperature correction may be approximate.")
 
         # Time: detect BY NAME first (the LLM's name-based pick, then any column
         # whose name reads like time); only if no time-like NAME exists, fall
@@ -830,11 +1096,52 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
             df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
             df = df.dropna(subset=[time_col]).set_index(time_col)
 
-        # Stash the per-role alternatives on the frame so the Advanced UI can
-        # render them inline under each dropdown (set AFTER any re-index so it
-        # lands on the final df object the caller receives).
-        df.attrs["mapping_alternatives"] = {
-            r: cols for r, cols in alternatives.items() if cols}
+        # Comprehensive per-role candidate lists for the UI: EVERY relevant
+        # column (LLM picks + name-scan), INCLUDING low-quality ones, so they all
+        # appear under "LLM-detected {role}" rather than being hidden. Each gets
+        # a short quality tag (e.g. 'all-zero', '94% missing', 'per-device') the
+        # UI appends after the name.
+        #
+        # Same-side only: a DC role lists AC columns as alternatives ONLY when
+        # the chosen column is itself an AC fallback (no DC column existed). When
+        # a real DC column was selected we never offer an AC column beside it —
+        # DC and AC power are different physical quantities, so e.g. `ac_power`
+        # must not appear under DC Power. (dc_*_cands are already wrong-side
+        # filtered; filter the V/I lists here too before pairing them by side.)
+        dc_v_cands = _drop_wrong_side(_cands("DC Voltage"), "dc")
+        ac_v_cands = _drop_wrong_side(_cands("AC Voltage"), "ac")
+        dc_i_cands = _drop_wrong_side(_cands("DC Current"), "dc")
+        ac_i_cands = _drop_wrong_side(_cands("AC Current"), "ac")
+        _role_cands = {
+            "DC Power":           (ac_p_cands + dc_p_cands) if p_side == "ac"
+                                  else dc_p_cands,
+            "DC Voltage":         (ac_v_cands + dc_v_cands) if v_side == "ac"
+                                  else dc_v_cands,
+            "DC Current":         (ac_i_cands + dc_i_cands) if i_side == "ac"
+                                  else dc_i_cands,
+            "Irradiance":         all_irr,
+            "Module temperature": _cands("Module temperature"),
+            "Time":               ([c for c in _cands("Time") if c in df.columns]
+                                   + [c for c in df.columns if _name_looks_like_time(c)]),
+        }
+        comprehensive_alts, quality_tags = {}, {}
+        for _role, _cand_list in _role_cands.items():
+            seen = []
+            for c in _cand_list:
+                if c in df.columns and c not in seen:
+                    seen.append(c)
+            if seen:
+                comprehensive_alts[_role] = seen
+                for c in seen:
+                    t = _quality_tag(df, c, _role)
+                    if t:
+                        quality_tags[c] = t
+
+        # Stash the per-role candidates + quality tags on the frame so the
+        # Advanced UI can render them under each dropdown (set AFTER any re-index
+        # so it lands on the final df object the caller receives).
+        df.attrs["mapping_alternatives"] = comprehensive_alts
+        df.attrs["mapping_quality_tags"] = quality_tags
 
         # Hold a freshly-identified (not-yet-cached) mapping as "pending" so the
         # caller can commit it to the cache only if the run is GOOD.
@@ -888,6 +1195,28 @@ def parse_contents(contents=None, filename=None, df=None, progress=None):
         )
         mapped_variables_dict = {}
         mapping_notes = []
+
+    # Coerce every mapped numeric-role column to a real numeric dtype before
+    # handing df back. A column stored as text (a common CSV/export quirk —
+    # "1200.5" as a string, or a mostly-numeric column with a few blank/
+    # sentinel strings mixed in) passes THIS function's own detection just
+    # fine — the column name and role are correctly identified — but every
+    # actual numeric operation on it downstream (a figure's axis range, a
+    # filter comparison, normalize()'s arithmetic, PVPRO's fitting) would
+    # otherwise fail with a raw, unhelpful TypeError, or worse, silently
+    # poison a value used by another calculation right after it (seen in
+    # make_overview_figures, where an Irradiance column with even one
+    # unparseable value used to take Temperature's figure down with it).
+    # This is the one place every caller's df ultimately comes from, so
+    # fixing it here — once — means figures, filters, normalize(), and
+    # PVPRO all get clean numeric data without needing their own version of
+    # the same coercion.
+    if df is not None and mapped_variables_dict:
+        for _role in ("DC Power", "Irradiance", "Module temperature",
+                     "DC Voltage", "DC Current"):
+            _col = mapped_variables_dict.get(_role)
+            if _col and _col in df.columns and not pd.api.types.is_numeric_dtype(df[_col]):
+                df[_col] = pd.to_numeric(df[_col], errors="coerce")
 
     return df, summary_table, mapped_variables_dict, code_read, mapping_notes
 
@@ -950,6 +1279,21 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
                          title_font=dict(size=11))
         return fig
 
+    def _numeric_column(key):
+        """Coerces a mapped column to numeric (text/mixed-dtype columns —
+        a common CSV/export quirk — otherwise fail every arithmetic or
+        comparison operation below with a raw, unhelpful TypeError). Raises
+        ValueError with a clear message if every value is unusable, so the
+        caller's own except-block reports a real reason instead of a
+        confusing "'>' not supported between str and int" from deep inside
+        a min/max comparison."""
+        s = df[key]
+        if not pd.api.types.is_numeric_dtype(s):
+            s = pd.to_numeric(s, errors="coerce")
+        if s.notna().sum() == 0:
+            raise ValueError(f"Column '{key}' has no usable numeric values")
+        return s
+
     # -------------------------
     # 1. Power (blue)
     # -------------------------
@@ -962,11 +1306,13 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if power_key not in df.columns:
             raise ValueError(f"Column '{power_key}' not found")
 
+        power_series = _numeric_column(power_key)
+
         fig_power = go.Figure()
 
         fig_power.add_trace(go.Scattergl(
             x=df.index,
-            y=df[power_key],
+            y=power_series,
             mode="markers",
             name="Power Output",
             opacity=0.18,
@@ -975,16 +1321,14 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 
         fig_power = apply_layout(fig_power, "Power vs Time", "Power (W)")
 
-        # Robust y-axis: a few garbage spikes (e.g. a 22 MW reading on a ~150 kW
-        # system) otherwise blow up the scale and flatten all the real data to a
-        # line at the baseline. Clamp the top to just above the 99.5th percentile
-        # so the genuine daily power cycle is visible; spikes go off-screen.
+        # Robust y-axis (from bugFixes): a few garbage spikes (e.g. a 22 MW
+        # reading on a ~150 kW system) otherwise flatten the real data to the
+        # baseline. Clamp the top just above the 99.5th percentile.
         pvals = pd.to_numeric(df[power_key], errors="coerce")
         p_hi = pvals.quantile(0.995)
         p_max = pvals.max()
         if np.isfinite(p_hi) and p_hi > 0 and np.isfinite(p_max) and p_max > p_hi * 1.5:
             fig_power.update_yaxes(range=[min(0, pvals.min()), p_hi * 1.1])
-
         figures.append(dcc.Graph(figure=fig_power))
 
     except Exception as e:
@@ -1002,11 +1346,13 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if irr_key not in df.columns:
             raise ValueError(f"Column '{irr_key}' not found")
 
+        irr_series = _numeric_column(irr_key)
+
         fig_irr = go.Figure()
 
         fig_irr.add_trace(go.Scattergl(
             x=df.index,
-            y=df[irr_key],
+            y=irr_series,
             mode="markers",
             name="Irradiance",
             opacity=0.18,
@@ -1016,19 +1362,19 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         fig_irr = apply_layout(fig_irr, "Irradiance", "Irrad. (W/m²)")
 
         # --- Apply irradiance limit ---
-        ymax = df[irr_key].max()
-        ymin = df[irr_key].min()
+        irr_ymax = irr_series.max()
+        irr_ymin = irr_series.min()
 
-        y_lower = ymin
-        y_upper = ymax
+        irr_y_lower = irr_ymin
+        irr_y_upper = irr_ymax
 
-        if ymax > 1500:
-            y_upper = 1500
+        if irr_ymax > 1500:
+            irr_y_upper = 1500
 
-        if ymin < 0:
-            y_lower = 0
+        if irr_ymin < 0:
+            irr_y_lower = 0
 
-        fig_irr.update_yaxes(range=[y_lower, y_upper])
+        fig_irr.update_yaxes(range=[irr_y_lower, irr_y_upper])
 
         figures.append(dcc.Graph(figure=fig_irr))
 
@@ -1047,35 +1393,45 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         if temp_raw not in df.columns:
             raise ValueError(f"Column '{temp_raw}' not found")
 
+        temp_series = _numeric_column(temp_raw)
+
         fig_temp = go.Figure()
 
         fig_temp.add_trace(go.Scattergl(
             x=df.index,
-            y=df[temp_raw],
+            y=temp_series,
             mode="markers",
             name="Module Temp raw",
             opacity=0.18,
             marker=dict(color=COLORS["temp_raw"], size=4)
         ))
 
-        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
-
         fig_temp = apply_layout(fig_temp, "Temperature", "Temp (°C)")
 
         # --- Apply temperature limit ---
-        ymax = df[temp_raw].max()
-        ymin = df[temp_raw].min()
+        # Own local names (temp_y_lower/temp_y_upper), computed BEFORE the
+        # only update_yaxes call for this figure. The previous version set
+        # the axis range once using the IRRADIANCE block's leftover
+        # y_lower/y_upper (from before Temperature had computed its own),
+        # then again with its own correct values — since those were shared,
+        # unscoped names, a plain string column anywhere upstream (Irradiance
+        # included) could leave them holding text, and Temperature's own,
+        # perfectly fine numeric column would still fail on the first,
+        # premature range update. One computation, right before the one
+        # place it's used, removes the whole class of that bug.
+        temp_ymax = temp_series.max()
+        temp_ymin = temp_series.min()
 
-        y_lower = ymin
-        y_upper = ymax
+        temp_y_lower = temp_ymin
+        temp_y_upper = temp_ymax
 
-        if ymax > 150:
-            y_upper = 80
+        if temp_ymax > 150:
+            temp_y_upper = 80
 
-        if ymin < -50:
-            y_lower = -40
+        if temp_ymin < -50:
+            temp_y_lower = -40
 
-        fig_temp.update_yaxes(range=[y_lower - 20, y_upper + 20])
+        fig_temp.update_yaxes(range=[temp_y_lower - 20, temp_y_upper + 20])
 
         figures.append(dcc.Graph(figure=fig_temp))
 
@@ -1089,10 +1445,11 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         v_key = mapped_variables_dict.get("DC Voltage")
 
         if v_key and v_key in df.columns:
+            v_series = _numeric_column(v_key)
             fig_v = go.Figure()
             fig_v.add_trace(go.Scattergl(
                 x=df.index,
-                y=df[v_key],
+                y=v_series,
                 mode="markers",
                 name="DC Voltage",
                 opacity=0.18,
@@ -1111,10 +1468,11 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
         i_key = mapped_variables_dict.get("DC Current")
 
         if i_key and i_key in df.columns:
+            i_series = _numeric_column(i_key)
             fig_i = go.Figure()
             fig_i.add_trace(go.Scattergl(
                 x=df.index,
-                y=df[i_key],
+                y=i_series,
                 mode="markers",
                 name="DC Current",
                 opacity=0.18,
@@ -1133,27 +1491,49 @@ def make_overview_figures(df, mapped_variables_dict, temp_col="temp_C"):
 # NORMALIZATION
 # ================================
 def normalize(df, mapped_variables_dict, gamma=-0.004):
-    # Adaptive normalization based on which columns are available:
-    #   power + irradiance + temp -> full temperature-corrected normalization
-    #   power + irradiance         -> irradiance-only normalization
-    #   power alone                -> raw power (no normalization possible)
-    power_key  = mapped_variables_dict.get("DC Power")
-    irr_key    = mapped_variables_dict.get("Irradiance")
+    """Normalizes DC Power by Irradiance (and, when available, a module
+    temperature correction) into a comparable capacity-factor-like series.
+
+    MERGED (master + bugFixes):
+      * DC Power is a hard requirement -> clear KeyError (master).
+      * Each input column is coerced to numeric first (master).
+      * Module temperature optional: skipped when absent (master + bugFixes).
+      * Irradiance optional (bugFixes): with no irradiance column the raw power
+        is trended directly ('norm' = power, un-normalized) so power-only
+        datasets can still be analyzed downstream (see low_power_filter and
+        the peak-power path in aggregate_daily).
+    """
+    power_key = mapped_variables_dict.get("DC Power")
+    if not power_key:
+        raise KeyError("normalize() requires 'DC Power' to be mapped")
+    irr_key = mapped_variables_dict.get("Irradiance")
     temp_C_key = mapped_variables_dict.get("Module temperature")
 
-    has_irr  = bool(irr_key) and irr_key in df.columns
-    has_temp = bool(temp_C_key) and temp_C_key in df.columns
+    def _numeric(s):
+        return s if pd.api.types.is_numeric_dtype(s) else pd.to_numeric(s, errors="coerce")
 
-    if has_irr and has_temp:
-        df['norm'] = df[power_key] / (
-            df[irr_key] * (1 + gamma * (df[temp_C_key] - 25)))*1000
-        df.loc[df[irr_key] < 50, 'norm'] = np.nan
-    elif has_irr:
-        df['norm'] = df[power_key] / df[irr_key] * 1000
-        df.loc[df[irr_key] < 50, 'norm'] = np.nan
-    else:
+    power = _numeric(df[power_key])
+    df[power_key] = power
+
+    if not (irr_key and irr_key in df.columns):
         # No irradiance: trend the raw power directly (un-normalized).
-        df['norm'] = df[power_key]
+        df['norm'] = power
+        return df
+
+    irr = _numeric(df[irr_key])
+    df[irr_key] = irr
+
+    if temp_C_key and temp_C_key in df.columns:
+        temp_C = _numeric(df[temp_C_key])
+        df[temp_C_key] = temp_C
+        temp_term = (1 + gamma * (temp_C - 25))
+    else:
+        # No module temperature: same no-op the correction would be at 25 C.
+        temp_term = 1.0
+
+    df['norm'] = power / (irr * temp_term) * 1000
+
+    df.loc[irr < 50, 'norm'] = np.nan
 
     return df
 
@@ -1166,22 +1546,31 @@ def low_irra_power_filter(df, mapped_variables_dict,
                           norm_lower=0.01, norm_upper_pct=99):
     mask = pd.Series(True, index=df.index)
 
-    irr_key = mapped_variables_dict["Irradiance"]
-    power_key = mapped_variables_dict["DC Power"]
+    irr_key = mapped_variables_dict.get("Irradiance")
+    power_key = mapped_variables_dict.get("DC Power")
+    if not irr_key:
+        raise KeyError("low_irra_power_filter() requires 'Irradiance' to be mapped")
+    if not power_key:
+        raise KeyError("low_irra_power_filter() requires 'DC Power' to be mapped")
+
+    def _numeric(s):
+        return s if pd.api.types.is_numeric_dtype(s) else pd.to_numeric(s, errors="coerce")
+
+    irr = _numeric(df[irr_key])
+    power = _numeric(df[power_key])
 
     # irradiance filter
-    mask &= df[irr_key] > irr_thresh
+    mask &= irr > irr_thresh
 
-    # Power filter — UNIT-INDEPENDENT. The old form (power > ratio * irradiance)
-    # compared the power column's native units against W/m², which only worked
-    # when power happened to be in watts; a kW-scaled file (e.g. DKASC) failed
-    # for every daytime row and 0% survived. Scale by the system's own
-    # spike-robust peak instead: at full sun (1000 W/m²) a point must produce
-    # at least `power_ratio` of peak power, proportionally less at lower sun.
-    p = pd.to_numeric(df[power_key], errors="coerce")
-    capacity = p.quantile(0.99)
+    # power filter -- UNIT-INDEPENDENT (from bugFixes). The old form
+    # (power > ratio * irradiance) compared power in its native units against
+    # W/m2, which only worked when power was in watts; a kW-scaled file (e.g.
+    # DKASC) failed every daytime row and 0% survived. Scale by the system's own
+    # spike-robust peak instead: at 1000 W/m2 a point must produce at least
+    # `power_ratio` of peak power, proportionally less at lower sun.
+    capacity = power.quantile(0.99)
     if np.isfinite(capacity) and capacity > 0:
-        mask &= p > power_ratio * (df[irr_key] / 1000.0) * capacity
+        mask &= power > power_ratio * (irr / 1000.0) * capacity
 
     # norm range filter
     upper = df['norm'].quantile(norm_upper_pct / 100)
@@ -1193,9 +1582,7 @@ def low_irra_power_filter(df, mapped_variables_dict,
 
     return normal_indices, outlier_indices
 
-# ================================
-# Low power filter (no-irradiance fallback)
-# ================================
+
 def low_power_filter(df, mapped_variables_dict, peak_quantile=0.99, min_frac=0.15):
     """Power-only cleanup used when there's no irradiance (so the irradiance-based
     clear-sky / low-irradiance filters can't run).
@@ -1222,298 +1609,9 @@ def low_power_filter(df, mapped_variables_dict, peak_quantile=0.99, min_frac=0.1
         return df.index, df.index[[]]
     return df.index[mask], df.index[~mask]
 
-
 # ================================
 # DAILY AGGREGATION
 # ================================
-# When there's no irradiance, the daily value is the day's PEAK power (a high
-# quantile) rather than the mean -- and low-peak days are dropped. Rationale:
-# without irradiance we can't weather-normalize, so a daily MEAN collapses on
-# sparsely/partially-sampled days (e.g. a dawn-only day averages near zero),
-# which then blows up year-over-year ratios. A clear day's PEAK power is roughly
-# comparable year-to-year (same solar geometry), so trending daily peaks of
-# clear/high-output days is the standard fallback and keeps the signal stable.
-PEAK_QUANTILE = 0.95          # "peak" = 95th percentile of a day's power
-CLEAR_DAY_FRAC = 0.6          # keep days whose peak >= 60% of the reference peak
-CLEAR_DAY_MIN_DAYS = 10       # only apply the clear-day drop when we have enough days
-DENOM_FLOOR_FRAC = 0.2        # YoY: ignore pairs whose prior value < 20% of median
-
-# Plausible annual degradation band (%/yr). Real PV degradation is a small
-# NEGATIVE number (~0 to -3 %/yr typically). Anything positive beyond noise, or
-# steeper than ~-3 %/yr, almost always means the inputs were un-normalizable
-# (no irradiance), too sparse, or otherwise unreliable -- we flag those as
-# rate_reliable = no. (Tunable: loosen MIN to e.g. -5 if you want to allow
-# genuinely fast-degrading systems through unflagged.)
-DEGRADATION_PLAUSIBLE_MIN = -3.0
-DEGRADATION_PLAUSIBLE_MAX = 0.5
-
-# A per-year degradation trend fit to a handful of daily points is unreliable --
-# a few noisy days swing the slope to absurd values (+33%/yr from 4 points). We
-# still REPORT a rate below this many daily points, but flag it as unreliable
-# (with the reason) rather than presenting it as trustworthy.
-MIN_TREND_POINTS = 20
-
-
-def rate_is_plausible(rd):
-    """True if a degradation rate (%/yr) is finite and within the plausible band
-    (roughly a small negative number). Used to flag unreliable results rather
-    than presenting them as trustworthy."""
-    try:
-        return bool(np.isfinite(rd) and
-                    DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
-    except Exception:
-        return False
-
-
-def degradation_reliability(rd, n_points=None, has_irradiance=True,
-                            duration_years=None, ci_width=None):
-    """Decide whether a (computed) degradation rate is trustworthy, and if not,
-    WHY -- so the UI can show the rate alongside 'unreliable because ...'.
-
-    `ci_width` (energy-ratio YoY only) is the width of the internal bootstrap
-    uncertainty band in %/yr. It is NEVER displayed as a range -- it only feeds
-    this flag: a band wider than MAX_CI_WIDTH means the spread of year-over-year
-    changes is too large for the single number to be trusted.
-
-    Returns (is_reliable, reasons). reasons is a list of plain-English strings;
-    an empty list means the rate looks reliable.
-    """
-    reasons = []
-    if n_points is not None and n_points < MIN_TREND_POINTS:
-        reasons.append(
-            f"only {n_points} daily data point(s) survived filtering "
-            f"(a reliable trend needs at least {MIN_TREND_POINTS})")
-    if not has_irradiance:
-        reasons.append(
-            "there is no irradiance column, so power isn't weather-normalized "
-            "(year-to-year weather then looks like degradation)")
-    if duration_years is not None and duration_years < 2:
-        reasons.append(
-            f"the data spans only {duration_years:.1f} year(s) — under 2 years is "
-            "too short to separate real aging from seasonal weather")
-    if not rate_is_plausible(rd):
-        reasons.append(
-            f"the computed rate ({rd:+.1f}%/yr) is outside the physically "
-            "plausible range (real degradation is roughly 0 to −3%/yr)")
-    if ci_width is not None and np.isfinite(ci_width) and ci_width > MAX_CI_WIDTH:
-        reasons.append(
-            f"the year-over-year changes disagree with each other by about "
-            f"±{ci_width / 2:.1f}%/yr — too scattered for this single number "
-            "to be trusted")
-    return (len(reasons) == 0), reasons
-
-
-# ---------------------------------------------------------------------------
-# ENERGY-RATIO METHOD (RdTools-style)
-#
-# Sum each day FIRST (measured energy vs plane-of-array-expected energy), then
-# trend the daily ratio year-over-year. Summing before dividing keeps dawn/dusk
-# and transient points from poisoning the ratio, so far less data is discarded
-# and the trend is steadier. Validated against synthetic data with known
-# injected rates (recovered within ~0.03 %/yr; truth inside the internal
-# uncertainty band in 12/12 runs).
-# ---------------------------------------------------------------------------
-ER_MIN_IRR = 50.0            # daylight gate for the daily sums (W/m^2)
-ER_MIN_DAY_POINTS = 4        # a day needs this many daylight points
-ER_MIN_INSOL_FRAC = 0.2      # ...and >=20% of the median daily insolation
-ER_RATIO_TRIM = (0.3, 1.7)   # sanity band around the median daily ratio
-ER_YOY_TOL_DAYS = 7          # match days within +/- a week of one year apart
-ER_MIN_PAIRS = 5             # need this many year-apart pairs for a rate
-ER_BOOT_N = 500              # bootstrap resamples for the internal band
-MAX_CI_WIDTH = 3.0           # internal band wider than this (%/yr) -> unreliable
-
-
-def daily_energy_ratio(df, mapped_variables_dict, gamma=-0.004):
-    """Daily measured-vs-expected energy ratio. Returns a Series indexed by
-    day, or None when it can't be built (no power/irradiance, no valid days)."""
-    pcol = mapped_variables_dict.get("DC Power")
-    icol = mapped_variables_dict.get("Irradiance")
-    tcol = mapped_variables_dict.get("Module temperature")
-    if not pcol or pcol not in df.columns or not icol or icol not in df.columns:
-        return None
-    p = pd.to_numeric(df[pcol], errors="coerce")
-    g = pd.to_numeric(df[icol], errors="coerce")
-    t = pd.to_numeric(df[tcol], errors="coerce") if tcol and tcol in df.columns else None
-
-    expected = g * (1 + gamma * (t - 25)) if t is not None else g.copy()
-    ok = (g >= ER_MIN_IRR) & (p >= 0) & expected.notna() & p.notna()
-    sub = pd.DataFrame({"p": p[ok], "e": expected[ok], "g": g[ok]})
-    if len(sub) == 0:
-        return None
-    day = sub.groupby(sub.index.date).agg(
-        e_meas=("p", "sum"), e_exp=("e", "sum"),
-        insol=("g", "sum"), n=("p", "size"))
-    day.index = pd.to_datetime(day.index)
-
-    med_insol = day["insol"].median()
-    day = day[(day["n"] >= ER_MIN_DAY_POINTS)
-              & (day["insol"] >= ER_MIN_INSOL_FRAC * med_insol)
-              & (day["e_exp"] > 0)]
-    if len(day) == 0:
-        return None
-    ratio = day["e_meas"] / day["e_exp"]
-    med = ratio.median()
-    ratio = ratio[(ratio >= ER_RATIO_TRIM[0] * med)
-                  & (ratio <= ER_RATIO_TRIM[1] * med)]
-    return ratio if len(ratio) >= 2 else None
-
-
-def compute_yoy_energy(df, mapped_variables_dict, gamma=-0.004):
-    """Energy-ratio YoY degradation rate.
-
-    Returns (rd, fig, ci_width, n_days):
-      rd        median year-over-year change of the daily energy ratio (%/yr)
-      fig       scatter of the daily ratio with the trend annotated
-      ci_width  width of the internal bootstrap band (%/yr) — used ONLY for
-                the reliability flag, never displayed as a range
-      n_days    number of valid daily points the estimate is built from
-    (np.nan, None, np.nan, 0) when the method can't run on this data.
-    """
-    ratio = daily_energy_ratio(df, mapped_variables_dict, gamma=gamma)
-    if ratio is None:
-        return np.nan, None, np.nan, 0
-    ratio = ratio.sort_index()
-
-    idx = ratio.index
-    targets = idx - pd.DateOffset(years=1)
-    pos = idx.get_indexer(targets, method="nearest")
-    changes = []
-    for i, j in enumerate(pos):
-        if j < 0 or idx[j] >= idx[i]:
-            continue
-        if abs((idx[i] - pd.DateOffset(years=1) - idx[j]).days) > ER_YOY_TOL_DAYS:
-            continue
-        prev, curr = ratio.iloc[j], ratio.iloc[i]
-        if prev > 0:
-            changes.append((curr / prev - 1.0) * 100.0)
-    changes = np.asarray(changes)
-    if len(changes) < ER_MIN_PAIRS:
-        return np.nan, None, np.nan, int(len(ratio))
-
-    rd = float(np.median(changes))
-    rng = np.random.default_rng(0)   # fixed seed -> same answer every run
-    boots = np.median(
-        rng.choice(changes, size=(ER_BOOT_N, len(changes)), replace=True), axis=1)
-    ci_width = float(np.percentile(boots, 95) - np.percentile(boots, 5))
-
-    # Figure: daily ratio scatter + the median trend through it.
-    t_yr = np.asarray((ratio.index - ratio.index[0]).days) / 365.25
-    trend = ratio.median() * (1 + rd / 100.0) ** t_yr
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=ratio.index, y=ratio.values, mode="markers",
-        marker=dict(size=6, opacity=0.6, color="#A6CAEC"),
-        name="Daily energy ratio"))
-    fig.add_trace(go.Scatter(
-        x=ratio.index, y=trend, mode="lines",
-        line=dict(color="#0070C0", width=2),
-        name=f"YoY Trend ({rd:.2f}%/yr)"))
-    fig.update_layout(
-        title="Daily Energy Ratio and YoY Trend",
-        xaxis_title="Time", yaxis_title="Measured / expected energy",
-        template="plotly_white", height=350,
-        margin=dict(l=40, r=20, t=50, b=40),
-        legend=dict(orientation="h", yanchor="top", y=-0.2,
-                    xanchor="center", x=0.5))
-    return rd, fig, ci_width, int(len(ratio))
-
-
-# ---------------------------------------------------------------------------
-# PVPRO parameter estimation from the data itself.
-#
-# Typical crystalline-module operating values used to back out the array
-# layout from measured string voltage/current. Rough by nature -- the UI
-# marks these as auto-filled estimates the user should review.
-# ---------------------------------------------------------------------------
-VMP_PER_CELL = 0.51      # V at max power per crystalline cell (standard)
-MODULE_IMP_TYP = 8.5     # A at max power for a typical crystalline string
-VI_P_TOL = 0.35          # measured V*I must agree with measured P within 35%
-
-
-def estimate_pvpro_params(df, mapped_variables_dict, cells_in_series=60):
-    """Estimate PVPRO array-layout parameters FROM THE MEASUREMENTS.
-
-    All electrical quantities are measured from the dataset itself: the median
-    voltage/current/power over the TOP-DECILE power points (the array's actual
-    max-power operating region). The layout then follows arithmetically:
-
-        modules_per_string = V_measured / (cells_in_series x 0.51 V/cell)
-        parallel_strings   = I_measured / I_string
-            where I_measured is the measured current, or P_measured/V_measured
-            when no current column exists.
-
-    Before estimating, the measurements are cross-checked against each other:
-    if measured V x I disagrees with measured P by more than 35%, the columns
-    are inconsistent (e.g. an AC current fallback on a DC-side power) and NO
-    estimate is produced -- better empty than wrong.
-
-    Returns {param_name: {"value": int, "basis": str}} for the parameters the
-    data supports; {} when it can't be done honestly.
-    """
-    out = {}
-    pcol = mapped_variables_dict.get("DC Power")
-    vcol = mapped_variables_dict.get("DC Voltage")
-    icol = mapped_variables_dict.get("DC Current")
-    if not pcol or pcol not in df.columns:
-        return out
-    p = pd.to_numeric(df[pcol], errors="coerce")
-    p_hi_cut = p.quantile(0.90)
-    if not np.isfinite(p_hi_cut) or p_hi_cut <= 0:
-        return out
-    high = p >= p_hi_cut            # the array's real max-power operating region
-    if int(high.sum()) < 30:
-        return out
-    p_med = p[high].median()
-
-    v_med = None
-    if vcol and vcol in df.columns:
-        v = pd.to_numeric(df[vcol], errors="coerce")[high].median()
-        # Plausible DC string voltage only (rejects mis-scaled/AC-ish values).
-        if np.isfinite(v) and 15 <= v <= 1500:
-            v_med = float(v)
-
-    i_med, i_from = None, "measured"
-    if icol and icol in df.columns:
-        i = pd.to_numeric(df[icol], errors="coerce")[high].median()
-        if np.isfinite(i) and 0.3 <= i <= 2000:
-            i_med = float(i)
-
-    # Cross-check the measurements against each other: V x I must reproduce P.
-    # Only possible when all three exist and P is in watts-compatible units;
-    # a failed check means the mapped columns are electrically inconsistent
-    # (different sides / different sub-arrays) -> refuse to estimate.
-    if v_med is not None and i_med is not None and p_med > 0:
-        ratio = (v_med * i_med) / p_med
-        if not (1 - VI_P_TOL <= ratio <= 1 + VI_P_TOL):
-            return out
-
-    # No current column: CALCULATE it from the measured power and voltage.
-    if i_med is None and v_med is not None and p_med > 0:
-        i_calc = p_med / v_med
-        if 0.3 <= i_calc <= 2000:
-            i_med, i_from = i_calc, "P/V"
-
-    module_vmp = cells_in_series * VMP_PER_CELL
-    if v_med is not None and module_vmp > 0:
-        mps = max(1, int(round(v_med / module_vmp)))
-        if mps <= 40:
-            out["modules_per_string"] = {
-                "value": mps,
-                "basis": (f"measured {v_med:.0f} V ÷ "
-                          f"{module_vmp:.1f} V/module "
-                          f"({cells_in_series} cells × {VMP_PER_CELL} V)")}
-
-    if i_med is not None:
-        ps = max(1, int(round(i_med / MODULE_IMP_TYP)))
-        if ps <= 200:
-            src = (f"measured {i_med:.1f} A" if i_from == "measured"
-                   else f"{i_med:.1f} A calculated as P÷V")
-            out["parallel_strings"] = {
-                "value": ps,
-                "basis": f"{src} ÷ {MODULE_IMP_TYP} A/string"}
-    return out
-
-
 def aggregate_daily(df_f, irradiance_col=None):
     # Group by the post-dropna frame's OWN index. Grouping by df_f.index.date
     # (the full, original-length index) breaks with "Grouper and axis must be
@@ -1802,12 +1900,32 @@ def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=
 
     fitted = res.fittedvalues
 
+    # --- Warm-up trim -------------------------------------------------------
+    # SARIMAX's diffuse initialization makes the first handful of one-step
+    # fitted values unreliable (they can spike to ~0 or huge values before the
+    # Kalman filter converges). Drop this transient so it doesn't corrupt the
+    # slope estimate or the plot. We drop about one seasonal cycle's worth of
+    # points, capped at 10% of the record so short series keep enough data.
+    warmup = min(seasonal_period + d, max(1, len(fitted) // 10))
+    fitted = fitted.iloc[warmup:]
+
     t = _time_to_years(fitted.index).values.reshape(-1, 1)
     y = fitted.values
 
     lr = LinearRegression().fit(t, y)
     slope = lr.coef_[0]
     rd = slope / np.mean(y) * 100
+
+    # --- Smoothed trend curve for plotting ---------------------------------
+    # We do NOT plot the raw one-step-ahead `fittedvalues` (on daily data they
+    # shadow the noisy series and look jagged). Instead we plot a CENTERED
+    # ROLLING MEAN of the (post-warm-up) fitted values: a smooth curve that
+    # still follows the mid-term undulations, matching the HW/CSD trend style
+    # rather than collapsing to a straight line. The reported rate `rd` is
+    # unchanged -- it is still the linear slope of the fitted values above.
+    smooth_window = 31  # ~1 month, centered
+    trend_curve = fitted.rolling(window=smooth_window, center=True,
+                                 min_periods=1).mean()
 
     fig = go.Figure()
 
@@ -1822,11 +1940,11 @@ def compute_arima(series, order=(1,1,0), seasonal_order=(0,1,1,12), p=1, d=1, q=
         )
     )
 
-    # ARIMA fitted line
+    # ARIMA fitted trend (smoothed)
     fig.add_trace(
         go.Scatter(
-            x=fitted.index,
-            y=fitted.values,
+            x=trend_curve.index,
+            y=trend_curve.values,
             mode="lines",
             line=dict(color="#0070C0", width=2),
             name=f"ARIMA Fit ({rd:.2f}%/yr)"
@@ -2516,6 +2634,420 @@ def _yoy_degradation(series, eps=1e-9):
     return float(np.median(ratios) * 100.0)  # %/yr
 
 
+
+# ================================
+# DAILY AGGREGATION
+# ================================
+# When there's no irradiance, the daily value is the day's PEAK power (a high
+# quantile) rather than the mean -- and low-peak days are dropped. Rationale:
+# without irradiance we can't weather-normalize, so a daily MEAN collapses on
+# sparsely/partially-sampled days (e.g. a dawn-only day averages near zero),
+# which then blows up year-over-year ratios. A clear day's PEAK power is roughly
+# comparable year-to-year (same solar geometry), so trending daily peaks of
+# clear/high-output days is the standard fallback and keeps the signal stable.
+PEAK_QUANTILE = 0.95          # "peak" = 95th percentile of a day's power
+CLEAR_DAY_FRAC = 0.6          # keep days whose peak >= 60% of the reference peak
+CLEAR_DAY_MIN_DAYS = 10       # only apply the clear-day drop when we have enough days
+DENOM_FLOOR_FRAC = 0.2        # YoY: ignore pairs whose prior value < 20% of median
+
+# Plausible annual degradation band (%/yr). Real PV degradation is a small
+# NEGATIVE number (~0 to -3 %/yr typically). Anything positive beyond noise, or
+# steeper than ~-3 %/yr, almost always means the inputs were un-normalizable
+# (no irradiance), too sparse, or otherwise unreliable -- we flag those as
+# rate_reliable = no. (Tunable: loosen MIN to e.g. -5 if you want to allow
+# genuinely fast-degrading systems through unflagged.)
+DEGRADATION_PLAUSIBLE_MIN = -3.0
+DEGRADATION_PLAUSIBLE_MAX = 0.5
+
+# A per-year degradation trend fit to a handful of daily points is unreliable --
+# a few noisy days swing the slope to absurd values (+33%/yr from 4 points). We
+# still REPORT a rate below this many daily points, but flag it as unreliable
+# (with the reason) rather than presenting it as trustworthy.
+MIN_TREND_POINTS = 20
+
+
+def rate_is_plausible(rd):
+    """True if a degradation rate (%/yr) is finite and within the plausible band
+    (roughly a small negative number). Used to flag unreliable results rather
+    than presenting them as trustworthy."""
+    try:
+        return bool(np.isfinite(rd) and
+                    DEGRADATION_PLAUSIBLE_MIN <= rd <= DEGRADATION_PLAUSIBLE_MAX)
+    except Exception:
+        return False
+
+
+def degradation_reliability(rd, n_points=None, has_irradiance=True,
+                            duration_years=None, ci_width=None):
+    """Decide whether a (computed) degradation rate is trustworthy, and if not,
+    WHY -- so the UI can show the rate alongside 'unreliable because ...'.
+
+    `ci_width` (energy-ratio YoY only) is the width of the internal bootstrap
+    uncertainty band in %/yr. It is NEVER displayed as a range -- it only feeds
+    this flag: a band wider than MAX_CI_WIDTH means the spread of year-over-year
+    changes is too large for the single number to be trusted.
+
+    Returns (is_reliable, reasons). reasons is a list of plain-English strings;
+    an empty list means the rate looks reliable.
+    """
+    reasons = []
+    if n_points is not None and n_points < MIN_TREND_POINTS:
+        reasons.append(
+            f"only {n_points} daily data point(s) survived filtering "
+            f"(a reliable trend needs at least {MIN_TREND_POINTS})")
+    if not has_irradiance:
+        reasons.append(
+            "there is no irradiance column, so power isn't weather-normalized "
+            "(year-to-year weather then looks like degradation)")
+    if duration_years is not None and duration_years < 2:
+        reasons.append(
+            f"the data spans only {duration_years:.1f} year(s) — under 2 years is "
+            "too short to separate real aging from seasonal weather")
+    if not rate_is_plausible(rd):
+        reasons.append(
+            f"the computed rate ({rd:+.1f}%/yr) is outside the physically "
+            "plausible range (real degradation is roughly 0 to −3%/yr)")
+    if ci_width is not None and np.isfinite(ci_width) and ci_width > MAX_CI_WIDTH:
+        reasons.append(
+            f"the year-over-year changes disagree with each other by about "
+            f"±{ci_width / 2:.1f}%/yr — too scattered for this single number "
+            "to be trusted")
+    return (len(reasons) == 0), reasons
+
+
+# ---------------------------------------------------------------------------
+# ENERGY-RATIO METHOD (RdTools-style)
+#
+# Sum each day FIRST (measured energy vs plane-of-array-expected energy), then
+# trend the daily ratio year-over-year. Summing before dividing keeps dawn/dusk
+# and transient points from poisoning the ratio, so far less data is discarded
+# and the trend is steadier. Validated against synthetic data with known
+# injected rates (recovered within ~0.03 %/yr; truth inside the internal
+# uncertainty band in 12/12 runs).
+# ---------------------------------------------------------------------------
+ER_MIN_IRR = 50.0            # daylight gate for the daily sums (W/m^2)
+ER_MIN_DAY_POINTS = 4        # a day needs this many daylight points
+ER_MIN_INSOL_FRAC = 0.2      # ...and >=20% of the median daily insolation
+ER_RATIO_TRIM = (0.3, 1.7)   # sanity band around the median daily ratio
+ER_YOY_TOL_DAYS = 7          # match days within +/- a week of one year apart
+ER_MIN_PAIRS = 5             # need this many year-apart pairs for a rate
+ER_BOOT_N = 500              # bootstrap resamples for the internal band
+MAX_CI_WIDTH = 3.0           # internal band wider than this (%/yr) -> unreliable
+
+
+def daily_energy_ratio(df, mapped_variables_dict, gamma=-0.004):
+    """Daily measured-vs-expected energy ratio. Returns a Series indexed by
+    day, or None when it can't be built (no power/irradiance, no valid days)."""
+    pcol = mapped_variables_dict.get("DC Power")
+    icol = mapped_variables_dict.get("Irradiance")
+    tcol = mapped_variables_dict.get("Module temperature")
+    if not pcol or pcol not in df.columns or not icol or icol not in df.columns:
+        return None
+    p = pd.to_numeric(df[pcol], errors="coerce")
+    g = pd.to_numeric(df[icol], errors="coerce")
+    t = pd.to_numeric(df[tcol], errors="coerce") if tcol and tcol in df.columns else None
+
+    expected = g * (1 + gamma * (t - 25)) if t is not None else g.copy()
+    ok = (g >= ER_MIN_IRR) & (p >= 0) & expected.notna() & p.notna()
+    sub = pd.DataFrame({"p": p[ok], "e": expected[ok], "g": g[ok]})
+    if len(sub) == 0:
+        return None
+    day = sub.groupby(sub.index.date).agg(
+        e_meas=("p", "sum"), e_exp=("e", "sum"),
+        insol=("g", "sum"), n=("p", "size"))
+    day.index = pd.to_datetime(day.index)
+
+    med_insol = day["insol"].median()
+    day = day[(day["n"] >= ER_MIN_DAY_POINTS)
+              & (day["insol"] >= ER_MIN_INSOL_FRAC * med_insol)
+              & (day["e_exp"] > 0)]
+    if len(day) == 0:
+        return None
+    ratio = day["e_meas"] / day["e_exp"]
+    med = ratio.median()
+    ratio = ratio[(ratio >= ER_RATIO_TRIM[0] * med)
+                  & (ratio <= ER_RATIO_TRIM[1] * med)]
+    return ratio if len(ratio) >= 2 else None
+
+
+def compute_yoy_energy(df, mapped_variables_dict, gamma=-0.004):
+    """Energy-ratio YoY degradation rate.
+
+    Returns (rd, fig, ci_width, n_days):
+      rd        median year-over-year change of the daily energy ratio (%/yr)
+      fig       scatter of the daily ratio with the trend annotated
+      ci_width  width of the internal bootstrap band (%/yr) — used ONLY for
+                the reliability flag, never displayed as a range
+      n_days    number of valid daily points the estimate is built from
+    (np.nan, None, np.nan, 0) when the method can't run on this data.
+    """
+    ratio = daily_energy_ratio(df, mapped_variables_dict, gamma=gamma)
+    if ratio is None:
+        return np.nan, None, np.nan, 0
+    ratio = ratio.sort_index()
+
+    idx = ratio.index
+    targets = idx - pd.DateOffset(years=1)
+    pos = idx.get_indexer(targets, method="nearest")
+    changes = []
+    for i, j in enumerate(pos):
+        if j < 0 or idx[j] >= idx[i]:
+            continue
+        if abs((idx[i] - pd.DateOffset(years=1) - idx[j]).days) > ER_YOY_TOL_DAYS:
+            continue
+        prev, curr = ratio.iloc[j], ratio.iloc[i]
+        if prev > 0:
+            changes.append((curr / prev - 1.0) * 100.0)
+    changes = np.asarray(changes)
+    if len(changes) < ER_MIN_PAIRS:
+        return np.nan, None, np.nan, int(len(ratio))
+
+    rd = float(np.median(changes))
+    rng = np.random.default_rng(0)   # fixed seed -> same answer every run
+    boots = np.median(
+        rng.choice(changes, size=(ER_BOOT_N, len(changes)), replace=True), axis=1)
+    ci_width = float(np.percentile(boots, 95) - np.percentile(boots, 5))
+
+    # Figure: daily ratio scatter + the median trend through it.
+    t_yr = np.asarray((ratio.index - ratio.index[0]).days) / 365.25
+    trend = ratio.median() * (1 + rd / 100.0) ** t_yr
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=ratio.index, y=ratio.values, mode="markers",
+        marker=dict(size=6, opacity=0.6, color="#A6CAEC"),
+        name="Daily energy ratio"))
+    fig.add_trace(go.Scatter(
+        x=ratio.index, y=trend, mode="lines",
+        line=dict(color="#0070C0", width=2),
+        name=f"YoY Trend ({rd:.2f}%/yr)"))
+    fig.update_layout(
+        title="Daily Energy Ratio and YoY Trend",
+        xaxis_title="Time", yaxis_title="Measured / expected energy",
+        template="plotly_white", height=350,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(orientation="h", yanchor="top", y=-0.2,
+                    xanchor="center", x=0.5))
+    return rd, fig, ci_width, int(len(ratio))
+
+
+# ---------------------------------------------------------------------------
+# PVPRO parameter estimation FROM THE DATA ITSELF.
+#
+# Typical crystalline-module operating values used to back out the array
+# layout from measured string voltage/current. Rough by nature -- the UI
+# marks these as auto-filled estimates the user should review.
+# ---------------------------------------------------------------------------
+VMP_PER_CELL = 0.51      # V at max power per crystalline cell (standard)
+MODULE_IMP_TYP = 8.5     # A at max power for a typical crystalline string
+VI_P_TOL = 0.35          # measured V*I must agree with measured P within 35%
+
+
+def estimate_pvpro_params(df, mapped_variables_dict, cells_in_series=60):
+    """Estimate PVPRO array-layout parameters FROM THE MEASUREMENTS.
+
+    All electrical quantities are measured from the dataset itself: the median
+    voltage/current/power over the TOP-DECILE power points (the array's actual
+    max-power operating region). The layout then follows arithmetically:
+
+        modules_per_string = V_measured / (cells_in_series x 0.51 V/cell)
+        parallel_strings   = I_measured / I_string
+            where I_measured is the measured current, or P_measured/V_measured
+            when no current column exists.
+
+    Before estimating, the measurements are cross-checked against each other:
+    if measured V x I disagrees with measured P by more than 35%, the columns
+    are inconsistent (e.g. an AC current fallback on a DC-side power) and NO
+    estimate is produced -- better empty than wrong.
+
+    Returns {param_name: {"value": int, "basis": str}} for the parameters the
+    data supports; {} when it can't be done honestly.
+    """
+    out = {}
+    pcol = mapped_variables_dict.get("DC Power")
+    vcol = mapped_variables_dict.get("DC Voltage")
+    icol = mapped_variables_dict.get("DC Current")
+    if not pcol or pcol not in df.columns:
+        return out
+    p = pd.to_numeric(df[pcol], errors="coerce")
+    p_hi_cut = p.quantile(0.90)
+    if not np.isfinite(p_hi_cut) or p_hi_cut <= 0:
+        return out
+    high = p >= p_hi_cut            # the array's real max-power operating region
+    if int(high.sum()) < 30:
+        return out
+    p_med = p[high].median()
+
+    v_med = None
+    if vcol and vcol in df.columns:
+        v = pd.to_numeric(df[vcol], errors="coerce")[high].median()
+        # Plausible DC string voltage only (rejects mis-scaled/AC-ish values).
+        if np.isfinite(v) and 15 <= v <= 1500:
+            v_med = float(v)
+
+    i_med, i_from = None, "measured"
+    if icol and icol in df.columns:
+        i = pd.to_numeric(df[icol], errors="coerce")[high].median()
+        if np.isfinite(i) and 0.3 <= i <= 2000:
+            i_med = float(i)
+
+    # Sanity-check V, I, P against each other. A measured V*I can be at most
+    # the reported power; it is often much LESS, because V and I are frequently
+    # per-inverter (or per-string) while DC Power is the whole-system total, so
+    # V*I is only a 1/N fraction of P. That is a LEGITIMATE case -- the
+    # per-device voltage/current still yield a correct modules-per-string /
+    # parallel-strings for that device -- so a ratio well below 1 must be
+    # allowed. We reject ONLY when V*I is materially GREATER than P, which is
+    # physically impossible for a sub-measurement and signals genuinely
+    # inconsistent columns (mis-scaled units, etc.). Wrong electrical side is
+    # already prevented upstream by the DC/AC name filter.
+    if v_med is not None and i_med is not None and p_med > 0:
+        ratio = (v_med * i_med) / p_med
+        if ratio > 1 + VI_P_TOL:
+            return out
+
+    # No current column: CALCULATE it from the measured power and voltage.
+    if i_med is None and v_med is not None and p_med > 0:
+        i_calc = p_med / v_med
+        if 0.3 <= i_calc <= 2000:
+            i_med, i_from = i_calc, "P/V"
+
+    module_vmp = cells_in_series * VMP_PER_CELL
+    if v_med is not None and module_vmp > 0:
+        mps = max(1, int(round(v_med / module_vmp)))
+        if mps <= 40:
+            out["modules_per_string"] = {
+                "value": mps,
+                "basis": (f"measured {v_med:.0f} V / "
+                          f"{module_vmp:.1f} V/module "
+                          f"({cells_in_series} cells x {VMP_PER_CELL} V)")}
+
+    if i_med is not None:
+        ps = max(1, int(round(i_med / MODULE_IMP_TYP)))
+        if ps <= 200:
+            src = (f"measured {i_med:.1f} A" if i_from == "measured"
+                   else f"{i_med:.1f} A calculated as P/V")
+            out["parallel_strings"] = {
+                "value": ps,
+                "basis": f"{src} / {MODULE_IMP_TYP} A/string"}
+    return out
+
+
+# Candidate window lengths (days) tried by estimate_pvpro_windows, shortest
+# first: a shorter window resolves the trend better, so the first one that
+# yields enough points per fit wins.
+_PVPRO_WINDOW_CANDIDATES = (7, 10, 14, 21, 30, 45, 60, 90, 120)
+
+
+def estimate_pvpro_windows(df, mapped_variables_dict,
+                           irradiance_threshold=200.0, min_points_per_window=20,
+                           target_points_per_window=60, max_windows=120):
+    """Recommend PVPRO's Days per run and Iterations per year FROM THE DATA.
+
+    compute_pvpro fits one single-diode model per window of `days_per_run`
+    days and skips any window with fewer than `min_points_per_window` rows;
+    it then needs at least 4 fitted windows. How many rows a window holds
+    depends on the sampling cadence (1-min vs hourly vs a block-averaged
+    3-hour series) and on how much Step 2 filtered away, so a fixed 14 days
+    can be generous on one dataset and hopeless on another.
+
+    This keeps exactly the rows compute_pvpro will keep (V, I, G, T all
+    present, G > irradiance_threshold, V > 0, I > 0), then for each candidate
+    window length runs the SAME window loop compute_pvpro runs and counts
+    rows per window. The shortest length whose median window holds
+    `target_points_per_window` rows (3x the hard minimum, so a cloudy
+    fortnight doesn't drop out) AND where at least 70% of windows clear the
+    hard minimum is chosen. Iterations per year is then set so windows tile
+    the year without gaps (step ~= window), capped so the whole record needs
+    at most `max_windows` fits (runtime scales with that count).
+
+    Returns {"days_per_run": {"value", "basis"}, "iterations_per_year":
+    {"value", "basis"}, "warning": str|None} or {} when the columns PVPRO
+    needs aren't there.
+    """
+    m = mapped_variables_dict or {}
+    keys = [m.get(k) for k in ("DC Voltage", "DC Current", "Irradiance", "Module temperature")]
+    if not all(k and k in df.columns for k in keys):
+        return {}
+    v_key, i_key, g_key, t_key = keys
+    d = df[keys].apply(pd.to_numeric, errors="coerce")
+    d.index = pd.to_datetime(d.index)
+    d = d.dropna()
+    d = d[(d[g_key] > irradiance_threshold) & (d[v_key] > 0) & (d[i_key] > 0)]
+    if len(d) < 100:
+        return {"warning": (f"only {len(d)} usable points above {irradiance_threshold:.0f} W/m\u00b2 "
+                            "with V, I and temperature present \u2014 too few for PVPRO at any "
+                            "window length; loosen the Step 2 filters.")}
+    idx = d.index.sort_values()
+    t0, t1 = idx[0], idx[-1]
+    span_days = max((t1 - t0).days, 1)
+    years = span_days / 365.25
+    ns = idx.asi8
+
+    def _window_counts(days, step_days):
+        counts, cur = [], t0
+        w = pd.Timedelta(days=days)
+        while cur + w <= t1 + pd.Timedelta(days=1):
+            lo = np.searchsorted(ns, cur.value, side="left")
+            hi = np.searchsorted(ns, (cur + w).value, side="left")
+            counts.append(hi - lo)
+            cur = cur + pd.Timedelta(days=step_days)
+        return np.array(counts)
+
+    # Evaluate every candidate that still fits >= 4 windows.
+    cand = []
+    for days in _PVPRO_WINDOW_CANDIDATES:
+        if days * 4 > span_days:          # fewer than 4 windows fit at all
+            break
+        c = _window_counts(days, days)
+        if len(c) < 4:
+            break
+        n_ok = int((c >= min_points_per_window).sum())
+        cand.append((days, float(np.median(c)), n_ok / len(c), n_ok))
+    if not cand:
+        return {"warning": (f"the usable record spans only {span_days} days \u2014 "
+                            "too short for 4 PVPRO windows.")}
+    # 1st choice: shortest window with a comfortable margin (median >= target,
+    # >= 70% of windows fittable). 2nd: shortest where nearly every window is
+    # fittable (>= 90%, median >= 1.5x the minimum) — fine, just less margin.
+    # Otherwise the candidate with the most fittable windows, with a warning.
+    warning = None
+    chosen = next((c for c in cand if c[1] >= target_points_per_window and c[2] >= 0.7), None)
+    if chosen is None:
+        chosen = next((c for c in cand if c[2] >= 0.9 and c[1] >= 1.5 * min_points_per_window), None)
+    if chosen is None:
+        chosen = max(cand, key=lambda c: (c[3] >= 4, c[2], -c[0]))
+        warning = (f"with {chosen[0]}-day windows only {chosen[3]} of "
+                   f"{int(round(chosen[3] / max(chosen[2], 1e-9)))} windows reach the "
+                   f"{min_points_per_window} usable points a fit needs (median "
+                   f"{chosen[1]:.0f}) \u2014 PVPRO may fail or be noisy; loosen the Step 2 "
+                   "filters or use a finer-resolution file.")
+    days, med_pts, ok_frac, _n_ok = chosen
+
+    iters = int(np.clip(round(365.25 / days), 4, 24))
+    n_windows = iters * years
+    capped = False
+    if n_windows > max_windows:
+        iters = max(4, int(max_windows // max(years, 1e-9)))
+        capped = True
+    cadence_min = float(np.median(np.diff(ns)) / 6e10) if len(ns) > 1 else float("nan")
+    per_day = len(d) / max(len(pd.Index(idx.normalize()).unique()), 1)
+
+    return {
+        "days_per_run": {
+            "value": int(days),
+            "basis": (f"{int(days)}-day windows hold a median of {med_pts:.0f} usable points "
+                      f"(~{per_day:.1f} per day with data), {ok_frac:.0%} of windows \u2265 "
+                      f"{min_points_per_window}")},
+        "iterations_per_year": {
+            "value": int(iters),
+            "basis": (f"{iters}/yr over {years:.1f} yr \u2248 {int(round(iters * years))} fits"
+                      + (f" (capped at {max_windows} for runtime)" if capped
+                         else " (windows tile the year back to back)"))},
+        "warning": warning,
+        "cadence_min": cadence_min,
+    }
+
+
 # =============================================================================
 # PVPRO  (single-diode-model based degradation) -- PUBLIC ENTRY POINT
 # =============================================================================
@@ -2603,6 +3135,13 @@ def compute_pvpro(df,
     tm_key  = mapped_variables_dict["Module temperature"]
 
     df_p = df[[v_key, i_key, irr_key, tm_key]].copy()
+    # A column stored as text (a common CSV/export quirk) would otherwise
+    # fail every comparison below (irradiance_threshold, > 0, ...) with a
+    # raw TypeError instead of just becoming NaN and getting dropped by the
+    # dropna() call right after.
+    for _col in (v_key, i_key, irr_key, tm_key):
+        if not pd.api.types.is_numeric_dtype(df_p[_col]):
+            df_p[_col] = pd.to_numeric(df_p[_col], errors="coerce")
     df_p.index = pd.to_datetime(df_p.index)
     df_p = df_p.dropna()
     df_p = df_p[df_p[irr_key] > irradiance_threshold]

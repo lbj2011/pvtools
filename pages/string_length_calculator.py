@@ -11,7 +11,6 @@ toddkarin
 """
 
 from dash import dash, html, dcc
-import base64
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 import plotly.colors
@@ -26,14 +25,24 @@ import pandas as pd
 import flask
 import io
 from utils import pvtoolslib
+from utils.cross_promo import promo_bar
 
 from app import app
+
+# Same vector basemap as field_degradation.py (keyless CARTO positron).
+BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+
+# Keep the complete CEC catalog on the server.  Sending every option as part
+# of the page layout made each visit roughly 2 MB before the user did anything.
+CEC_MODULE_OPTIONS = pvtoolslib.cec_module_dropdown_list
+DEFAULT_CEC_MODULE = CEC_MODULE_OPTIONS[0]
 
 # app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 def get_layout():
     return layout
 
 layout = dbc.Container([
+    promo_bar("string-length"),   # closable links to other tools (utils/cross_promo.py)
     html.Hr(),
     html.Div([
         html.H1("Solar Photovoltaic String Length Calculator"),
@@ -210,10 +219,19 @@ layout = dbc.Container([
                         dbc.Button(id='get-weather', n_clicks=0,
                                    children='Show nearest location on map'),
                     ]),
-                    dcc.Loading(  # This hides the output and shows a spinner
+                    dcc.Loading(
                         id='loading',
                         type='default',
-                        children=html.Div(id='weather_data_download')
+                        children=html.Div([
+                            dbc.Button(
+                                'Download weather data',
+                                id='download-weather-button',
+                                n_clicks=0,
+                                color='light',
+                                className='mt-2'
+                            ),
+                            dcc.Download(id='weather-data-download')
+                        ])
                     )
 
                 ], md=4),
@@ -245,10 +263,11 @@ layout = dbc.Container([
                                 """),
                                 dcc.Dropdown(
                                     id='module_name',
-                                    options=pvtoolslib.cec_module_dropdown_list,
-                                    value=
-                                    pvtoolslib.cec_module_dropdown_list[0][
-                                        'value'],
+                                    # Options are supplied by a server-side
+                                    # typeahead callback instead of embedding
+                                    # the entire CEC catalog in the layout.
+                                    options=[DEFAULT_CEC_MODULE],
+                                    value=DEFAULT_CEC_MODULE['value'],
                                     style={'max-width': 500}
                                 ),
                                 html.P(''),
@@ -992,7 +1011,7 @@ layout = dbc.Container([
     Output("details-collapse", "is_open", allow_duplicate=True),
     [Input("details-button", "n_clicks")],
     [State("details-collapse", "is_open")],
-    prevent_initial_call='initial_duplicate'
+    prevent_initial_call=True
 )
 def toggle_collapse(n, is_open):
     if n:
@@ -1243,25 +1262,26 @@ def sum_safety_factor(nsrdb_weather_data_safety_factor,
     return [safety_factor_str]
 
 
-# Callback for finding closest lat/lon in database.
+# Weather data can be several megabytes.  Previously this callback ran on
+# every initial page load because latitude and longitude were Inputs, then
+# embedded the whole CSV as a base64 data URL in the Dash response.  Generate
+# it only after an explicit click and let dcc.Download stream the payload.
 @app.callback(
-    Output('weather_data_download', 'children'),
-    [Input('lat', 'value'),
-     Input('lon', 'value')]
+    Output('weather-data-download', 'data'),
+    Input('download-weather-button', 'n_clicks'),
+    State('lat', 'value'),
+    State('lon', 'value'),
+    prevent_initial_call=True,
 )
-def update_output_div(lat, lon):
-    
-    weather, info = get_weather_data(lat, lon)
-    csv_buffer = io.StringIO()
-    weather.to_csv(csv_buffer, index=False)
-    csv_bytes = csv_buffer.getvalue().encode()
-    b64 = base64.b64encode(csv_bytes).decode()
-    
+def download_weather_data(n_clicks, lat, lon):
+    if not n_clicks:
+        raise PreventUpdate
 
-    return html.A(
-        'Download weather data',
-        href=f"data:text/csv;base64,{b64}",
-        download="weather_data.csv"
+    weather, _ = get_weather_data(lat, lon)
+    return dcc.send_data_frame(
+        weather.to_csv,
+        'weather_data.csv',
+        index=False,
     )
 
 
@@ -1270,11 +1290,12 @@ def update_output_div(lat, lon):
     Output('closest-message', 'children'),
     [Input('get-weather', 'n_clicks')],
     [State('lat', 'value'),
-     State('lon', 'value')]
+     State('lon', 'value')],
+    prevent_initial_call=True,
 )
 def update_output_div(n_clicks, lat, lon):
-    # if n_clicks==0:
-    #     return ''
+    if not n_clicks:
+        raise PreventUpdate
 
     # print('Finding database location')
     filedata = pvtoolslib.get_s3_filename_df()
@@ -1302,15 +1323,22 @@ def update_output_div(n_clicks, lat, lon):
 #      Input('lat', 'value'),
 #      Input('lon', 'value')])
 @app.callback(
-    [Output('map', 'figure', allow_duplicate=True),
-     Output('map', 'config', allow_duplicate=True)
+    [Output('map', 'figure'),
+     Output('map', 'config')
      ],
     [Input('get-weather', 'n_clicks')],
     [State('lat', 'value'),
      State('lon', 'value')],
-     prevent_initial_call=True
      )
 def update_map_callback(n_clicks, lat, lon):
+    # Runs on page load too (no prevent_initial_call) so the map is drawn
+    # immediately at the default location instead of an empty plot.
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        raise PreventUpdate
+
     # print('Updating the map')
     # if n_clicks>0:
     # print('Verbose:String Voltage Calculator:new weather location:')
@@ -1324,7 +1352,7 @@ def update_map_callback(n_clicks, lat, lon):
     closest_lon = np.array(filedata_closest['lon'])[0]
     map_figure = {
         'data': [
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=filedata['lat'],
                 lon=filedata['lon'],
                 mode='markers',
@@ -1334,7 +1362,7 @@ def update_map_callback(n_clicks, lat, lon):
                 text=[''],
                 name='Database location'
             ),
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=[float(lat)],
                 lon=[float(lon)],
                 mode='markers',
@@ -1344,7 +1372,7 @@ def update_map_callback(n_clicks, lat, lon):
                 text=['Target location'],
                 name='Target location'
             ),
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=[closest_lat],
                 lon=[closest_lon],
                 mode='markers',
@@ -1362,8 +1390,9 @@ def update_map_callback(n_clicks, lat, lon):
             # height=600,
             margin={'l': 10, 'b': 10, 't': 0, 'r': 0},
             hovermode='closest',
-            mapbox=dict(
-                accesstoken='pk.eyJ1IjoidG9kZGthcmluIiwiYSI6Ik1aSndibmcifQ.hwkbjcZevafx2ApulodXaw',
+            # MapLibre API (layout.map). The legacy layout.mapbox +
+            # Mapbox token renders a blank plot under plotly>=6.
+            map=dict(
                 bearing=0,
                 center=dict(
                     lat=float(lat),
@@ -1371,7 +1400,7 @@ def update_map_callback(n_clicks, lat, lon):
                 ),
                 pitch=0,
                 zoom=5,
-                style='light'
+                style=BASEMAP_STYLE
             ),
             legend=dict(
                 x=0,
@@ -1429,19 +1458,54 @@ def update_Voco(racking_model):
     [Input('map', 'clickData')
      ],
     [State('get-weather', 'n_clicks')
-     ])
+     ],
+    prevent_initial_call=True,
+)
 def display_click_data(clickData, n_clicks):
-    # If no type given, do not change lat or lon
-    if type(clickData) == type(None):
-        d = {'lat': 37.88, 'lon': -122.25}
-    else:
-        click_dict = eval(str(clickData))
-        d = click_dict['points'][0]
+    # An empty clickData value is normal during page initialization.  The old
+    # code treated it as a real click and incremented get-weather, which in
+    # turn generated the full map on every page load.
+    if not clickData or not clickData.get('points'):
+        raise PreventUpdate
+
+    d = clickData['points'][0]
 
     # update_map(d['lat'],d['lon'])
 
     return ['{:1.3f}'.format(d['lat']), '{:1.3f}'.format(d['lon']),
-            n_clicks + 1]
+            (n_clicks or 0) + 1]
+
+
+@app.callback(
+    Output('module_name', 'options'),
+    Input('module_name', 'search_value'),
+    State('module_name', 'value'),
+)
+def filter_cec_module_options(search_value, selected_value):
+    """Return a small typeahead slice instead of the full CEC catalog."""
+    query = (search_value or '').strip().lower()
+
+    if query:
+        matches = [
+            option for option in CEC_MODULE_OPTIONS
+            if query in str(option.get('label', '')).lower()
+            or query in str(option.get('value', '')).lower()
+        ][:100]
+    else:
+        matches = list(CEC_MODULE_OPTIONS[:50])
+
+    # Dash must keep the current value among the available options.
+    if selected_value and not any(
+            option.get('value') == selected_value for option in matches):
+        selected = next(
+            (option for option in CEC_MODULE_OPTIONS
+             if option.get('value') == selected_value),
+            None,
+        )
+        if selected is not None:
+            matches.insert(0, selected)
+
+    return matches
 
 
 def make_iv_summary_layout(module_parameters):
@@ -1523,7 +1587,7 @@ def make_iv_summary_layout(module_parameters):
 
 @app.callback(Output('module_name_iv', 'children', allow_duplicate=True),
               Input('module_name', 'value'),
-              prevent_initial_call='initial_duplicate')
+              prevent_initial_call=True)
 def plot_lookup_IV(module_name):
     """
     Callback for IV curve plotting in setting module parameters.
@@ -1720,7 +1784,7 @@ def get_weather_data(lat, lon):
                State('fixed_tilt_backside_irradiance_fraction', 'value'),
                State('single_axis_backside_irradiance_fraction', 'value'),
                ],
-               prevent_initial_call='initial_duplicate'
+               prevent_initial_call=True
               )
 def run_simulation(n_clicks, lat, lon, module_parameter_input_type, module_name,
                    module_name_manual,
